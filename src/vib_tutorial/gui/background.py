@@ -122,6 +122,25 @@ or nearly proportional.</li>
 relative to the largest one. With proportional damping every phase is 0° or 180°
 (a real mode); otherwise the masses reach their peaks at different times.</p>
 
+<h3>Watching the modal coordinates</h3>
+<p>Set <i>Plot coordinates</i> (above the time histories) to <i>Modal</i> to plot the
+motion in modal coordinates instead of mass displacements: one curve per mode, in the mode
+colors. Each curve is scaled to metres: it is that mode's share of the displacement of
+the mass the mode moves most. It follows the <i>Method</i> selector:</p>
+<ul>
+<li><b>Classical:</b> q = Φ<sup>T</sup>Mx. Since x = Φq exactly, the curves hold all
+of the motion. With proportional damping each q<sub>r</sub> is its own damped oscillator.
+With non-proportional damping the off-diagonal terms of C<sub>m</sub> make each
+q<sub>r</sub> push on the others, and you see motion move from one curve to another.</li>
+<li><b>State-space:</b> η = V<sup>−1</sup>z, where V holds the eigenvectors [ψ; λψ]
+as columns. It needs velocities as well as displacements. The coordinates of λ and λ*
+are conjugates, so each pair is one curve, 2 Re(η). These are independent for
+<i>any</i> damping: each one is a pure decaying oscillation (or decay) unless the force
+drives it.</li>
+</ul>
+<p>Under a harmonic force tuned to a natural frequency, the modal view shows which mode
+takes up the energy. The physical view shows the same motion as a mix of all of them.</p>
+
 <h3>Try it</h3>
 <ol>
 <li>Set c<sub>1</sub> = 15 and leave the other dampers at 2. The note switches to
@@ -132,12 +151,16 @@ system, other modes are excited too and the shape drifts as it decays.</li>
 <li>Set c<sub>1</sub> back to 2, so every c<sub>i</sub>/k<sub>i</sub> is equal again
 (stiffness-proportional damping), and repeat. The coupling returns to 0 and the release
 stays in one clean shape.</li>
+<li>Switch <i>Plot coordinates</i> to <i>Modal</i> and repeat steps 1 to 3. With
+c<sub>1</sub> = 15 the released mode 3 feeds modes 1 and 2, and mode 1 keeps ringing
+after mode 3 has died away. With c<sub>1</sub> = 2 only the mode 3 curve moves.</li>
 <li>Set c<sub>1</sub> = 15 again and switch <i>Method</i> to <i>State-space</i>. The
 table now has 2N rows in conjugate pairs. Select a row and tick <i>Animate mode
 shapes</i>: the arrows fan out (phases other than 0°/180°), and the shape never passes
 through zero everywhere at once.</li>
 <li>Select λ and then λ* and release each. The motion is identical, and it now stays
-in one shape as it decays: the complex mode is an exact mode of the damped system.</li>
+in one shape as it decays: the complex mode is an exact mode of the damped system.
+In the modal view only its own curve moves.</li>
 <li>Raise c<sub>1</sub> to 200. One pair turns into two real eigenvalues (overdamped),
 one slow and one very fast, listed with their time constants. There are still 2N in
 total.</li>

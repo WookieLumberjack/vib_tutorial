@@ -6,7 +6,7 @@ notebooks, and tests.
 
 from .forcing import ForceController, ForceKind, ForceSettings
 from .frf_matrix import ModalTerm, frf_matrix, modal_frf_terms
-from .modal import ComplexMode, ModalResult, Mode, frf, modal_analysis, receptance
+from .modal import ComplexMode, ModalResult, Mode, frf, modal_analysis, modal_coordinate_map, receptance
 from .model import ChainSystem, assemble_chain, state_space
 from .simulator import Simulator, foh_discretize
 from .substructure import (
@@ -47,6 +47,7 @@ __all__ = [
     "frf_matrix",
     "interior_counts",
     "modal_analysis",
+    "modal_coordinate_map",
     "modal_frf_terms",
     "receptance",
     "reduced_frf",

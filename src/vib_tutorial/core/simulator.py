@@ -118,20 +118,20 @@ class Simulator:
             self._cache[h] = foh_discretize(self._A, self._B, h)
         return self._cache[h]
 
-    def advance(self, duration: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def advance(self, duration: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Advance by approximately `duration` seconds of simulated time.
 
-        Returns per-step samples (t, x, force) with shapes (k,), (k, n), (k,),
-        which the GUI appends to its history buffers.
+        Returns per-step samples (t, x, v, force) with shapes (k,), (k, n),
+        (k, n), (k,), which the GUI appends to its history buffers.
         """
         h = self.step_size()
         steps = min(MAX_STEPS_PER_ADVANCE, max(0, int(round(duration / h))))
         n = self.system.n
         ts = np.empty(steps)
-        xs = np.empty((steps, n))
+        zs = np.empty((steps, 2 * n))
         fs = np.empty(steps)
         if steps == 0:
-            return ts, xs, fs
+            return ts, zs[:, :n], zs[:, n:], fs
 
         Phi, G0, G1 = self._discrete(h)
         j = self.force.settings.target
@@ -145,8 +145,8 @@ class Simulator:
             z = Phi @ z + g0 * f0 + g1 * f1
             self.t += h
             ts[k] = self.t
-            xs[k] = z[:n]
+            zs[k] = z
             fs[k] = f1
             f0 = f1
         self.state = z
-        return ts, xs, fs
+        return ts, zs[:, :n], zs[:, n:], fs

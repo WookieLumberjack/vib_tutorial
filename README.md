@@ -26,7 +26,7 @@ uv run pytest         # run the tests
 | Area | What it holds |
 |---|---|
 | **Left** | System parameters (m, k, c for each element, 1 to 8 masses), the applied force, and simulation controls (run/pause, speed, plot window, auto-scale) |
-| **Centre** | Animation of the chain (with a scale bar for the real displacement) above time histories of every mass's displacement and the applied force |
+| **Centre** | Animation of the chain (with a scale bar for the real displacement) above time histories of the applied force and of the motion, in physical or modal coordinates |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
 Two more pages work on the same chain: **FRF matrix** shows every term of the receptance
@@ -47,6 +47,8 @@ chain by component mode synthesis (both below).
   a number of cycles of any mode.
 - **Switch between two modal-analysis methods** (below), and compare them on the same
   system.
+- **Plot the motion in modal coordinates** (*Plot coordinates → Modal*, above the time
+  histories): one curve per mode instead of one per mass (below).
 - **Slow motion** (0.05× to 2×) for the higher modes, and auto-scaled animation and plots
   so small motions stay visible.
 
@@ -73,6 +75,21 @@ complex mode sets both displacement and velocity, so on the same system only tha
 responds and decays cleanly:
 
 ![State-space method on the same system: 2N eigenvalues, the complex-plane plot of λ5, and a clean single-mode release](docs/images/state_space_release.png)
+
+### Modal coordinates
+
+*Plot coordinates → Modal* splits the motion into one curve per mode. Each curve is that
+mode's share of the displacement of the mass it moves most, so its size compares
+directly with the physical plot. The curves follow the *Method* selector:
+
+- **Classical**: q = Φ<sup>T</sup>Mx with the real mode shapes, so x = Σ φ<sub>r</sub>q<sub>r</sub>
+  exactly. With non-proportional damping these coordinates are coupled. Release mode 3 with
+  `c1` = 15 and modes 1 and 2 pick up motion.
+- **State-space**: η = V<sup>−1</sup>z with the complex eigenvectors, one curve 2 Re(η) per
+  conjugate pair. These decouple for any damping. A released complex mode moves only its
+  own curve.
+
+![Modal coordinates, classical method, c1 = 15: releasing mode 3 also drives modes 1 and 2](docs/images/modal_coordinates.png)
 
 ### Frequency response
 
@@ -177,6 +194,18 @@ $x(t) = 2\,\mathrm{Re}(\psi_x e^{\lambda t})$. With non-proportional damping $\p
 complex, so each mass has its own phase. The two methods are linked by matching each
 damped pair to the undamped mode it most resembles (the modal assurance criterion, MAC).
 
+**Modal coordinates.** Each method gives a change of coordinates that the time histories
+can plot. Classical: $x = \Phi q$, so $q = \Phi^T M x$, and the equations become
+
+$$\ddot{q} + \Phi^T C\Phi\,\dot{q} + \mathrm{diag}(\omega_r^2)\,q = \Phi^T f$$
+
+which separate into N single-DOF equations only if $\Phi^T C\Phi$ is diagonal. Otherwise
+damping transfers motion between the $q_r$. State-space: $z = V\eta$, so $\eta = V^{-1}z$,
+and $\dot{\eta} = \Lambda\eta + V^{-1}Bf$ is decoupled for any damping. A conjugate pair
+contributes $2\,\mathrm{Re}(\psi_x\eta_r)$ to $x$. The app scales each coordinate to the
+mode's displacement at the mass where its normalized shape is 1: $\phi_{r,\max}\,q_r$
+and $2\,\mathrm{Re}(\eta_r)$.
+
 **Frequency response.** The receptance is solved directly at each frequency:
 $H(\omega) = (K - \omega^2 M + i\omega C)^{-1}$. It is also a sum of modal terms. With the
 state-space eigenvectors $V$ (and $V^{-1}$), every eigenvalue contributes a residue matrix,
@@ -201,7 +230,7 @@ step size adapts to the fastest mode, the drive frequency and the pulse length.
 
 - `core/model.py`: assembles $M$, $C$, $K$ and the state-space matrices.
 - `core/modal.py`: classical modes (`scipy.linalg.eigh`), all 2N state-space eigenpairs
-  (`scipy.linalg.eig`), the MAC pairing, and the frequency response.
+  (`scipy.linalg.eig`), the MAC pairing, the modal-coordinate map, and the frequency response.
 - `core/frf_matrix.py`: the full receptance matrix and its modal (pole–residue) terms.
 - `core/simulator.py`: the exact first-order-hold time stepper.
 - `core/substructure.py`: Craig–Bampton substructuring, mode comparison (frequency error,
@@ -214,9 +243,20 @@ The `core` package has no Qt dependency, so you can use it from scripts or noteb
 ```python
 from vib_tutorial.core import ChainSystem, modal_analysis
 
-res = modal_analysis(ChainSystem([1.0] * 4, [400.0] * 4, [15.0, 2.0, 2.0, 2.0]))
+chain = ChainSystem([1.0] * 4, [400.0] * 4, [15.0, 2.0, 2.0, 2.0])
+res = modal_analysis(chain)
 [(m.fn_hz, m.zeta_modal, m.damped.zeta) for m in res.modes]    # classical, N modes
 [(m.eigenvalue, m.shape) for m in res.complex_modes]           # state-space, 2N modes
+
+import numpy as np
+from vib_tutorial.core import Simulator, modal_coordinate_map
+
+sim = Simulator(chain)
+sim.set_displacement(0.01 * res.modes[2].shape)                # release classical mode 3
+t, x, v, f = sim.advance(2.0)                                  # per-step samples
+z = np.hstack([x, v])
+q = z @ modal_coordinate_map(chain, res)                       # classical, (steps, N), m
+eta = z @ modal_coordinate_map(chain, res, complex_modes=True) # one per pair, m
 
 from vib_tutorial.core import compare_modes, craig_bampton
 
@@ -229,7 +269,9 @@ cb = craig_bampton(s, interfaces=[3], n_kept=[1, 1])          # cut at m4, 1 mod
 
 - Drag a mass with the mouse and let go (an initial-condition "pluck")
 - Frequency sweep (chirp) forcing, and base excitation instead of an applied force
-- Energy bars (kinetic, potential, dissipated) and modal-coordinate time histories
+- Energy bars (kinetic, potential, dissipated), including each mode's energy
+  ½(q̇<sub>r</sub>² + ω<sub>r</sub>²q<sub>r</sub>²), to show energy moving between modes under
+  non-proportional damping
 - Tuned mass damper and vibration absorber presets
 - Save and load parameter presets for classroom exercises
 - Substructuring: time-simulate the Craig–Bampton reduced model alongside the full one

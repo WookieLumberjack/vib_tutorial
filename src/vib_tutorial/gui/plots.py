@@ -14,7 +14,7 @@ from .style import FORCE_COLOR, MASS_COLORS, MODE_COLORS
 
 
 class TimeHistoryPlot(pg.GraphicsLayoutWidget):
-    """Displacement of every mass and the applied force vs. time."""
+    """Displacements (of every mass, or of every mode) and the applied force vs. time."""
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -38,11 +38,15 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
         self.x_curves: list[pg.PlotDataItem] = []
 
     def set_dof(self, n: int) -> None:
+        """One curve per mass displacement."""
+        self.set_curves("Displacement", [(f"x{i + 1}", MASS_COLORS[i]) for i in range(n)])
+
+    def set_curves(self, label: str, curves: list[tuple[str, str]]) -> None:
+        """Replace the upper plot's curves with one per (legend name, color)."""
         for c in self.x_curves:
             self.x_plot.removeItem(c)
-        self.x_curves = [
-            self.x_plot.plot(pen=pg.mkPen(MASS_COLORS[i], width=1), name=f"x{i + 1}") for i in range(n)
-        ]
+        self.x_plot.setLabel("left", label, units="m")
+        self.x_curves = [self.x_plot.plot(pen=pg.mkPen(color, width=1), name=name) for name, color in curves]
 
     def set_auto_range(self, on: bool) -> None:
         """Auto-fit the y axes each frame, or freeze them at their current range."""
