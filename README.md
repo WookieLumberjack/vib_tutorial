@@ -91,7 +91,9 @@ plots (row: response, column: force), on shared axes so their sizes compare dire
   shows the selected term as magnitude with phase, or real with imaginary part.
 - **Modes included in the sum**: each term is a sum of one term per mode. Untick modes to see
   the truncated modal sum (dashed red) against the full solution (black), and each mode's term
-  in its own colour. The real part shows best how the terms add.
+  in its own colour. The real part shows best how the terms add. The large plot shades the
+  frequency band where the sum differs most from the full solution, and lists the **static
+  compliance** (ω = 0): the ticked modes' sum against K⁻¹, and each mode's share of it.
 - **Exact or classical terms**: the exact expansion uses the complex (state-space) modes and
   always sums to the full solution. The classical one uses the real modes with ζ modal, and
   misses even with every mode when damping is non-proportional.

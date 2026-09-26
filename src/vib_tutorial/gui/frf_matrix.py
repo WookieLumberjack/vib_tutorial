@@ -358,6 +358,8 @@ class FrfMatrixPage(QtWidgets.QWidget):
         self.H = np.zeros((0, 0, 0), dtype=complex)  # (F, n, n) full solution
         self.terms: list[ModalTerm] = []
         self.term_H = np.zeros((0, 0, 0, 0), dtype=complex)  # (R, F, n, n)
+        self.static = None  # K^-1, the static compliance; None if the chain can move as a rigid body
+        self.term_static = np.zeros((0, 0, 0))  # (R, n, n) each term at w = 0
         self.term_colors: list[str] = []
         self.expansion_note = ""
         self.output = 0
@@ -554,6 +556,8 @@ class FrfMatrixPage(QtWidgets.QWidget):
             self._build_io(n)
         self.freqs = frequency_grid(self.result, FREQ_POINTS)
         self.H = frf_matrix(system, self.freqs)
+        K = system.matrices()[2]
+        self.static = np.linalg.inv(K) if np.linalg.cond(K) < 1e12 else None
         self._recompute_terms()
 
     def _build_io(self, n: int) -> None:
@@ -601,6 +605,9 @@ class FrfMatrixPage(QtWidgets.QWidget):
             )
         self.terms = terms
         self.term_H = np.stack([t.evaluate(self.freqs) for t in terms])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # Imaginary parts cancel at w = 0 (a pair's two terms are conjugates).
+            self.term_static = np.stack([t.evaluate(np.zeros(1))[0].real for t in terms])
         self.term_colors = []
         roots = 0
         for t in terms:
@@ -711,7 +718,29 @@ class FrfMatrixPage(QtWidgets.QWidget):
         if int(sel.sum()) == 0:
             verdict = "No modes ticked: the sum is zero."
         note = f"<br><span style='color:#666'>{self.expansion_note}</span>" if self.expansion_note else ""
-        return f"{title} {parts}<br>{verdict}{note}"
+        return f"{title} {parts}<br>{verdict}<br>{self._static_text(j, inputs, sel)}{note}"
+
+    def _static_text(self, j: int, inputs: list[int], sel: np.ndarray) -> str:
+        """Static compliance (w = 0): the ticked modes' sum vs K^-1, and each mode's share."""
+        if self.static is None:
+            return ("<b>Static compliance</b> (ω = 0): none. K is singular, so the chain can move "
+                    "as a rigid body and a steady force has no static deflection.")
+        full = float(self.static[j, inputs].sum())
+        each = self.term_static[:, j, inputs].sum(axis=1)
+        partial = float(each[sel].sum())
+        err = (partial - full) / full if full else 0.0
+        color = "#2a7d2a" if abs(err) < 1e-6 else "#b36b00" if abs(err) < 0.05 else SELECT_COLOR
+        amount = "0% (exact)" if abs(err) < 1e-9 else f"{100 * err:+.3g}%"
+        shares = []
+        for t, c, value, on in zip(self.terms, self.term_colors, each, sel):
+            share = f"{100 * value / full:.3g}%" if full and np.isfinite(value) else "—"
+            style = "" if on else " style='color:#999'"
+            shares.append(f"<span style='color:{c}'>■</span><span{style}>{t.label} {share}</span>")
+        return (
+            f"<b>Static compliance</b> (ω = 0): K<sup>−1</sup> gives {full:.4g} m/N; the ticked "
+            f"modes give {partial:.4g} m/N, error <b style='color:{color}'>{amount}</b>. "
+            f"<span style='color:#666'>Each mode's share (grey: not ticked):</span> {', '.join(shares)}."
+        )
 
 
 THEORY_HTML = """
@@ -772,6 +801,13 @@ misses. The missing high modes act almost like springs there (their <i>residual 
 Σ φ<sub>jr</sub>φ<sub>kr</sub>/ω<sub>r</sub>²), and leaving them out shifts the antiresonances.
 Compare the <b>real part</b>: the terms add directly, so you can see the offset left by a
 missing mode.</p>
+<p>At ω = 0 the sum of every mode is the <b>static compliance</b> K<sup>−1</sup> =
+Σ<sub>r</sub> φ<sub>r</sub>φ<sub>r</sub><sup>T</sup>/ω<sub>r</sub>² (damping plays no part
+there, so even the classical sum is exact). Each mode's share of it is
+φ<sub>jr</sub>φ<sub>kr</sub>/ω<sub>r</sub>² divided by the total, which is why the high modes
+matter so little statically: their share falls as 1/ω<sub>r</sub>². The header of the large plot
+lists every mode's share and the error of the ticked ones. That error is the residual
+flexibility that a truncated model leaves out.</p>
 
 <h3>Non-proportional damping</h3>
 <p>The formula above keeps only the diagonal of Φ<sup>T</sup>CΦ. With non-proportional damping

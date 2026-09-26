@@ -233,13 +233,19 @@ def test_frf_matrix_page(app):
     assert len(page.grid.cells) == n and len(page.mode_checks) == n
     assert (page.output, page.inputs) == (n - 1, {n - 1})
     assert "none" in page.detail.header.text()  # all modes: the sum is the full solution
-    assert "Shaded" not in page.detail.header.text()
+    assert "Shaded" not in page.detail.header.text() and "0% (exact)" in page.detail.header.text()
 
     # Truncate to mode 1: the driving-point sum now misses the full solution.
     page._check_all(False)
     page.mode_checks[0].setChecked(True)
     assert page.selected_terms().tolist() == [True] + [False] * (n - 1)
     assert "%" in page.detail.header.text() and "Shaded" in page.detail.header.text()
+    # Static compliance of mode 1 alone, against K^-1.
+    K = w.sim.system.matrices()[2]
+    phi = w.modal.modes[0].shape_mass_normalized
+    static = np.linalg.inv(K)[n - 1, n - 1]
+    one = phi[n - 1] ** 2 / w.modal.modes[0].omega_n ** 2
+    assert f"{100 * (one - static) / static:+.3g}%" in page.detail.header.text()
 
     # Clicking selects a cell; Ctrl+click adds another force in the same row.
     page._on_cell(0, 1, False)
@@ -270,7 +276,7 @@ def test_frf_matrix_page(app):
     # A free (rigid-body) chain falls back to the classical expansion.
     w.params.rows[0][2].setValue(0.0)
     w.params.rows[0][3].setValue(0.0)
-    assert "not available" in page.detail.header.text()
+    assert "not available" in page.detail.header.text() and "rigid body" in page.detail.header.text()
     app.processEvents()  # let queued axis relayouts run before teardown
     w.close()
 
