@@ -4,11 +4,12 @@ Nothing in this package depends on Qt, so it can be used from scripts,
 notebooks, and tests.
 """
 
+from .energy import kinetic_energy, modal_energies, potential_energy, stored_energy
 from .forcing import ForceController, ForceKind, ForceSettings
 from .frf_matrix import ModalTerm, frf_matrix, modal_frf_terms
 from .modal import ComplexMode, ModalResult, Mode, frf, modal_analysis, modal_coordinate_map, receptance
 from .model import ChainSystem, assemble_chain, state_space
-from .simulator import Simulator, foh_discretize
+from .simulator import Simulator, foh_discretize, foh_quadratic_integrals
 from .substructure import (
     ComponentMode,
     CraigBamptonModel,
@@ -43,14 +44,19 @@ __all__ = [
     "craig_bampton",
     "damped_poles",
     "foh_discretize",
+    "foh_quadratic_integrals",
     "frf",
     "frf_matrix",
     "interior_counts",
+    "kinetic_energy",
     "modal_analysis",
     "modal_coordinate_map",
+    "modal_energies",
+    "potential_energy",
     "modal_frf_terms",
     "receptance",
     "reduced_frf",
     "state_space",
+    "stored_energy",
     "substructure_damping",
 ]

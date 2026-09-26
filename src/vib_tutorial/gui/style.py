@@ -31,3 +31,13 @@ SUB_COLORS = ["#3a6ea5", "#d17a00", "#4f8f3a"]
 
 FORCE_COLOR = "#c1121f"
 STRUCTURE_COLOR = "#333333"
+
+# Energy bars: stored (kinetic, potential), and the ledger of energy in and out.
+ENERGY_COLORS = {
+    "kinetic": "#1982c4",
+    "potential": "#2a9d8f",
+    "stored": "#8d99ae",
+    "added": "#6a4c93",
+    "work": FORCE_COLOR,
+    "dissipated": "#e76f51",
+}

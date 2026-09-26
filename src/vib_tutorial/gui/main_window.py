@@ -13,11 +13,15 @@ from ..core import (
     ForceKind,
     ForceSettings,
     Simulator,
+    kinetic_energy,
     modal_analysis,
     modal_coordinate_map,
+    modal_energies,
+    potential_energy,
 )
 from .animation import ChainView
 from .background import COUPLING_TIP, make_background_view
+from .energy import EnergyPanel, EnergyState
 from .frf_matrix import FrfMatrixPage
 from .history import History
 from .modes import Method, mode_entries
@@ -96,6 +100,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.method = Method.CLASSICAL
         self.entries = mode_entries(self.modal, self.method)
         self.running = True
+        self._energy_scale = 0.0  # J at full bar height; follows the plot window while auto-scaling
 
         # --- left: inputs
         self.params = ParameterPanel(system)
@@ -113,6 +118,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # --- center: animation + time histories
         self.chain = ChainView()
+        self.energy = EnergyPanel()
         self.time_plot = TimeHistoryPlot()
         self.coords_combo = QtWidgets.QComboBox()
         self.coords_combo.addItem("Physical: mass displacements x", False)
@@ -130,8 +136,13 @@ class MainWindow(QtWidgets.QMainWindow):
         pv.addLayout(coords_row)
         pv.addWidget(self.time_plot, 1)
         self._coords_widgets = (coords_label, self.coords_combo)
+        top = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        top.addWidget(self.chain)
+        top.addWidget(self.energy)
+        top.setStretchFactor(0, 1)
+        top.setSizes([480, 270])
         center = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
-        center.addWidget(self.chain)
+        center.addWidget(top)
         center.addWidget(plot_box)
         center.setSizes([300, 450])
 
@@ -383,6 +394,24 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.controls.auto_scale.isChecked() and entry.freq_hz > 0:
             self.controls.fit_to_mode(entry.key)
 
+    def _update_energy(self, xs: np.ndarray, vs: np.ndarray) -> None:
+        """Show the energy now; recent samples xs, vs set the bar scale, like the animation's."""
+        system, x, v = self.sim.system, self.sim.displacement, self.sim.velocity
+        if self.controls.auto_scale.isChecked() and xs.size:
+            stored = kinetic_energy(system, vs).sum(axis=1) + potential_energy(system, xs).sum(axis=1)
+            self._energy_scale = float(stored.max())
+        self.energy.bars.set_state(
+            EnergyState(
+                kinetic=float(kinetic_energy(system, v).sum()),
+                potential=float(potential_energy(system, x).sum()),
+                modal=modal_energies(system, self.modal, x, v),
+                added=self.sim.energy_added,
+                work=self.sim.work,
+                dissipated=self.sim.dissipated,
+            ),
+            self._energy_scale,
+        )
+
     # ------------------------------------------------------------ main loop
     def _frame(self) -> None:
         start = self._clock.elapsed()
@@ -419,6 +448,8 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             y = x
         self.time_plot.update_data(t, y, f, window)
+        if self.energy.isVisible():
+            self._update_energy(x[-min(len(x), 20_000) :], v[-min(len(v), 20_000) :])
         if self.animate_modes.isChecked():
             self._animate_modes(2 * math.pi * MODE_ANIMATION_HZ * now)
         self.controls.time_label.setText(f"{self.sim.t:8.3f} s   (step {self.sim.step_size() * 1e3:.3g} ms)")
