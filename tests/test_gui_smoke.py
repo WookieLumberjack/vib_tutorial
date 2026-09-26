@@ -165,3 +165,46 @@ def test_chain_view_fits_all_masses(app):
         view.set_masses(np.ones(n))
         (x0, x1), _ = view.viewRange()
         assert x0 <= 0 and x1 >= n * SPACING + 0.2, f"n={n}: x-range {x0:.2f}..{x1:.2f} crops the chain"
+
+
+def test_substructuring_page(app):
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    page = w.cms_page
+    w.show()
+    w.pages.setCurrentWidget(page)
+    app.processEvents()
+
+    # N set on this page drives the shared chain; the interface starts in the middle.
+    page.dof.setValue(8)
+    assert w.sim.system.n == 8 and w.params.dof.value() == 8
+    assert page.interface.currentText() == "m4"
+    assert page.model.labels == ["q_A1", "q_B1", "x4", "x8"]
+    assert page.table.rowCount() == 8 and page.table.item(4, 3).text() == "not in model"
+    assert "4 DOFs" in page.summary.text()
+    assert "Assemble the reduced model" in page.matrices.toPlainText()
+
+    # Guyan keeps only the boundary; "All modes" is exact.
+    page.guyan_button.click()
+    assert page.model.n_red == 2 and "Guyan" in page.summary.text()
+    page.exact_button.click()
+    assert page.model.n_red == 8
+    assert all(c.error == pytest.approx(0.0, abs=1e-9) for c in page.comparisons)
+
+    # Interface at the last possible mass: B has no interior DOFs, its spin is disabled.
+    page.interface.setCurrentIndex(page.interface.count() - 1)
+    assert not page.kept[1].isEnabled() and page.model.substructures[1].ni == 0
+
+    # A parameter edit on the Simulation page reaches this page; a floating interior is reported.
+    w.params.rows[0][2].setValue(0.0)
+    w.params.rows[1][2].setValue(0.0)
+    assert page.model is None and "K_ii" in page.summary.text()
+    w.params.rows[1][2].setValue(400.0)
+    assert page.model is not None
+
+    # The simulation keeps running behind this page without drawing.
+    w._sim_target = 0.5
+    w._tick()
+    assert w.sim.t > 0.1
+    w.close()

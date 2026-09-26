@@ -163,3 +163,86 @@ def test_releasing_complex_mode_excites_only_that_mode():
     ts, xs, _ = sim.advance(1.0)
     exact = (m.shape[None, :] * np.exp(m.eigenvalue * ts)[:, None]).real
     np.testing.assert_allclose(xs, exact, atol=1e-9)
+
+
+def _cb_system():
+    return ChainSystem([1.0, 2.0, 0.5, 1.5, 1.0, 0.8, 1.2], [400.0, 300.0, 500.0, 200.0, 350.0, 450.0, 250.0], [2.0] * 7)
+
+
+def test_substructures_assemble_to_full_matrices():
+    from vib_tutorial.core import craig_bampton
+
+    s = _cb_system()
+    model = craig_bampton(s, [2, 4], [1, 1, 1])
+    for full, attr in zip(s.matrices(), "MCK"):
+        total = np.zeros((s.n, s.n))
+        for sub in model.substructures:
+            ix = np.ix_(sub.dofs, sub.dofs)
+            total[ix] += getattr(sub, attr)
+        np.testing.assert_allclose(total, full)
+    # Every DOF is interior to one substructure or on the boundary; the tip is a boundary DOF.
+    interior = np.concatenate([sub.interior for sub in model.substructures])
+    assert sorted(np.concatenate([interior, model.boundary])) == list(range(s.n))
+    assert list(model.boundary) == [2, 4, 6]
+
+
+def test_craig_bampton_structure_and_assembly():
+    from vib_tutorial.core import craig_bampton
+
+    s = _cb_system()
+    model = craig_bampton(s, [3], [2, 1])
+    for sub in model.substructures:
+        # Constraint modes: interior at static equilibrium, K_ii Psi + K_ib = 0.
+        np.testing.assert_allclose(sub.block(sub.K, "i", "i") @ sub.Psi + sub.block(sub.K, "i", "b"), 0, atol=1e-9)
+        k = sub.n_kept
+        np.testing.assert_allclose(sub.K_red[:k, :k], np.diag(sub.fixed_omegas[:k] ** 2), atol=1e-8)
+        np.testing.assert_allclose(sub.K_red[:k, k:], 0, atol=1e-8)  # K^ is block diagonal
+        np.testing.assert_allclose(sub.M_red[:k, :k], np.eye(k), atol=1e-12)
+    # Assembling the reduced substructures = reducing the assembled model with the global T.
+    M, C, K = s.matrices()
+    for red, full in ((model.M, M), (model.C, C), (model.K, K)):
+        np.testing.assert_allclose(red, model.T.T @ full @ model.T, atol=1e-9)
+    assert model.labels == ["q_A1", "q_A2", "q_B1", "x4", "x7"]
+
+
+def test_craig_bampton_is_exact_with_all_modes_and_an_upper_bound_otherwise():
+    from vib_tutorial.core import compare_modes, craig_bampton, interior_counts
+
+    s = _cb_system()
+    full = modal_analysis(s)
+    exact = craig_bampton(s, [3], interior_counts(s.n, [3]))
+    assert exact.n_red == s.n
+    np.testing.assert_allclose(exact.fn_hz, [m.fn_hz for m in full.modes], rtol=1e-10)
+    assert all(c.mac == pytest.approx(1.0) for c in compare_modes(exact, full))
+
+    for kept in ([0, 0], [1, 0], [1, 1], [2, 2]):  # [0, 0] is Guyan condensation
+        cmp = compare_modes(craig_bampton(s, [3], kept), full)
+        errors = [c.error for c in cmp if c.error is not None]
+        assert len(errors) == sum(kept) + 2
+        assert all(e >= -1e-12 for e in errors)  # Rayleigh-Ritz: never below the true value
+    # More modes kept never makes the first mode worse.
+    e = [compare_modes(craig_bampton(s, [3], [k, k]), full)[0].error for k in range(3)]
+    assert e[0] >= e[1] >= e[2]
+
+
+def test_reduced_frf_matches_full_when_exact_and_statically():
+    from vib_tutorial.core import craig_bampton, interior_counts, reduced_frf
+
+    s = _cb_system()
+    tip = s.n - 1
+    exact = craig_bampton(s, [2], interior_counts(s.n, [2]))
+    f = np.array([0.5, 1.7, 3.3])
+    np.testing.assert_allclose(reduced_frf(exact, f, tip), frf(s, f, tip), rtol=1e-8)
+    # Constraint modes are static solutions, so even Guyan is exact at 0 Hz.
+    guyan = craig_bampton(s, [2], [0, 0])
+    np.testing.assert_allclose(reduced_frf(guyan, np.array([0.0]), tip), frf(s, np.array([0.0]), tip), rtol=1e-10)
+
+
+def test_craig_bampton_rejects_floating_interior():
+    from vib_tutorial.core import craig_bampton
+
+    # A free chain (k1 = 0) is fine: fixing the interface still holds m1 via k2.
+    craig_bampton(ChainSystem([1.0] * 5, [0.0, 400.0, 400.0, 400.0, 400.0], [2.0] * 5), [2], [1, 1])
+    # With k1 = k2 = 0, m1 floats even when the boundary is held.
+    with pytest.raises(ValueError, match="K_ii"):
+        craig_bampton(ChainSystem([1.0] * 5, [0.0, 0.0, 400.0, 400.0, 400.0], [2.0] * 5), [2], [1, 1])

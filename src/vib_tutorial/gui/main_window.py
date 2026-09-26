@@ -14,6 +14,7 @@ from .history import History
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, PhasorPanel, TimeHistoryPlot
+from .substructuring import SubstructuringPage
 
 FRAME_MS = 16  # ~60 fps
 MODE_ANIMATION_HZ = 0.5  # visual rate for the animated mode-shape plot
@@ -159,7 +160,15 @@ class MainWindow(QtWidgets.QMainWindow):
         splitter.addWidget(center)
         splitter.addWidget(tabs)
         splitter.setSizes([400, 750, 550])
-        self.setCentralWidget(splitter)
+        self.sim_page = splitter
+
+        # --- second page: substructuring (same chain, its own layout)
+        self.cms_page = SubstructuringPage()
+        self.pages = QtWidgets.QTabWidget()
+        self.pages.setDocumentMode(True)
+        self.pages.addTab(self.sim_page, "Simulation && modal analysis")
+        self.pages.addTab(self.cms_page, "Substructuring (Craig–Bampton)")
+        self.setCentralWidget(self.pages)
         self.resize(1700, 900)
 
         # --- wiring
@@ -171,6 +180,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.animate_modes.toggled.connect(lambda on: on or self._animate_modes(0.0))
         self.table.itemSelectionChanged.connect(self._on_mode_selected)
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
+        self.cms_page.dof_requested.connect(self.params.dof.setValue)
+        self.cms_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
 
         self._apply_dof(system.n)
         self._refresh_modal()
@@ -205,6 +216,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _refresh_modal(self) -> None:
         self.modal = modal_analysis(self.sim.system)
+        self.cms_page.set_system(self.sim.system, self.modal)
         self._refresh_modal_views()
 
     def _on_method_changed(self) -> None:
@@ -324,6 +336,9 @@ class MainWindow(QtWidgets.QMainWindow):
             ts, xs, fs = self.sim.advance(self._sim_target - self.sim.t)
             self.history.extend(ts, xs, fs)
 
+        # The simulation keeps running behind the Substructuring page; skip drawing it.
+        if self.pages.currentWidget() is not self.sim_page:
+            return
         window = self.controls.window.value()
         t, x, f = self.history.window(window)
         peak = float(np.abs(x[-min(len(x), 20_000) :]).max()) if x.size else 0.0

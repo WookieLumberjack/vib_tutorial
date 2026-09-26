@@ -203,9 +203,14 @@ def frf(system: ChainSystem, freqs_hz: np.ndarray, input_dof: int) -> np.ndarray
 
     H(w) = (K - w^2 M + i w C)^-1 e_input
     """
-    M, C, K = system.matrices()
+    e = np.zeros(system.n)
+    e[input_dof] = 1.0
+    return receptance(*system.matrices(), freqs_hz, e)
+
+
+def receptance(M: np.ndarray, C: np.ndarray, K: np.ndarray, freqs_hz: np.ndarray, f: np.ndarray) -> np.ndarray:
+    """(K - w^2 M + i w C)^-1 f at each frequency, shape (len(freqs), len(f))."""
     w = TWO_PI * np.asarray(freqs_hz, dtype=float)
     Z = K[None, :, :] - (w**2)[:, None, None] * M[None] + 1j * w[:, None, None] * C[None]
-    rhs = np.zeros((w.size, system.n, 1), dtype=complex)
-    rhs[:, input_dof, 0] = 1.0
+    rhs = np.broadcast_to(np.asarray(f, dtype=complex)[None, :, None], (w.size, f.size, 1))
     return np.linalg.solve(Z, rhs)[:, :, 0]
