@@ -58,10 +58,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.modal_note.setWordWrap(True)
         self.animate_modes = QtWidgets.QCheckBox("Animate mode shapes")
         self.release_amp = spin(0.001, 1000.0, 20.0, 3, " mm")
+        amp_tip = (
+            "<p>Starting displacement of the mass that moves most when a mode is released. "
+            "The other masses are scaled by the mode shape.</p>"
+            "<p>The system is linear, so this changes the size of the motion but not how fast "
+            "it decays; the decay rate is set by the mode's damping ratio ζ. To watch a "
+            "well-damped mode, slow the simulation down (Simulation → Speed).</p>"
+        )
+        self.release_amp.setToolTip(amp_tip)
+        amp_label = QtWidgets.QLabel("Initial displacement:")
+        amp_label.setToolTip(amp_tip)
         release = QtWidgets.QPushButton("Release selected mode")
         release.setToolTip(
-            "Set the masses to the selected mode shape (largest displacement = amplitude) "
-            "at rest and let go. With proportional damping only that mode responds."
+            "<p><b>Free vibration from a mode shape.</b></p>"
+            "<p>Switches off the applied force, moves the masses into the shape of the mode "
+            "selected in the table above (mode 1 if none is selected), holds them at rest, "
+            "then lets go.</p>"
+            "<p>With <b>proportional</b> damping only that mode responds: every mass oscillates "
+            "at the mode's damped frequency f_d, keeping the same shape while the motion "
+            "decays at the rate set by ζ.</p>"
+            "<p>With <b>non-proportional</b> damping the real (undamped) shape is not an exact "
+            "mode, so other modes are excited too and the shape drifts as it decays.</p>"
         )
         release.clicked.connect(self._release_mode)
         modal_tab = QtWidgets.QWidget()
@@ -72,7 +89,7 @@ class MainWindow(QtWidgets.QMainWindow):
         row = QtWidgets.QHBoxLayout()
         row.addWidget(self.animate_modes)
         row.addStretch(1)
-        row.addWidget(QtWidgets.QLabel("Amplitude:"))
+        row.addWidget(amp_label)
         row.addWidget(self.release_amp)
         row.addWidget(release)
         mv.addLayout(row)
