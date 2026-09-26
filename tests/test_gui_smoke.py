@@ -184,6 +184,11 @@ def test_substructuring_page(app):
     assert page.table.rowCount() == 8 and page.table.item(4, 3).text() == "not in model"
     assert page.table.horizontalHeaderItem(5).text() == "ζ CB" and page.table.item(0, 5).text() != "—"
     assert page.component_table.rowCount() == 6 and page.component_table.item(0, 0).text() == "A1"
+    assert len(page.basis.plots.ci.items) == 4  # one shape per reduced coordinate
+    page.component_table.selectRow(3)  # B1 alone, overlaid on the coupled mode it becomes
+    assert page.plots.component.substructure == "B" and page.table.currentRow() == page.plots.component.closest - 1
+    page.table.selectRow(0)
+    assert page.plots.component is None
     assert "4 DOFs" in page.summary.text()
     text = page.matrices.toPlainText()
     assert "Assemble the reduced model" in text and "Damping in the reduced model" in text

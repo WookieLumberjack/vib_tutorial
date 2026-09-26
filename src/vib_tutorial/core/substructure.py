@@ -243,6 +243,9 @@ class ComponentMode:
     closest: int  # 1-based full-system mode that this component mode carries the most energy of
     closest_fn_hz: float
     share: float  # that fraction of the coupled mode's strain energy, 0..1
+    dofs: np.ndarray  # global DOFs of the substructure, ascending along the chain
+    shape: np.ndarray  # mode shape on those DOFs (0 at the held boundary), peak |1|, signed to
+    # move the same way as the coupled mode's elastic motion
 
 
 def component_modes(model: CraigBamptonModel, full: ModalResult) -> list[ComponentMode]:
@@ -267,10 +270,16 @@ def component_modes(model: CraigBamptonModel, full: ModalResult) -> list[Compone
         d = Phi[sub.interior] - sub.Psi @ Phi[sub.boundary]
         q = sub.Phi.T @ Mii @ d  # (ni, n_modes)
         shares = sub.fixed_omegas[:, None] ** 2 * q**2 / energy[None, :]
+        dofs = np.sort(sub.dofs)
         for r in range(sub.ni):
             best = int(np.argmax(shares[r]))
+            shape = np.zeros(dofs.size)
+            shape[np.searchsorted(dofs, sub.interior)] = sub.Phi[:, r]
+            shape *= np.sign(q[r, best]) or 1.0
+            shape /= np.abs(shape).max()
             out.append(ComponentMode(sub.name, r + 1, float(sub.fixed_omegas[r] / TWO_PI), zetas[r],
-                                     r < sub.n_kept, best + 1, full.modes[best].fn_hz, float(shares[r, best])))
+                                     r < sub.n_kept, best + 1, full.modes[best].fn_hz, float(shares[r, best]),
+                                     dofs, shape))
     return out
 
 

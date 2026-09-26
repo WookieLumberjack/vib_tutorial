@@ -93,14 +93,19 @@ DOF, and the reduced substructures are assembled on the shared interface DOF.
 - **Substructures on their own**: each substructure's fixed-interface modes (natural
   frequency and exact damping ratio with its boundary held), whether each is kept, and the
   coupled mode it becomes (largest share of that mode's strain energy).
+- **Component shape overlay**: click a row of that table to draw the clamped component
+  shape over the coupled mode it becomes.
+- **Basis (T)**: every column of T drawn as a shape along the chain, the set of shapes every
+  reduced-model motion is built from.
 - **Modes & FRF**: the selected mode shape, true vs CB, and the tip and interface
   receptance of both models for the force at the tip.
 - **Matrices (step by step)**: every stage with the current numbers: the full K and M,
   each substructure's partitioned matrices, the fixed-interface modes (kept and discarded),
   the constraint modes Ψ, the transformation T, the reduced matrices, and the assembled
   reduced model.
-- **Theory**: original vs substructured formulation side by side, Hurty vs Craig–Bampton,
-  Guyan reduction as the zero-mode case, and a "Try it" walkthrough.
+- **Theory**: what a basis is (with a 2-mass worked example) and why Craig–Bampton chooses
+  its shapes, original vs substructured formulation side by side, Hurty vs Craig–Bampton,
+  Guyan reduction as the zero-mode case, and a "Try it" walkthrough, and a notation table.
 - **Presets**: *Guyan (0 modes)* and *All modes (exact)*.
 
 For each substructure, partitioned into interior $i$ and boundary $b$ DOFs,

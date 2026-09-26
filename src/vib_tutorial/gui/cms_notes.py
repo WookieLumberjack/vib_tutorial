@@ -33,6 +33,7 @@ LEGEND_HTML = (
 )
 
 THEORY_HTML = """
+<p><i>Symbols are defined in the <a href="#notation">Notation</a> table at the end.</i></p>
 <h3>Why substructure?</h3>
 <p>Real structures are built from components: an engine on a frame, a wing on a fuselage,
 a payload on a launcher. <b>Dynamic substructuring</b> models each component on its own,
@@ -58,6 +59,106 @@ is read directly, so any difference from the full model is caused by the reducti
 not by how the load was projected. A force on an interior DOF is allowed in Craig–Bampton,
 but it only reaches the model through the kept modes and the constraint modes. In practice,
 the DOFs that are loaded, measured or connected to other components are made masters.</p>
+
+<h3>What is a basis? (the key idea)</h3>
+<p>Every method on this page, and modal analysis itself, rests on one idea: <b>describing the
+motion with a different set of shapes</b>. It is worth getting this clear before looking at
+any Craig–Bampton matrix.</p>
+
+<h4>Coordinates are amplitudes of shapes</h4>
+<p>A displacement of the chain is a vector x of N numbers. Any such vector can be built as a
+sum of N independent <i>basis vectors</i> (shapes) v<sub>1</sub> … v<sub>N</sub>, each
+multiplied by an amplitude c<sub>j</sub>:</p>
+<p>&nbsp;&nbsp;x = v<sub>1</sub>c<sub>1</sub> + v<sub>2</sub>c<sub>2</sub> + … = V c,
+&nbsp;&nbsp; V = [v<sub>1</sub> v<sub>2</sub> …]</p>
+<p>The amplitudes c are the <b>coordinates</b> in that basis. The physical DOFs are just
+one choice: V = I, where shape j is "move mass j by 1 m, hold all the others". Nothing makes
+that choice special. It is convenient for building M and K, but usually a poor way to
+<i>describe</i> the motion, because every mass moves in every mode.</p>
+<p>An everyday analogy: a point on a map can be given as (east, north) or as (distance,
+bearing) along a road. Same point, different coordinates. And a vibrating guitar string is
+naturally described by the amplitudes of its sine-shaped harmonics, not by the displacement
+of each point.</p>
+
+<h4>What a change of basis does to the equations</h4>
+<p>Substitute x = Vc into Mẍ + Cẋ + Kx = f and premultiply by V<sup>T</sup>:</p>
+<p>&nbsp;&nbsp;(V<sup>T</sup>MV) c̈ + (V<sup>T</sup>CV) ċ + (V<sup>T</sup>KV) c = V<sup>T</sup>f</p>
+<p>Why V<sup>T</sup>? Energy. The kinetic energy is ½ẋ<sup>T</sup>Mẋ =
+½ċ<sup>T</sup>(V<sup>T</sup>MV)ċ and the strain energy is ½c<sup>T</sup>(V<sup>T</sup>KV)c, so
+the new matrices describe the <i>same</i> energies in the new coordinates. V<sup>T</sup>f is
+the work the force does through each shape (a generalized force). This is also the principle
+of virtual work, or a Galerkin projection.</p>
+<p>That gives a practical way to <b>read</b> any transformed matrix:</p>
+<ul>
+<li>Diagonal entry (V<sup>T</sup>KV)<sub>jj</sub> = v<sub>j</sub><sup>T</sup>Kv<sub>j</sub>: twice
+the strain energy of shape j at unit amplitude, a "generalized stiffness".</li>
+<li>Off-diagonal entry v<sub>j</sub><sup>T</sup>Kv<sub>k</sub>: how much shapes j and k interact
+elastically. Zero means they are <i>stiffness-orthogonal</i>: they can move independently
+without exchanging strain energy. The same holds for M (inertia coupling) and C.</li>
+</ul>
+
+<h4>Modal analysis is already a change of basis</h4>
+<p>Choosing V = Φ, the system's own mass-normalized mode shapes, is the best-known example.
+Those shapes happen to be orthogonal through both M and K, so V<sup>T</sup>MV = I and
+V<sup>T</sup>KV = diag(ω²): every off-diagonal term vanishes and the equations uncouple.
+That is <i>why</i> modal coordinates are so useful, not a coincidence of the solver.</p>
+
+<h4>A worked example (2 masses, m = 1 kg, k = 400 N/m)</h4>
+<p>K = [ 800 −400 ; −400 400 ], M = I. True frequencies: 1.967 and 5.150 Hz.</p>
+<ol>
+<li><b>A full, different basis.</b> Take v<sub>1</sub> = [1, 1] ("move together") and
+v<sub>2</sub> = [1, −1] ("move apart"). Then V<sup>T</sup>KV = [ 400 400 ; 400 2000 ] and
+V<sup>T</sup>MV = [ 2 0 ; 0 2 ]. The matrices look nothing like K and M, and the off-diagonal
+400 says the two shapes are coupled, yet solving gives exactly 1.967 and 5.150 Hz. A
+<b>square</b> (complete) basis only rewrites the problem; it cannot change the answer.</li>
+<li><b>Truncate it.</b> Keep only v<sub>1</sub>: one equation, ω² = 400 / 2, f = 2.25 Hz,
+14% high. The masses are now forced to move together, which is a constraint, so the structure
+is stiffer and the frequency can only go up (the Rayleigh quotient,
+f² ∝ v<sup>T</sup>Kv / v<sup>T</sup>Mv).</li>
+<li><b>Choose a better shape.</b> Use the static deflection under a tip load instead,
+v = [0.5, 1]: ω² = 200 / 1.25, f = 2.01 Hz, only 2.3% high with a single coordinate. (The true
+mode is [0.618, 1].) A static shape captures most of the low-frequency motion. That is exactly
+why Craig–Bampton uses static constraint modes.</li>
+</ol>
+
+<h4>Reduction = a tall basis</h4>
+<p>When V has fewer columns than rows (N × m, m &lt; N), x = Vc <i>restricts</i> the motion to
+combinations of m shapes: the model can only move along those "rails". Everything then depends
+on whether the true motion lies (nearly) inside that set of shapes. The MAC in the comparison
+table measures exactly that for each mode. Adding shapes can only enlarge the set, which is why
+the frequencies converge from above.</p>
+
+<h4>The Craig–Bampton basis, and why it is chosen this way</h4>
+<p>Inside a component, any motion can be split into two parts:</p>
+<ul>
+<li><b>Motion forced by the boundary.</b> If the boundary moves slowly, the interior simply
+follows statically. The constraint modes Ψ describe this exactly: column j is the static shape
+when boundary DOF j moves by 1 and the others are held.</li>
+<li><b>The component's own vibration relative to that.</b> With the boundary held, what is left
+is a free vibration of the clamped component, so it is described by its fixed-interface modes
+Φ, lowest first, since low-frequency loading excites them most.</li>
+</ul>
+<p>Together they are complete: keep every fixed-interface mode and T is square and invertible,
+so nothing is lost. The design has three further consequences:</p>
+<ul>
+<li><b>The boundary coordinates stay physical.</b> Every fixed-interface mode is zero on the
+boundary, and each constraint mode is 1 on one boundary DOF and 0 on the others. So the
+coordinate multiplying constraint mode j <i>is</i> the displacement x<sub>b,j</sub>. This is what
+makes assembly trivial: two components are joined simply by giving their interface the same
+x<sub>b</sub>. Modal coordinates of two separate components cannot be joined like that.</li>
+<li><b>K̂ is block diagonal.</b> The constraint modes are static, so they do no elastic work
+against the fixed-interface modes: φ<sup>T</sup>(K<sub>ii</sub>Ψ + K<sub>ib</sub>) = 0. The two
+families are stiffness-orthogonal.</li>
+<li><b>M̂ is not.</b> They are not mass-orthogonal: when the boundary accelerates, the inertia
+of the interior drives the component's modes. M̂<sub>qb</sub> is that inertial coupling, and it
+is how the components talk to each other dynamically. (For C, see <i>Damping</i> under <i>Properties worth knowing</i>.)</li>
+</ul>
+<p>The <i>Basis</i> tab plots every column of the current T as a shape along the chain. For the
+default 8-mass chain cut at m4 with one mode each, there are four: A's first clamped mode (over
+m1–m3, zero elsewhere), B's first clamped mode (over m5–m7), a "tent" for x<sub>4</sub> (rising
+linearly from the ground to m4, falling to m8, the static shape of both components when the
+interface moves) and a ramp for x<sub>8</sub> (zero up to m4, rising to the tip). Every motion
+the reduced model can make is a combination of those four shapes.</p>
 
 <h3>Original vs substructured formulation</h3>
 <table border="1" cellspacing="0" cellpadding="4">
@@ -174,6 +275,9 @@ identical three-mass pieces, so each has a clamped mode at 2.44 Hz. Coupled, the
 into modes 3 (2.84 Hz) and 4 (3.84 Hz), each carrying about half its energy: two equal
 oscillators joined together always split this way. Move the interface to m7: A's three lowest
 modes each become mostly one coupled mode (shares of 74–84%), while the higher ones mix more.</li>
+<li>Open the <i>Basis</i> tab and change the modes kept: each kept mode adds one shape (one
+column of T), and the constraint-mode shapes stay the same. Every result on this page is a
+combination of the shapes shown there.</li>
 <li>Click <i>Guyan (0 modes)</i>. Only the two boundary DOFs are left: mode 1 is still
 within 2%, mode 2 is 11% high. On the <i>Modes &amp; FRF</i> tab the reduced FRF matches at
 low frequency and drifts above mode 1.</li>
@@ -187,6 +291,40 @@ the reduction happens in A. With 1 mode kept in A the model has 3 DOFs and mode 
 too high (MAC 0.27). Keep 3 modes in A (up to 3.97 Hz) and modes 1 to 4 fall within
 0.2%: the rule of thumb in action.</li>
 </ol>
+
+<h3><a name="notation"></a>Notation</h3>
+<table border="1" cellspacing="0" cellpadding="4">
+<tr><th>Symbol</th><th>Meaning</th><th>Units</th></tr>
+<tr><td>N</td><td>number of masses (physical DOFs) in the full chain</td><td>—</td></tr>
+<tr><td>m<sub>j</sub>, k<sub>j</sub>, c<sub>j</sub></td><td>mass j; spring and damper j (joining mass j−1, or the ground, to mass j)</td><td>kg, N/m, N·s/m</td></tr>
+<tr><td>x, ẋ, ẍ</td><td>physical displacements, velocities, accelerations</td><td>m, m/s, m/s²</td></tr>
+<tr><td>f</td><td>applied force vector (here only at the tip)</td><td>N</td></tr>
+<tr><td>M, C, K</td><td>mass, damping and stiffness matrices of the full chain</td><td>kg, N·s/m, N/m</td></tr>
+<tr><td>A, B; (s)</td><td>the substructures; superscript (s) marks a quantity of substructure s, e.g. K<sup>(A)</sup></td><td>—</td></tr>
+<tr><td>L<sub>s</sub></td><td>Boolean localization matrix: picks substructure s's DOFs out of the global x</td><td>—</td></tr>
+<tr><td>i, b</td><td>interior DOFs (inside one substructure) and boundary / master DOFs (interface and tip)</td><td>—</td></tr>
+<tr><td>x<sub>i</sub>, x<sub>b</sub></td><td>interior and boundary displacements</td><td>m</td></tr>
+<tr><td>K<sub>ii</sub>, K<sub>ib</sub>, K<sub>bi</sub>, K<sub>bb</sub></td><td>partitions (blocks) of a substructure matrix; same for M and C</td><td>as K</td></tr>
+<tr><td>n<sub>i</sub>, n<sub>b</sub></td><td>number of interior / boundary DOFs</td><td>—</td></tr>
+<tr><td>V, v<sub>j</sub>, c</td><td>a general basis (matrix of shapes), one shape, and the coordinates (amplitudes) in that basis</td><td>—</td></tr>
+<tr><td>φ<sub>r</sub>, Φ</td><td>fixed-interface normal mode r of a substructure (boundary held) and the matrix of all of them, mass-normalized: Φ<sup>T</sup>M<sub>ii</sub>Φ = I</td><td>1/√kg</td></tr>
+<tr><td>Φ<sub>k</sub>, k</td><td>the kept (lowest) fixed-interface modes, and how many are kept</td><td>1/√kg, —</td></tr>
+<tr><td>ω<sub>r</sub>, Λ<sub>k</sub></td><td>natural frequency of fixed-interface mode r; Λ<sub>k</sub> = diag(ω<sub>r</sub>²) of the kept ones</td><td>rad/s, rad²/s²</td></tr>
+<tr><td>Ψ</td><td>constraint modes: Ψ = −K<sub>ii</sub><sup>−1</sup>K<sub>ib</sub>, static interior shape for a unit displacement of each boundary DOF</td><td>m/m (dimensionless)</td></tr>
+<tr><td>q</td><td>modal coordinates: amplitudes of the kept fixed-interface modes</td><td>m·√kg</td></tr>
+<tr><td>T</td><td>Craig–Bampton transformation (the basis): [x<sub>i</sub>; x<sub>b</sub>] = T [q; x<sub>b</sub>], T = [ Φ<sub>k</sub> Ψ ; 0 I ]</td><td>mixed</td></tr>
+<tr><td>M̂, Ĉ, K̂, f̂</td><td>reduced matrices and force: T<sup>T</sup>MT, T<sup>T</sup>CT, T<sup>T</sup>KT, T<sup>T</sup>f</td><td>mixed</td></tr>
+<tr><td>K̂<sub>bb</sub></td><td>boundary stiffness K<sub>bb</sub> − K<sub>bi</sub>K<sub>ii</sub><sup>−1</sup>K<sub>ib</sub> (Schur complement = Guyan stiffness)</td><td>N/m</td></tr>
+<tr><td>M̂<sub>qb</sub></td><td>inertial coupling between the kept modes and the boundary motion</td><td>√kg</td></tr>
+<tr><td>η</td><td>mode shape of the reduced model in coordinates [q, x<sub>b</sub>]; x = Tη recovers it physically</td><td>mixed</td></tr>
+<tr><td>f<sub>n</sub>, f<sub>d</sub></td><td>undamped natural frequency ω<sub>n</sub>/2π, damped frequency ω<sub>d</sub>/2π</td><td>Hz</td></tr>
+<tr><td>λ</td><td>damped eigenvalue −ζω<sub>n</sub> ± iω<sub>d</sub></td><td>1/s</td></tr>
+<tr><td>ζ</td><td>damping ratio: −Re λ / |λ| ("alone": of a substructure with its boundary held)</td><td>—</td></tr>
+<tr><td>MAC</td><td>modal assurance criterion (φ<sup>T</sup>x)² / (φ<sup>T</sup>φ · x<sup>T</sup>x): shape similarity, 0 to 1</td><td>—</td></tr>
+<tr><td>Share</td><td>fraction of a coupled mode's strain energy carried by one fixed-interface mode</td><td>—</td></tr>
+<tr><td>H(ω)</td><td>receptance (FRF) X/F = (K − ω²M + iωC)<sup>−1</sup></td><td>m/N</td></tr>
+<tr><td>CB</td><td>Craig–Bampton (the reduced model); "true" = the full N-DOF model</td><td>—</td></tr>
+</table>
 """
 
 

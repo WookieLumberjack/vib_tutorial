@@ -212,10 +212,22 @@ class ComponentTable(QtWidgets.QTableWidget):
             self.horizontalHeaderItem(col).setToolTip(tip)
         self.verticalHeader().setVisible(False)
         self.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
+        self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.setToolTip("Click a row to draw this component mode over the coupled mode it becomes "
+                        "(Modes & FRF tab). Click it again to clear.")
         self.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
 
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # Clicking the selected row again clears the overlay.
+        index = self.indexAt(event.position().toPoint())
+        if index.isValid() and self.selectionModel().isRowSelected(index.row()):
+            self.clearSelection()
+            return
+        super().mousePressEvent(event)
+
     def set_rows(self, modes: list[ComponentMode]) -> None:
+        self.clearSelection()
         self.setRowCount(len(modes))
         for r, m in enumerate(modes):
             cells = [
@@ -263,8 +275,10 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         self.shape.setLabel("left", "Normalized amplitude")
         self.shape.showGrid(x=True, y=True, alpha=0.3)
         self.shape.setMouseEnabled(x=False, y=False)
-        self.shape.setYRange(-1.15, 1.15, padding=0)
-        self.shape_legend = self.shape.addLegend(offset=(5, -5), brush=pg.mkBrush(255, 255, 255, 210))
+        # Headroom above +1 for a one-row legend, so it never covers a shape.
+        self.shape.setYRange(-1.15, 1.5, padding=0)
+        self.shape.getAxis("left").setTicks([[(v, f"{v:g}") for v in (-1, -0.5, 0, 0.5, 1)]])
+        self.shape_legend = self.shape.addLegend(offset=(5, 2), colCount=3, brush=pg.mkBrush(255, 255, 255, 230))
         self.frf = self.addPlot(row=1, col=0)
         self.frf.setLogMode(x=True, y=True)
         self.frf.setLabel("left", "|X / F|  [m/N]")
@@ -286,12 +300,14 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         if model is not None:
             for b in model.boundary[:-1]:  # interface masses
                 line = pg.InfiniteLine(pos=b + 1, angle=90, pen=pg.mkPen("#999", width=1, style=CB_PEN_STYLE),
-                                       label="interface", labelOpts={"position": 0.95, "color": "#777"})
+                                       label="interface", labelOpts={"position": 0.08, "color": "#777"})
                 self.shape.addItem(line)
                 self._shape_items.append(line)
         self._true_curve = self.shape.plot(symbol="s", symbolSize=9, symbolPen=None)
         self._cb_curve = self.shape.plot(symbol="o", symbolSize=11, symbolBrush=None)
-        self._shape_items += [self._true_curve, self._cb_curve]
+        self._component_curve = self.shape.plot(symbol="t", symbolSize=11)
+        self._shape_items += [self._true_curve, self._cb_curve, self._component_curve]
+        self.component: ComponentMode | None = None
         self.shape.setXRange(0, n, padding=0.05)
         self.shape.getAxis("bottom").setTicks([[(0, "ground")] + [(i, f"m{i}") for i in range(1, n + 1)]])
 
@@ -309,12 +325,35 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         if c.shape_cb is None:
             self._cb_curve.setData([], [])
             self.shape.setTitle(f"Mode {c.index} is not in the reduced model", size="10pt")
+        else:
+            self._cb_curve.setData(xs, np.concatenate([[0.0], c.shape_cb]))
+            self._cb_curve.setPen(pg.mkPen("#000", width=2, style=CB_PEN_STYLE))
+            self._cb_curve.setSymbolPen(pg.mkPen("#000", width=2))
+            self.shape_legend.addItem(self._cb_curve, f"Mode {c.index} CB: {c.fn_cb:.4g} Hz")
+            self.shape.setTitle(f"Mode {c.index}: error {100 * c.error:+.3g}%, MAC {c.mac:.3f}", size="10pt")
+        # Keep an overlay only while it belongs to this coupled mode.
+        keep = self.component is not None and self.component.closest == c.index
+        self.set_component(self.component if keep else None)
+
+    def set_component(self, comp: ComponentMode | None) -> None:
+        """Overlay one substructure's own (boundary-held) mode shape, or clear it."""
+        self.component = comp
+        if comp is None:
+            self._component_curve.setData([], [])
             return
-        self._cb_curve.setData(xs, np.concatenate([[0.0], c.shape_cb]))
-        self._cb_curve.setPen(pg.mkPen("#000", width=2, style=CB_PEN_STYLE))
-        self._cb_curve.setSymbolPen(pg.mkPen("#000", width=2))
-        self.shape_legend.addItem(self._cb_curve, f"Mode {c.index} CB: {c.fn_cb:.4g} Hz")
-        self.shape.setTitle(f"Mode {c.index}: error {100 * c.error:+.3g}%, MAC {c.mac:.3f}", size="10pt")
+        xs, ys = comp.dofs + 1.0, comp.shape
+        if comp.substructure == SUB_NAMES[0]:  # A starts at the ground
+            xs, ys = np.concatenate([[0.0], xs]), np.concatenate([[0.0], ys])
+        color = SUB_COLORS[SUB_NAMES.index(comp.substructure)]
+        self._component_curve.setData(xs, ys)
+        self._component_curve.setPen(pg.mkPen(color, width=3, style=QtCore.Qt.PenStyle.DotLine))
+        self._component_curve.setSymbolBrush(color)
+        self._component_curve.setSymbolPen(None)
+        self.shape_legend.addItem(
+            self._component_curve,
+            f"{comp.substructure}{comp.index} alone, boundary held: {comp.fn_hz:.4g} Hz "
+            f"({100 * comp.share:.0f}% of mode {comp.closest})",
+        )
 
     def set_frf(self, system: ChainSystem, full: ModalResult, model: CraigBamptonModel | None) -> None:
         for item in self._frf_items:
@@ -352,6 +391,69 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         self.frf.setXRange(math.log10(lo), math.log10(hi), padding=0)
 
 
+class BasisPlots(QtWidgets.QWidget):
+    """Every column of the global T drawn as a shape along the chain: the reduced model's basis."""
+
+    COLS = 2
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.header = QtWidgets.QLabel()
+        self.header.setWordWrap(True)
+        self.plots = pg.GraphicsLayoutWidget()
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(self.header)
+        layout.addWidget(self.plots, 1)
+
+    def set_model(self, model: CraigBamptonModel | None) -> None:
+        self.plots.clear()
+        if model is None:
+            self.header.setText("")
+            return
+        n = model.system.n
+        self.header.setText(
+            f"<b>The reduced model's basis:</b> x = T [q; x<sub>b</sub>]. Each of the {model.n_red} "
+            f"columns of T is one shape over the whole chain, and every motion the reduced model can "
+            f"make is a combination of these {model.n_red} shapes (the full model has {n}). "
+            "<span style='color:#666'>Modal columns q are the substructures' own clamped modes "
+            "(zero outside their substructure and at every boundary mass). Boundary columns "
+            "x<sub>b</sub> are constraint modes: 1 at that boundary mass, 0 at the other one, and "
+            "the static shape in between. That is why x<sub>b</sub> stays a physical "
+            "displacement.</span>"
+        )
+        xs = np.arange(n + 1)
+        ticks = [[(0, "gnd")] + [(i, f"m{i}") for i in range(1, n + 1)]]
+        freqs = {f"q_{sub.name}{k + 1}": sub.fixed_omegas[k] / (2 * math.pi)
+                 for sub in model.substructures for k in range(sub.n_kept)}
+        for c, label in enumerate(model.labels):
+            p = self.plots.addPlot(row=c // self.COLS, col=c % self.COLS)
+            p.setMouseEnabled(x=False, y=False)
+            p.hideButtons()
+            p.showGrid(x=True, y=True, alpha=0.25)
+            p.setXRange(0, n, padding=0.05)
+            p.getAxis("bottom").setTicks(ticks)
+            col = model.T[:, c]
+            if label.startswith("q_"):
+                name = label[2]
+                color = SUB_COLORS[SUB_NAMES.index(name)]
+                title = (f"q<sub>{label[2:]}</sub>: {name}'s clamped mode {label[3:]} "
+                         f"({freqs[label]:.3g} Hz)")
+                ys = col / np.abs(col).max()
+                p.setYRange(-1.15, 1.15, padding=0)
+            else:
+                color = "#000"
+                title = f"{label}: constraint mode ({label} = 1, other boundary held)"
+                ys = col
+                p.setYRange(-0.1, 1.15, padding=0)
+            p.setTitle(title, size="9pt")
+            p.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#bbb", width=1)))
+            for b in model.boundary:
+                p.addItem(pg.InfiniteLine(pos=b + 1, angle=90,
+                                          pen=pg.mkPen("#bbb", width=1, style=CB_PEN_STYLE)))
+            p.plot(xs, np.concatenate([[0.0], ys]), pen=pg.mkPen(color, width=2),
+                   symbol="o", symbolSize=7, symbolBrush=color, symbolPen=None)
+
+
 class SubstructuringPage(QtWidgets.QWidget):
     """Controls, schematic and comparison on the left; plots, matrices and theory on the right."""
 
@@ -364,6 +466,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.full: ModalResult | None = None
         self.model: CraigBamptonModel | None = None
         self.comparisons: list[ModeComparison] = []
+        self.components: list[ComponentMode] = []
         self._dirty = False
         self._updating = False  # true while controls are being synced to the model
         self._kept_wanted = [1, 1]  # remembered across changes of N, clipped to the interior size
@@ -430,6 +533,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.component_note.setWordWrap(True)
         self.component_note.setStyleSheet("color: #666;")
         self.table.itemSelectionChanged.connect(self._on_row)
+        self.component_table.itemSelectionChanged.connect(self._on_component_row)
         self.summary = QtWidgets.QLabel()
         self.summary.setWordWrap(True)
         left = QtWidgets.QWidget()
@@ -454,7 +558,9 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.theory = QtWidgets.QTextBrowser()
         self.theory.setHtml(THEORY_HTML)
         self.tabs = QtWidgets.QTabWidget()
+        self.basis = BasisPlots()
         self.tabs.addTab(self.plots, "Modes && FRF")
+        self.tabs.addTab(self.basis, "Basis (T)")
         self.tabs.addTab(self.matrices, "Matrices (step by step)")
         self.tabs.addTab(self.theory, "Theory")
 
@@ -494,7 +600,21 @@ class SubstructuringPage(QtWidgets.QWidget):
         self._kept_wanted = [value] * len(SUB_NAMES)
         self.refresh()
 
+    def _on_component_row(self) -> None:
+        rows = self.component_table.selectionModel().selectedRows()
+        if not rows or not self.components:
+            self.plots.set_component(None)
+            self.plots.set_highlight(self.table.currentRow())
+            return
+        comp = self.components[rows[0].row()]
+        self.plots.component = comp
+        self.table.selectRow(comp.closest - 1)  # shows the coupled mode, which keeps the overlay
+        self.plots.set_highlight(comp.closest - 1)
+        self.tabs.setCurrentWidget(self.plots)
+
     def _on_row(self) -> None:
+        if self.plots.component is not None and self.table.currentRow() != self.plots.component.closest - 1:
+            self.component_table.clearSelection()  # a different coupled mode: drop the overlay
         self.plots.set_highlight(self.table.currentRow())
 
     # ----------------------------------------------------------- compute
@@ -537,17 +657,20 @@ class SubstructuringPage(QtWidgets.QWidget):
             self.matrices.setHtml(f"<p>{reason}</p>")
             self.plots.set_comparisons([], None)
             self.plots.set_frf(system, full, None)
+            self.basis.set_model(None)
             return
 
         comparisons = self.comparisons
         self.summary.setText(self._summary(model, comparisons))
         self.plots.set_comparisons(comparisons, model)
         self.table.set_rows(comparisons)
-        components = component_modes(model, full)
+        self.plots.component = None
+        self.components = components = component_modes(model, full)
         self.component_table.set_rows(components)
         self.component_note.setText(self._component_note(model, components))
         self._on_row()
         self.plots.set_frf(system, full, model)
+        self.basis.set_model(model)
         scroll = self.matrices.verticalScrollBar().value()
         self.matrices.setHtml(matrices_html(model, full))
         self.matrices.verticalScrollBar().setValue(scroll)
