@@ -12,6 +12,8 @@ Two complementary views are computed:
    state matrix come in pairs lambda = -zeta w_n +/- i w_n sqrt(1 - zeta^2).
    These are exact for any damping, and the corresponding mode shapes are in
    general complex (masses do not all pass through zero at the same instant).
+   All 2N eigenpairs, conjugates and real (overdamped) roots included, are
+   kept in ``ModalResult.complex_modes``.
 """
 
 from __future__ import annotations
@@ -27,14 +29,39 @@ TWO_PI = 2.0 * np.pi
 
 
 @dataclass(frozen=True)
-class DampedPole:
-    """One oscillatory eigenvalue pair of the damped system."""
+class ComplexMode:
+    """One eigenpair (lambda, psi) of the 2N x 2N state matrix.
 
-    eigenvalue: complex  # the member of the pair with positive imaginary part
-    omega_n: float  # rad/s, |lambda|
-    zeta: float  # -Re(lambda) / |lambda|
-    omega_d: float  # rad/s, Im(lambda)
-    shape: np.ndarray  # complex displacement shape, largest entry normalized to 1+0j
+    Oscillatory eigenvalues come in conjugate pairs; both members are kept so
+    the full set of 2N solutions can be shown. A real eigenvalue is a
+    non-oscillatory (overdamped, or rigid-body when lambda = 0) solution.
+    """
+
+    index: int  # 1-based position among all 2N eigenvalues
+    eigenvalue: complex
+    shape: np.ndarray  # complex displacement part psi, largest entry normalized to 1+0j
+    state_vector: np.ndarray  # full eigenvector [psi, lambda psi], same normalization
+    conjugate: int | None  # index of the conjugate partner; None for a real eigenvalue
+
+    @property
+    def is_oscillatory(self) -> bool:
+        return self.conjugate is not None
+
+    @property
+    def omega_n(self) -> float:
+        """rad/s, |lambda|."""
+        return abs(self.eigenvalue)
+
+    @property
+    def zeta(self) -> float:
+        """-Re(lambda) / |lambda|."""
+        wn = self.omega_n
+        return -self.eigenvalue.real / wn if wn > 0 else float("nan")
+
+    @property
+    def omega_d(self) -> float:
+        """rad/s, |Im(lambda)| (the same for both members of a pair)."""
+        return abs(self.eigenvalue.imag)
 
     @property
     def fn_hz(self) -> float:
@@ -54,7 +81,7 @@ class Mode:
     shape: np.ndarray  # real shape, largest |entry| normalized to +1
     shape_mass_normalized: np.ndarray  # phi with phi^T M phi = 1
     zeta_modal: float  # phi^T C phi / (2 w); NaN for a rigid-body mode
-    damped: DampedPole | None  # None if this mode is overdamped
+    damped: ComplexMode | None  # matching eigenvalue with Im > 0; None if overdamped
 
     @property
     def fn_hz(self) -> float:
@@ -63,9 +90,14 @@ class Mode:
 
 @dataclass(frozen=True)
 class ModalResult:
-    modes: list[Mode]
-    overdamped_roots: list[float]  # real eigenvalues (1/s) of non-oscillatory motion
+    modes: list[Mode]  # N undamped normal modes
+    complex_modes: list[ComplexMode]  # all 2N state-space eigenpairs, ordered by |lambda|
     coupling: float  # max normalized off-diagonal of Phi^T C Phi; 0 => proportional
+
+    @property
+    def overdamped_roots(self) -> list[float]:
+        """Real eigenvalues (1/s) of non-oscillatory motion, slowest first."""
+        return sorted((m.eigenvalue.real for m in self.complex_modes if not m.is_oscillatory), reverse=True)
 
     @property
     def is_proportional(self) -> bool:
@@ -73,10 +105,6 @@ class ModalResult:
 
 
 def _normalize_real(v: np.ndarray) -> np.ndarray:
-    return v / v[np.argmax(np.abs(v))]
-
-
-def _normalize_complex(v: np.ndarray) -> np.ndarray:
     return v / v[np.argmax(np.abs(v))]
 
 
@@ -93,34 +121,15 @@ def modal_analysis(system: ChainSystem) -> ModalResult:
         ratios = np.where(d > 0, off / d, 0.0)
     coupling = float(ratios.max()) if ratios.size else 0.0
 
-    # --- Exact damped eigenvalues from the state matrix.
-    A, _ = state_space(system)
-    lam, vecs = scipy.linalg.eig(A)
+    # --- Exact damped eigenpairs of the state matrix.
+    complex_modes = _state_space_modes(system)
+    poles = [m for m in complex_modes if m.is_oscillatory and m.eigenvalue.imag > 0]
     n = system.n
-    scale = max(1.0, float(np.abs(lam).max()))
-    poles: list[DampedPole] = []
-    overdamped: list[float] = []
-    for i, li in enumerate(lam):
-        if li.imag > 1e-9 * scale:
-            wn = abs(li)
-            poles.append(
-                DampedPole(
-                    eigenvalue=complex(li),
-                    omega_n=wn,
-                    zeta=-li.real / wn,
-                    omega_d=li.imag,
-                    shape=_normalize_complex(vecs[:n, i]),
-                )
-            )
-        elif abs(li.imag) <= 1e-9 * scale:
-            overdamped.append(float(li.real))
-    poles.sort(key=lambda p: p.omega_n)
-    overdamped.sort(reverse=True)
 
     # Pair each damped pole with the undamped mode whose shape it most resembles
     # (modal assurance criterion), so a heavily damped mode that drops out does
     # not shift the pairing of the others.
-    matched: dict[int, DampedPole] = {}
+    matched: dict[int, ComplexMode] = {}
     unmatched = set(range(n))
     for pole in poles:
         if not unmatched:
@@ -144,7 +153,43 @@ def modal_analysis(system: ChainSystem) -> ModalResult:
                 damped=matched.get(r),
             )
         )
-    return ModalResult(modes=modes, overdamped_roots=overdamped, coupling=coupling)
+    return ModalResult(modes=modes, complex_modes=complex_modes, coupling=coupling)
+
+
+def _state_space_modes(system: ChainSystem) -> list[ComplexMode]:
+    """All 2N eigenpairs of A, each conjugate pair adjacent (Im > 0 member first)."""
+    A, _ = state_space(system)
+    lam, vecs = scipy.linalg.eig(A)
+    n = system.n
+    # A repeated (defective) eigenvalue such as the lambda = 0 of a free chain
+    # splits into +/- ~sqrt(eps) i numerically, so "real" needs a loose tolerance.
+    tol = 1e-6 * max(1.0, float(np.abs(lam).max()))
+    upper = [i for i in range(lam.size) if lam[i].imag > tol]
+    lower = {i for i in range(lam.size) if lam[i].imag < -tol}
+    real = [i for i in range(lam.size) if abs(lam[i].imag) <= tol]
+
+    # Each group is one oscillatory pair or one real root, ordered by |lambda|.
+    groups: list[tuple[complex, np.ndarray, bool]] = []
+    for i in upper:
+        partner = min(lower, key=lambda j: abs(lam[j] - np.conj(lam[i])))
+        lower.discard(partner)
+        groups.append((complex(lam[i]), vecs[:, i], True))
+    for i in real:
+        groups.append((complex(lam[i].real), vecs[:, i].real.astype(complex), False))
+    groups.sort(key=lambda g: abs(g[0]))
+
+    out: list[ComplexMode] = []
+    for li, v, oscillatory in groups:
+        v = v / v[np.argmax(np.abs(v[:n]))]  # largest displacement entry -> 1+0j
+        k = len(out) + 1
+        if oscillatory:
+            # Store the partner as the exact conjugate so the pair is consistent.
+            out.append(ComplexMode(k, li, v[:n].copy(), v, conjugate=k + 1))
+            vc = v.conj()
+            out.append(ComplexMode(k + 1, li.conjugate(), vc[:n].copy(), vc, conjugate=k))
+        else:
+            out.append(ComplexMode(k, li, v[:n].copy(), v, conjugate=None))
+    return out
 
 
 def _mac(real_shape: np.ndarray, complex_shape: np.ndarray) -> float:

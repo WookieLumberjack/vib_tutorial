@@ -65,6 +65,56 @@ def test_window_interactions(app):
     w.close()
 
 
+def test_state_space_method(app):
+    import numpy as np
+
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.modes import Method
+
+    w = MainWindow()
+    w.params.rows[0][3].setValue(15.0)  # non-proportional
+    n = w.sim.system.n
+    w.method_combo.setCurrentIndex(list(Method).index(Method.STATE_SPACE))
+    assert w.table.rowCount() == 2 * n
+    assert w.phasor_plot.isVisibleTo(w) and "2N" in w.modal_note.text()
+    assert w.table.item(1, 0).text() == "2 = λ1*"
+    # Combos list one entry per conjugate pair, at the damped frequency.
+    assert w.force_panel.tune.count() == 1 + n
+    assert w.force_panel.tune.itemData(1) == pytest.approx(w.modal.complex_modes[0].fd_hz)
+
+    # Releasing a complex mode sets displacement Re(psi) and velocity Re(lambda psi);
+    # its conjugate releases the same motion.
+    w.table.selectRow(2)
+    w._release_mode()
+    m = w.modal.complex_modes[2]
+    amp = w.release_amp.value() * 1e-3
+    np.testing.assert_allclose(w.sim.state, amp * m.state_vector.real)
+    assert w.controls.window.value() == pytest.approx(10 / m.fd_hz, abs=0.005)
+    state = w.sim.state.copy()
+    w.table.selectRow(3)
+    w._release_mode()
+    np.testing.assert_allclose(w.sim.state, state)
+    assert w.phasor_plot.table.rowCount() == n
+
+    w.animate_modes.setChecked(True)
+    w._tick()
+
+    # Overdamped and rigid-body systems produce real eigenvalues; they must display.
+    w.params.rows[0][3].setValue(200.0)
+    w.params.rows[0][2].setValue(0.0)
+    assert w.table.rowCount() == 2 * n
+    assert any("τ" in w.table.item(r, 4).text() for r in range(2 * n))
+    w.table.selectRow(0)
+    w._release_mode()
+    w._tick()
+
+    # Switching back restores the classical table.
+    w.method_combo.setCurrentIndex(list(Method).index(Method.CLASSICAL))
+    assert w.table.rowCount() == n and not w.phasor_plot.isVisibleTo(w)
+    assert w.table.horizontalHeaderItem(2).text() == "ζ modal"
+    w.close()
+
+
 def test_damper_stays_connected():
     import numpy as np
 

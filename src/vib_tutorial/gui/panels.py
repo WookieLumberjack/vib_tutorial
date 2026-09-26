@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtWidgets
 
-from ..core import ChainSystem, ForceController, ForceKind, ModalResult
+from ..core import ChainSystem, ForceController, ForceKind
 from ..core.model import DEFAULT_DAMPING, DEFAULT_MASS, DEFAULT_STIFFNESS
+from .modes import ModeEntry
 from .style import MASS_COLORS, MAX_DOF
 
 
@@ -23,14 +24,14 @@ def spin(lo: float, hi: float, value: float, decimals: int, suffix: str = "") ->
 
 
 def fill_mode_combo(
-    combo: QtWidgets.QComboBox, result: ModalResult, placeholder: str, data=lambda mode: mode.fn_hz
+    combo: QtWidgets.QComboBox, entries: list[ModeEntry], placeholder: str, data=lambda e: e.freq_hz
 ) -> None:
-    """List the modes in a one-shot "pick a mode" combo; item data is data(mode)."""
+    """List the modes in a one-shot "pick a mode" combo; item data is data(entry)."""
     combo.clear()
     combo.addItem(placeholder)
-    for mode in result.modes:
-        if mode.fn_hz > 0:  # skip rigid-body modes
-            combo.addItem(f"Mode {mode.index} ({mode.fn_hz:.3g} Hz)", data(mode))
+    for e in entries:
+        if e.listed:  # skip rigid / non-oscillatory modes and conjugate duplicates
+            combo.addItem(f"{e.key} ({e.freq_hz:.3g} Hz)", data(e))
 
 
 class ParameterPanel(QtWidgets.QGroupBox):
@@ -179,8 +180,8 @@ class ForcePanel(QtWidgets.QGroupBox):
         self.target.blockSignals(False)
         self._apply()
 
-    def set_modes(self, result: ModalResult) -> None:
-        fill_mode_combo(self.tune, result, "Tune to…")
+    def set_modes(self, entries: list[ModeEntry]) -> None:
+        fill_mode_combo(self.tune, entries, "Tune to…")
 
     def _on_tune(self, index: int) -> None:
         f = self.tune.itemData(index)
@@ -274,15 +275,16 @@ class SimControls(QtWidgets.QGroupBox):
         self.fit_window.activated.connect(self._on_fit_window)
         fit_row.addWidget(self.fit_window, 1)
         fit_tip = (
-            "Set the plot window to show this many cycles of a mode (window = cycles / f\u2099).\n"
+            "Set the plot window to show this many cycles of a mode (window = cycles / f\u2099;\n"
+            "f_d for the state-space method).\n"
             "Changing the cycle count re-fits to the last mode picked.\n"
             "Releasing a mode also fits to it while auto-scale is on."
         )
         for w in (self.cycles, self.fit_window):
             w.setToolTip(fit_tip)
         form.addRow("Fit window:", fit_row)
-        self._fit_mode: int | None = None  # number of the last mode fitted to
-        self._mode_freqs: dict[int, float] = {}  # mode number -> fn [Hz]
+        self._fit_mode: str | None = None  # key of the last mode fitted to
+        self._mode_freqs: dict[str, float] = {}  # mode key -> frequency [Hz]
 
         self.auto_scale = QtWidgets.QCheckBox("Auto-scale animation and plots")
         self.auto_scale.setChecked(True)
@@ -293,19 +295,19 @@ class SimControls(QtWidgets.QGroupBox):
         self.time_label = QtWidgets.QLabel()
         form.addRow("Sim time:", self.time_label)
 
-    def set_modes(self, result: ModalResult) -> None:
-        fill_mode_combo(self.fit_window, result, "mode\u2026", data=lambda mode: mode.index)
-        self._mode_freqs = {m.index: m.fn_hz for m in result.modes if m.fn_hz > 0}
+    def set_modes(self, entries: list[ModeEntry]) -> None:
+        fill_mode_combo(self.fit_window, entries, "mode\u2026", data=lambda e: e.key)
+        self._mode_freqs = {e.key: e.freq_hz for e in entries if e.freq_hz > 0}
 
-    def fit_to_mode(self, mode_number: int) -> None:
+    def fit_to_mode(self, key: str) -> None:
         """Size the plot window to show `cycles` periods of the given mode."""
-        self._fit_mode = mode_number
+        self._fit_mode = key
         self._apply_fit()
 
     def _on_fit_window(self, index: int) -> None:
-        mode_number = self.fit_window.itemData(index)
-        if mode_number:
-            self.fit_to_mode(mode_number)
+        key = self.fit_window.itemData(index)
+        if key:
+            self.fit_to_mode(key)
         self.fit_window.setCurrentIndex(0)
 
     def _apply_fit(self) -> None:

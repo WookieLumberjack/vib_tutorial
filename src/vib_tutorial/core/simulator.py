@@ -78,6 +78,12 @@ class Simulator:
         self.state[:n] = x
         self.state[n:] = 0.0
 
+    def set_state(self, x: np.ndarray, v: np.ndarray) -> None:
+        """Set displacements (m) and velocities (m/s), e.g. to release a complex mode."""
+        n = self.system.n
+        self.state[:n] = x
+        self.state[n:] = v
+
     @property
     def displacement(self) -> np.ndarray:
         return self.state[: self.system.n]

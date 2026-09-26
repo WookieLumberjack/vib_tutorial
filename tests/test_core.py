@@ -11,6 +11,7 @@ from vib_tutorial.core import (
     Simulator,
     frf,
     modal_analysis,
+    state_space,
 )
 
 
@@ -119,3 +120,46 @@ def test_live_parameter_change_keeps_state():
     np.testing.assert_array_equal(sim.state, before)
     sim.set_system(sim.system.resized(3))
     assert sim.state.size == 6
+
+
+def test_state_space_modes_are_2n_eigenpairs():
+    s = ChainSystem([1.0, 2.0, 0.5, 1.0], [400.0, 300.0, 500.0, 200.0], [20.0, 0.0, 1.0, 0.0])
+    res = modal_analysis(s)
+    cm = res.complex_modes
+    assert len(cm) == 2 * s.n
+    assert [m.index for m in cm] == list(range(1, 2 * s.n + 1))
+    A, _ = state_space(s)
+    for m in cm:
+        # Each is an eigenpair of A, with the state vector = [psi, lambda psi].
+        np.testing.assert_allclose(A @ m.state_vector, m.eigenvalue * m.state_vector, atol=1e-9)
+        np.testing.assert_allclose(m.state_vector[s.n :], m.eigenvalue * m.shape, atol=1e-9)
+        assert np.abs(m.shape).max() == pytest.approx(1.0)
+        # Conjugate partners are adjacent and exact conjugates.
+        partner = cm[m.conjugate - 1]
+        assert abs(partner.index - m.index) == 1 and partner.conjugate == m.index
+        assert partner.eigenvalue == m.eigenvalue.conjugate()
+        np.testing.assert_array_equal(partner.shape, m.shape.conj())
+    # The classical table's damped poles are the Im > 0 members.
+    assert {id(md.damped) for md in res.modes} == {id(m) for m in cm if m.eigenvalue.imag > 0}
+
+
+def test_state_space_modes_include_real_roots():
+    res = modal_analysis(ChainSystem([1.0, 1.0], [100.0, 100.0], [80.0, 0.0]))
+    real = [m for m in res.complex_modes if not m.is_oscillatory]
+    assert len(res.complex_modes) == 4 and len(real) == 2
+    assert all(m.eigenvalue.imag == 0 and m.eigenvalue.real < 0 for m in real)
+    assert res.overdamped_roots == sorted((m.eigenvalue.real for m in real), reverse=True)
+
+
+def test_releasing_complex_mode_excites_only_that_mode():
+    # Non-proportional damping: the real undamped shape is not a mode, the complex one is.
+    s = ChainSystem([1.0] * 4, [400.0] * 4, [15.0, 2.0, 2.0, 2.0])
+    res = modal_analysis(s)
+    assert not res.is_proportional
+    m = res.complex_modes[4]
+    sim = Simulator(s)
+    z0 = m.state_vector.real
+    sim.set_state(z0[: s.n], z0[s.n :])
+    ts, xs, _ = sim.advance(1.0)
+    exact = (m.shape[None, :] * np.exp(m.eigenvalue * ts)[:, None]).real
+    np.testing.assert_allclose(xs, exact, atol=1e-9)
