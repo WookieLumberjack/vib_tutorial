@@ -37,6 +37,12 @@ def test_window_interactions(app):
     w.controls.cycles.setValue(4)
     assert w.controls.window.value() == pytest.approx(4 / w.modal.modes[1].fn_hz, abs=0.005)
 
+    # Non-proportional damping: note explains coupling; its link opens the Background tab.
+    w.params.rows[0][3].setValue(15.0)
+    assert "non-proportional" in w.modal_note.text()
+    w.modal_note.linkActivated.emit("#background")
+    assert w.tabs.currentWidget() is w.background
+
     # Change number of masses.
     w.params.dof.setValue(6)
     assert w.sim.system.n == 6 and w.table.rowCount() == 6

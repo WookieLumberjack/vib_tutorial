@@ -9,6 +9,7 @@ from PySide6 import QtCore, QtWidgets
 
 from ..core import ChainSystem, ForceController, ForceKind, ForceSettings, Simulator, modal_analysis
 from .animation import ChainView
+from .background import COUPLING_TIP, make_background_view
 from .history import History
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, TimeHistoryPlot
@@ -56,6 +57,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mode_plot = ModeShapePlot()
         self.modal_note = QtWidgets.QLabel()
         self.modal_note.setWordWrap(True)
+        self.modal_note.setToolTip(COUPLING_TIP)
+        self.modal_note.linkActivated.connect(lambda _: self.tabs.setCurrentWidget(self.background))
         self.animate_modes = QtWidgets.QCheckBox("Animate mode shapes")
         self.release_amp = spin(0.001, 1000.0, 20.0, 3, " mm")
         amp_tip = (
@@ -97,9 +100,11 @@ class MainWindow(QtWidgets.QMainWindow):
         mv.addLayout(row)
 
         self.frf_plot = FrfPlot()
-        tabs = QtWidgets.QTabWidget()
+        self.background = make_background_view()
+        tabs = self.tabs = QtWidgets.QTabWidget()
         tabs.addTab(modal_tab, "Modal analysis")
         tabs.addTab(self.frf_plot, "Frequency response")
+        tabs.addTab(self.background, "Background")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)
@@ -159,12 +164,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.controls.set_modes(self.modal)
         notes = []
         if self.modal.is_proportional:
-            notes.append("Damping is <b>proportional</b>: modes are real and uncoupled, so ζ modal = ζ exact.")
+            notes.append(
+                "Damping is <b>proportional</b>: it does not couple the undamped modes, so the "
+                "modes are real and ζ modal = ζ exact."
+            )
         else:
             notes.append(
-                f"Damping is <b>non-proportional</b> (coupling {self.modal.coupling:.2f}): exact modes are "
-                "complex and ζ modal is an approximation."
+                "Damping is <b>non-proportional</b>: it couples the undamped modes "
+                f"(coupling index {self.modal.coupling:.2f}; 0 = none, 1 = strong). The exact damped "
+                "modes are complex (masses peak at different times) and ζ modal is an approximation."
             )
+        notes.append("<a href='#background'>Why?</a>")
         if self.modal.overdamped_roots:
             roots = ", ".join(f"{r:.3g}" for r in self.modal.overdamped_roots)
             notes.append(f"Non-oscillatory (overdamped) roots λ = {roots} 1/s.")
