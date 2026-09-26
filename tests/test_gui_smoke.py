@@ -505,3 +505,54 @@ def test_modal_test_page(app):
     p.anti_alias.setChecked(False)
     assert not p.acq.settings.anti_alias
     w.close()
+
+
+def test_modal_extraction_on_the_test_page(app):
+    from vib_tutorial.core import Excitation, Window
+    from vib_tutorial.core.identification import Method
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.test_page
+    w.pages.setCurrentWidget(p)
+    assert "complete" in p.results.notes.text()  # nothing extracted while measuring
+    p.excitation.setCurrentIndex(list(Excitation).index(Excitation.PERIODIC_RANDOM))
+    while not p.acq.done:
+        p._measure_some()
+    # LSCF by default, poles picked automatically: all four modes.
+    assert p.extract.current is Method.LSCF and len(p.poles) == 4
+    assert p.results.table.rowCount() == 4 and p.results.table.item(3, 7).text() == "1.000"
+    assert p.frf_view.fit_curves[0].getData()[0] is not None
+
+    # Clicking a selected pole removes it; clicking it again brings it back.
+    order, i = p.poles[1]
+    p.stab_plot.pole_clicked.emit(order, i)
+    assert len(p.poles) == 3 and p.results.table.item(1, 2).text() == "missed"
+    p.stab_plot.pole_clicked.emit(order, i)
+    assert len(p.poles) == 4
+    # A new noise level keeps the hand-picked poles (found again by frequency).
+    p.response_noise.setValue(0.5)
+    assert len(p.poles) == 4 and p.picked is not None
+    p.extract.auto.click()
+    assert p.picked is None
+
+    # The fit band follows the draggable region and limits the modes found.
+    p.frf_view.fit_band_changed.emit(0.5, 4.0)
+    assert p.extract.band == (0.5, 4.0)
+    assert {int(p.results.table.item(r, 0).text()) for r in range(p.results.table.rowCount())} == {1, 2}
+
+    for m in (Method.PEAK, Method.CIRCLE):
+        p.extract.method.setCurrentIndex(list(Method).index(m))
+        assert p.stab is None and p.ident.method is m and p.ident.modes
+    assert not p.extract.order.isVisibleTo(p)
+
+    # The exponential-window correction is offered only with that window.
+    assert not p.extract.correct.isVisibleTo(p)
+    p.excitation.setCurrentIndex(list(Excitation).index(Excitation.IMPACT))
+    p.exp_end.setValue(5.0)
+    while not p.acq.done:
+        p._measure_some()
+    assert p.window.currentData() is Window.FORCE_EXPONENTIAL and p.extract.correct.isVisibleTo(p)
+    assert "moved" in p.results.notes.text()
+    w.close()
