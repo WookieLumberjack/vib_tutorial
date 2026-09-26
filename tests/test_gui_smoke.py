@@ -182,6 +182,7 @@ def test_substructuring_page(app):
     assert page.interface.currentText() == "m4"
     assert page.model.labels == ["q_A1", "q_B1", "x4", "x8"]
     assert page.table.rowCount() == 8 and page.table.item(4, 3).text() == "not in model"
+    assert page.table.horizontalHeaderItem(5).text() == "ζ CB" and page.table.item(0, 5).text() != "—"
     assert "4 DOFs" in page.summary.text()
     text = page.matrices.toPlainText()
     assert "Assemble the reduced model" in text and "Damping in the reduced model" in text

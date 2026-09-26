@@ -239,6 +239,8 @@ class ModeComparison:
     mac: float | None
     shape_true: np.ndarray  # largest |entry| = +1
     shape_cb: np.ndarray | None  # sign aligned with shape_true
+    zeta_true: float | None = None  # exact damping ratio; None if overdamped or rigid
+    zeta_cb: float | None = None  # exact damping ratio of the reduced model's matching pole
 
     @property
     def error(self) -> float | None:
@@ -247,20 +249,49 @@ class ModeComparison:
             return None
         return (self.fn_cb - self.fn_true) / self.fn_true
 
+    @property
+    def zeta_error(self) -> float | None:
+        """Relative damping-ratio error (zeta_CB - zeta_true) / zeta_true; either sign."""
+        if self.zeta_cb is None or not self.zeta_true:
+            return None
+        return (self.zeta_cb - self.zeta_true) / self.zeta_true
+
 
 def compare_modes(model: CraigBamptonModel, full: ModalResult) -> list[ModeComparison]:
-    """Pair reduced mode r with true mode r (both ordered by frequency)."""
+    """Pair reduced mode r with true mode r (both ordered by frequency).
+
+    Damping ratios are exact on both sides: the true one from the full model's
+    matching damped pole, the CB one from the damped pole of M^, C^, K^ nearest
+    in |lambda| to reduced mode r (so an overdamped mode does not shift the rest).
+    """
+    zeta_cb = _reduced_zetas(model)
     out = []
     for r, mode in enumerate(full.modes):
         true = mode.shape
+        zeta_true = mode.damped.zeta if mode.damped is not None else None
         if r < model.n_red:
             cb = model.shapes[:, r].copy()
             if cb @ true < 0:
                 cb = -cb
             mac = float((cb @ true) ** 2 / ((cb @ cb) * (true @ true)))
-            out.append(ModeComparison(r + 1, mode.fn_hz, float(model.fn_hz[r]), mac, true, cb))
+            out.append(ModeComparison(r + 1, mode.fn_hz, float(model.fn_hz[r]), mac, true, cb,
+                                      zeta_true, zeta_cb[r]))
         else:
-            out.append(ModeComparison(r + 1, mode.fn_hz, None, None, true, None))
+            out.append(ModeComparison(r + 1, mode.fn_hz, None, None, true, None, zeta_true))
+    return out
+
+
+def _reduced_zetas(model: CraigBamptonModel) -> list[float | None]:
+    """Exact damping ratio of each reduced mode, None where it has no oscillatory pole."""
+    poles = list(damped_poles(model.M, model.C, model.K))
+    out: list[float | None] = []
+    for w in model.omegas:
+        if not poles or w <= 1e-9:
+            out.append(None)
+            continue
+        p = min(poles, key=lambda lam: abs(abs(lam) - w))
+        poles.remove(p)
+        out.append(float(-p.real / abs(p)))
     return out
 
 

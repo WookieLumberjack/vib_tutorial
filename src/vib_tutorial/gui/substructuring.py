@@ -122,7 +122,7 @@ class SubstructureSchematic(pg.PlotWidget):
 
 
 class ComparisonTable(QtWidgets.QTableWidget):
-    HEADERS = ["Mode", "fₙ true [Hz]", "fₙ CB [Hz]", "Error", "MAC"]
+    HEADERS = ["Mode", "fₙ true [Hz]", "fₙ CB [Hz]", "Error", "ζ true", "ζ CB", "MAC"]
     TIPS = [
         "Mode number, ordered by frequency",
         "Natural frequency of the full N-DOF model (Kφ = ω²Mφ)",
@@ -130,6 +130,11 @@ class ComparisonTable(QtWidgets.QTableWidget):
         "Blank when the reduced model has fewer DOFs than this mode number.",
         "(f_CB − f_true) / f_true. Never negative: CB is a Rayleigh–Ritz method, so it can only "
         "over-estimate stiffness.",
+        "Exact damping ratio of the full model (from its damped eigenvalue λ: −Re λ / |λ|)",
+        "Exact damping ratio of the reduced model M̂η̈ + Ĉη̇ + K̂η = 0, with Ĉ = TᵀCT. "
+        "Coloured by its error relative to ζ true, which can have either sign. With stiffness-"
+        "proportional damping it tracks the frequency error; with non-proportional damping it "
+        "can be much worse.",
         "Modal assurance criterion between the true shape φ and the recovered CB shape Tη: "
         "(φᵀx)² / (φᵀφ · xᵀx). 1 = identical shape, 0 = unrelated.",
     ]
@@ -155,6 +160,8 @@ class ComparisonTable(QtWidgets.QTableWidget):
                 f"{c.fn_true:.4g}",
                 "—" if c.fn_cb is None else f"{c.fn_cb:.4g}",
                 "not in model" if c.fn_cb is None else ("—" if err is None else f"{100 * err:+.3g}%"),
+                zeta_text(c.zeta_true),
+                "—" if c.fn_cb is None else zeta_text(c.zeta_cb),
                 "—" if c.mac is None else f"{c.mac:.3f}",
             ]
             for col, text in enumerate(cells):
@@ -164,6 +171,9 @@ class ComparisonTable(QtWidgets.QTableWidget):
                     item.setForeground(pg.mkColor(MODE_COLORS[r % len(MODE_COLORS)]))
                 elif col == 3 and err is not None:
                     item.setForeground(pg.mkColor(error_color(err)))
+                elif col == 5 and c.zeta_error is not None:
+                    item.setForeground(pg.mkColor(error_color(c.zeta_error)))
+                    item.setToolTip(f"{100 * c.zeta_error:+.3g}% vs ζ true")
                 elif c.fn_cb is None:
                     item.setForeground(pg.mkColor("#999"))
                 self.setItem(r, col, item)
@@ -171,6 +181,10 @@ class ComparisonTable(QtWidgets.QTableWidget):
         height += sum(self.rowHeight(r) for r in range(self.rowCount()))
         self.setFixedHeight(height)
         self.selectRow(min(selected, len(comparisons) - 1))
+
+
+def zeta_text(zeta: float | None) -> str:
+    return "overdamped" if zeta is None else f"{zeta:.4f}"
 
 
 def error_color(err: float) -> str:
@@ -501,8 +515,10 @@ class SubstructuringPage(QtWidgets.QWidget):
             else ""
         )
         worst = max((c.error for c in comparisons if c.error is not None), default=0.0)
+        worst_zeta = max((c.zeta_error for c in comparisons if c.zeta_error is not None), key=abs, default=0.0)
         return (
             f"Reduced model: <b>{model.n_red} DOFs</b> instead of {n} "
             f"({model.n_modal} modal + {model.boundary.size} boundary): [{coords}]. {kind} "
-            f"Largest frequency error: <b style='color:{error_color(worst)}'>{100 * worst:.3g}%</b>."
+            f"Largest frequency error: <b style='color:{error_color(worst)}'>{100 * worst:.3g}%</b>; "
+            f"damping ratio: <b style='color:{error_color(worst_zeta)}'>{100 * worst_zeta:+.3g}%</b>."
         )

@@ -271,3 +271,17 @@ def test_craig_bampton_damping():
     exact = craig_bampton(s, [3], interior_counts(s.n, [3]))
     true = [m.damped.eigenvalue for m in modal_analysis(s).modes]
     np.testing.assert_allclose(damped_poles(exact.M, exact.C, exact.K), true, rtol=1e-8)
+
+
+def test_compare_modes_damping_ratios():
+    from vib_tutorial.core import compare_modes, craig_bampton, interior_counts
+
+    s = ChainSystem([1.0] * 8, [400.0] * 8, [15.0] + [2.0] * 7)
+    full = modal_analysis(s)
+    exact = compare_modes(craig_bampton(s, [3], interior_counts(s.n, [3])), full)
+    for c in exact:
+        assert c.zeta_cb == pytest.approx(c.zeta_true, rel=1e-8)
+    reduced = compare_modes(craig_bampton(s, [3], [1, 1]), full)
+    assert reduced[0].zeta_error == pytest.approx(0.0, abs=0.05)
+    assert abs(reduced[3].zeta_error) > 0.2  # truncation loses damping faster than frequency accuracy
+    assert reduced[4].zeta_cb is None and reduced[4].zeta_true is not None

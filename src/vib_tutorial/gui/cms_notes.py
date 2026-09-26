@@ -8,7 +8,7 @@ from ..core import (
     CraigBamptonModel,
     ModalResult,
     Substructure,
-    damped_poles,
+    compare_modes,
     substructure_damping,
 )
 from ..core.modal import TWO_PI
@@ -433,25 +433,22 @@ def _damped_comparison(model: CraigBamptonModel, full: ModalResult | None) -> st
            "<p>The frequencies above ignore damping. The reduced model does include it: Ĉ is used "
            "for the FRF on the Modes &amp; FRF tab, and the damped eigenvalues of "
            "M̂η̈ + Ĉη̇ + K̂η = 0 give its damping ratios. Both columns are exact (state-space) "
-           "values, so any difference comes from the reduction alone.</p>"]
+           "values, so any difference comes from the reduction alone. The comparison table on the left shows the same two columns.</p>"]
     if full is None:
         return "".join(out)
-    poles = damped_poles(model.M, model.C, model.K)
-    true = [m.damped for m in full.modes if m.damped is not None]
     rows = ["<table border='1' cellspacing='0' cellpadding='3'>"
-            "<tr><th>Mode</th><th>ζ true</th><th>ζ CB</th><th>f<sub>d</sub> true [Hz]</th>"
-            "<th>f<sub>d</sub> CB [Hz]</th></tr>"]
-    for r, t in enumerate(true):
-        cells = [str(r + 1), f"{t.zeta:.4f}"]
-        if r < poles.size:
-            p = poles[r]
-            z = -p.real / abs(p)
-            err = (z - t.zeta) / t.zeta if t.zeta > 0 else 0.0
-            color = "#2a7d2a" if abs(err) < 1e-3 else "#b07000" if abs(err) < 0.05 else "#c1121f"
-            cells += [f"<span style='color:{color}'>{z:.4f}</span>", f"{t.fd_hz:.4g}", f"{p.imag / TWO_PI:.4g}"]
+            "<tr><th>Mode</th><th>ζ true</th><th>ζ CB</th><th>ζ error</th></tr>"]
+    for c in compare_modes(model, full):
+        cells = [str(c.index), "overdamped" if c.zeta_true is None else f"{c.zeta_true:.4f}"]
+        if c.fn_cb is None:
+            cells += ["<span style='color:#999'>not in model</span>", "—"]
+        elif c.zeta_cb is None:
+            cells += ["overdamped", "—"]
         else:
-            cells += ["<span style='color:#999'>not in model</span>", f"{t.fd_hz:.4g}", "—"]
-        rows.append("<tr>" + "".join(f"<td align='right'>{c}</td>" for c in cells) + "</tr>")
+            err = c.zeta_error
+            color = "#000" if err is None else "#2a7d2a" if abs(err) < 1e-3 else "#b07000" if abs(err) < 0.05 else "#c1121f"
+            cells += [f"{c.zeta_cb:.4f}", "—" if err is None else f"<span style='color:{color}'>{100 * err:+.3g}%</span>"]
+        rows.append("<tr>" + "".join(f"<td align='right'>{x}</td>" for x in cells) + "</tr>")
     rows.append("</table>")
     out.append("".join(rows))
     out.append("<p>With stiffness-proportional damping (the default), ζ<sub>r</sub> = βω<sub>r</sub>/2, "
