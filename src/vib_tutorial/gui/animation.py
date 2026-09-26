@@ -129,8 +129,12 @@ class ChainView(pg.PlotWidget):
                 label.setZValue(6)
                 self._labels.append(self._add(label))
             self._n = n
-            self.setXRange(-0.25, n * SPACING + 0.6, padding=0)
-            self.setYRange(-0.6, 0.75, padding=0)
+            # Set both axes in one call: with the aspect ratio locked, separate
+            # setXRange/setYRange calls let the second one shrink the first,
+            # cropping the chain once it's wider than the widget's shape.
+            self.setRange(
+                QtCore.QRectF(-0.25, -0.6, n * SPACING + 0.85, 1.35), padding=0
+            )
             self._scale_bar.setData([0.05, 0.05 + MAX_SWING], [-0.55, -0.55])
             self._scale_text.setPos(0.1 + MAX_SWING, -0.55)
 

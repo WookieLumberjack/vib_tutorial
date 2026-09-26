@@ -89,3 +89,16 @@ def test_auto_scale_gain_is_bounded(app):
     for _ in range(2000):  # vibration decayed to numerical noise
         view.update_state(np.full(4, 1e-20), 1e-20, 0.0, 0, 1.0)
     assert view.gain <= MAX_SWING / MIN_AUTO_PEAK * (1 + 1e-9)
+
+
+def test_chain_view_fits_all_masses(app):
+    import numpy as np
+
+    from vib_tutorial.gui.animation import SPACING, ChainView
+
+    view = ChainView()
+    view.resize(700, 300)  # wide-but-short, like the app's animation pane
+    for n in (4, 8, 2, 6):
+        view.set_masses(np.ones(n))
+        (x0, x1), _ = view.viewRange()
+        assert x0 <= 0 and x1 >= n * SPACING + 0.2, f"n={n}: x-range {x0:.2f}..{x1:.2f} crops the chain"
