@@ -5,6 +5,7 @@ notebooks, and tests.
 """
 
 from .forcing import ForceController, ForceKind, ForceSettings
+from .frf_matrix import ModalTerm, frf_matrix, modal_frf_terms
 from .modal import ComplexMode, ModalResult, Mode, frf, modal_analysis, receptance
 from .model import ChainSystem, assemble_chain, state_space
 from .simulator import Simulator, foh_discretize
@@ -31,6 +32,7 @@ __all__ = [
     "ForceKind",
     "ForceSettings",
     "ModalResult",
+    "ModalTerm",
     "Mode",
     "ModeComparison",
     "Simulator",
@@ -42,8 +44,10 @@ __all__ = [
     "damped_poles",
     "foh_discretize",
     "frf",
+    "frf_matrix",
     "interior_counts",
     "modal_analysis",
+    "modal_frf_terms",
     "receptance",
     "reduced_frf",
     "state_space",
