@@ -90,6 +90,38 @@ the damped system using the <i>undamped</i> mode shapes. When damping is proport
 two methods agree to machine precision, as the table shows. The time simulation uses the
 full M, C, K, so it always shows the true behaviour.</p>
 
+<h3>The state-space method: 2N eigenvalues</h3>
+<p>Choose <i>Method → State-space</i> on the Modal analysis tab to see the full damped
+solution directly. Writing the N second-order equations as 2N first-order ones doubles
+the size of the eigenproblem, so there are <b>2N eigenvalues</b> and 2N eigenvectors:</p>
+<ul>
+<li><b>Conjugate pairs.</b> A is real, so complex eigenvalues come in pairs
+λ = σ + iω<sub>d</sub> and λ* = σ − iω<sub>d</sub>, with conjugate shapes ψ and ψ*.
+Neither one alone is a real motion; together they are:
+x(t) = ψe<sup>λt</sup> + ψ*e<sup>λ*t</sup> = 2 Re(ψ e<sup>λt</sup>). In the
+complex-plane plot the arrows of λ turn anticlockwise and those of λ* clockwise; their
+real parts, the displacements, are identical. Each oscillatory mode of the classical
+table corresponds to one pair.</li>
+<li><b>Real eigenvalues.</b> A heavily damped (overdamped) mode gives two real
+eigenvalues instead of a pair: pure exponential decays with time constant
+τ = −1/λ and no oscillation. A chain that is free to slide (k<sub>1</sub> = 0)
+has λ = 0: rigid-body motion.</li>
+<li><b>The eigenvector includes velocities.</b> The state eigenvector is
+[ψ ; λψ]. To start the chain in exactly one mode you must set the displacements
+<i>and</i> the velocities: x(0) = Re(ψ), ẋ(0) = Re(λψ). That is what <i>Release
+selected mode</i> does in this method. It is why a complex mode can be released cleanly
+with non-proportional damping, while the classical release (real shape, at rest) excites
+other modes too.</li>
+<li><b>Orthogonality.</b> A is not symmetric, so the ψ are not orthogonal in the
+usual sense. Decoupling the equations needs the <i>left</i> eigenvectors of A as well
+(or the symmetric "Duncan" form of the state equations). This is why the classical
+method, with its simple Φ<sup>T</sup>MΦ = I, is preferred whenever damping is light
+or nearly proportional.</li>
+</ul>
+<p>The <b>phase</b> column next to the complex-plane plot gives each mass's phase
+relative to the largest one. With proportional damping every phase is 0° or 180°
+(a real mode); otherwise the masses reach their peaks at different times.</p>
+
 <h3>Try it</h3>
 <ol>
 <li>Set c<sub>1</sub> = 15 and leave the other dampers at 2. The note switches to
@@ -100,6 +132,15 @@ system, other modes are excited too and the shape drifts as it decays.</li>
 <li>Set c<sub>1</sub> back to 2, so every c<sub>i</sub>/k<sub>i</sub> is equal again
 (stiffness-proportional damping), and repeat. The coupling returns to 0 and the release
 stays in one clean shape.</li>
+<li>Set c<sub>1</sub> = 15 again and switch <i>Method</i> to <i>State-space</i>. The
+table now has 2N rows in conjugate pairs. Select a row and tick <i>Animate mode
+shapes</i>: the arrows fan out (phases other than 0°/180°), and the shape never passes
+through zero everywhere at once.</li>
+<li>Select λ and then λ* and release each. The motion is identical, and it now stays
+in one shape as it decays: the complex mode is an exact mode of the damped system.</li>
+<li>Raise c<sub>1</sub> to 200. One pair turns into two real eigenvalues (overdamped),
+one slow and one very fast, listed with their time constants. There are still 2N in
+total.</li>
 </ol>
 """
 

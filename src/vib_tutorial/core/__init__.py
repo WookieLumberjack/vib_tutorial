@@ -5,13 +5,13 @@ notebooks, and tests.
 """
 
 from .forcing import ForceController, ForceKind, ForceSettings
-from .modal import DampedPole, ModalResult, Mode, frf, modal_analysis
+from .modal import ComplexMode, ModalResult, Mode, frf, modal_analysis
 from .model import ChainSystem, assemble_chain, state_space
 from .simulator import Simulator, foh_discretize
 
 __all__ = [
     "ChainSystem",
-    "DampedPole",
+    "ComplexMode",
     "ForceController",
     "ForceKind",
     "ForceSettings",
