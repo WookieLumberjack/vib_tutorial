@@ -29,6 +29,9 @@ uv run pytest         # run the tests
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) above time histories of every mass's displacement and the applied force |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
+A second page, **Substructuring (Craig–Bampton)**, reduces the same chain by component
+mode synthesis (below).
+
 ## What you can do
 
 - **Edit any mass, stiffness, or damping value while the simulation runs.** The state is
@@ -76,6 +79,43 @@ The receptance |X_i / F| and phase of every mass for a force at the selected mas
 natural frequencies are dotted and the current drive frequency is dashed.
 
 <img src="docs/images/frequency_response.png" alt="Frequency response magnitude and phase" width="420">
+
+### Substructuring (Craig–Bampton)
+
+The second page cuts the chain at one *interface* mass into substructure A (grounded) and
+B (free end). The boundary (master) DOFs are the interface and the last mass, which is
+where the force is applied, so the loaded DOF stays physical. Each substructure keeps a
+chosen number of its fixed-interface normal modes plus one constraint mode per boundary
+DOF, and the reduced substructures are assembled on the shared interface DOF.
+
+- **Comparison table**: true vs reduced natural frequencies, the error (never negative:
+  CB frequencies are upper bounds), and the MAC of the recovered shape.
+- **Substructures on their own**: each substructure's fixed-interface modes (natural
+  frequency and exact damping ratio with its boundary held), whether each is kept, and the
+  coupled mode it becomes (largest share of that mode's strain energy).
+- **Component shape overlay**: click a row of that table to draw the clamped component
+  shape over the coupled mode it becomes.
+- **Basis (T)**: every column of T drawn as a shape along the chain, the set of shapes every
+  reduced-model motion is built from.
+- **Modes & FRF**: the selected mode shape, true vs CB, and the tip and interface
+  receptance of both models for the force at the tip.
+- **Matrices (step by step)**: every stage with the current numbers: the full K and M,
+  each substructure's partitioned matrices, the fixed-interface modes (kept and discarded),
+  the constraint modes Ψ, the transformation T, the reduced matrices, and the assembled
+  reduced model.
+- **Theory**: what a basis is (with a 2-mass worked example) and why Craig–Bampton chooses
+  its shapes, original vs substructured formulation side by side, Hurty vs Craig–Bampton,
+  Guyan reduction as the zero-mode case, and a "Try it" walkthrough, and a notation table.
+- **Presets**: *Guyan (0 modes)* and *All modes (exact)*.
+
+For each substructure, partitioned into interior $i$ and boundary $b$ DOFs,
+
+$$\begin{bmatrix}x_i\\ x_b\end{bmatrix} = \underbrace{\begin{bmatrix}\Phi_k & \Psi\\ 0 & I\end{bmatrix}}_{T}\begin{bmatrix}q\\ x_b\end{bmatrix},
+\qquad \Psi = -K_{ii}^{-1}K_{ib},\qquad \hat M = T^TMT,\ \hat K = T^TKT$$
+
+where $\Phi_k$ are the $k$ lowest mass-normalized modes of $K_{ii}\phi = \omega^2 M_{ii}\phi$.
+$\hat K$ is block diagonal, $\mathrm{diag}(\omega_k^2)$ and $K_{bb} - K_{bi}K_{ii}^{-1}K_{ib}$, while
+$\hat M$ couples $q$ to $x_b$.
 
 ## The math, briefly
 
@@ -133,6 +173,8 @@ step size adapts to the fastest mode, the drive frequency and the pulse length.
 - `core/modal.py`: classical modes (`scipy.linalg.eigh`), all 2N state-space eigenpairs
   (`scipy.linalg.eig`), the MAC pairing, and the frequency response.
 - `core/simulator.py`: the exact first-order-hold time stepper.
+- `core/substructure.py`: Craig–Bampton substructuring, mode comparison (frequency error,
+  MAC) and the reduced-model FRF.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed.
 
@@ -144,6 +186,12 @@ from vib_tutorial.core import ChainSystem, modal_analysis
 res = modal_analysis(ChainSystem([1.0] * 4, [400.0] * 4, [15.0, 2.0, 2.0, 2.0]))
 [(m.fn_hz, m.zeta_modal, m.damped.zeta) for m in res.modes]    # classical, N modes
 [(m.eigenvalue, m.shape) for m in res.complex_modes]           # state-space, 2N modes
+
+from vib_tutorial.core import compare_modes, craig_bampton
+
+s = ChainSystem.uniform(8)
+cb = craig_bampton(s, interfaces=[3], n_kept=[1, 1])          # cut at m4, 1 mode each
+[(c.fn_true, c.fn_cb, c.mac) for c in compare_modes(cb, modal_analysis(s))]
 ```
 
 ## Ideas for extension

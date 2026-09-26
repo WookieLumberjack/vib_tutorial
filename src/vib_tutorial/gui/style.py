@@ -26,5 +26,8 @@ MODE_COLORS = [
     "#ff595e",
 ]
 
+# Substructures A, B on the Substructuring page (bands, springs, and labels).
+SUB_COLORS = ["#3a6ea5", "#d17a00", "#4f8f3a"]
+
 FORCE_COLOR = "#c1121f"
 STRUCTURE_COLOR = "#333333"
