@@ -218,6 +218,55 @@ def test_substructuring_page(app):
     w.close()
 
 
+def test_substructuring_free_interface(app):
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    page = w.cms_page
+    w.show()
+    w.pages.setCurrentWidget(page)
+    page.dof.setValue(8)
+    app.processEvents()
+    assert page.compare.table.rowCount() == 8
+    cb_error = page.comparisons[0].error
+
+    # Rubin: same size, B's rigid-body mode always kept, more accurate on mode 1.
+    page.method.setCurrentIndex(page.method.findData("rubin"))
+    assert page.model.method == "rubin" and page.model.labels == ["q_A1", "q_B1", "x4", "x8"]
+    assert page.kept[1].minimum() == 1 and page.model.substructures[1].n_rigid == 1
+    assert page.table.horizontalHeaderItem(5).text() == "ζ Rubin"
+    assert 0 < page.comparisons[0].error < cb_error
+    assert page.component_table.rowCount() == 9 and page.component_table.item(4, 1).text() == "0 (rigid)"
+    assert "residual attachment" in page.basis.plots.ci.getItem(1, 0).titleLabel.text
+    text = page.matrices.toPlainText()
+    assert "Residual flexibility" in text and "split half and half" in text
+    page.guyan_button.click()
+    assert [s.value() for s in page.kept] == [0, 1] and page.guyan_button.text() == "Fewest modes"
+    page.exact_button.click()
+    assert all(c.error == pytest.approx(0.0, abs=1e-9) for c in page.comparisons)
+
+    # MacNeal: massless boundary, so fewer modes than coordinates, and never exact.
+    page.method.setCurrentIndex(page.method.findData("macneal"))
+    assert page.model.n_red == 8 and page.model.omegas.size == 6 and "6 modes" in page.summary.text()
+    assert page.exact_button.text() == "All modes"
+    assert max(abs(c.error) for c in page.comparisons if c.error is not None) > 0.01
+
+    # Compare methods: every method in the table, and a convergence curve for the selected mode.
+    page.table.selectRow(2)
+    assert all("%" in page.compare.table.item(2, col).text() for col in (2, 3, 4))
+    assert len(page.compare.plot.getPlotItem().listDataItems()) >= 3
+    assert "Mode 3" in page.compare.plot.getPlotItem().titleLabel.text
+
+    # A floating interior (k1 = k2 = 0): Craig-Bampton fails, the free-interface methods do not.
+    w.params.rows[0][2].setValue(0.0)
+    w.params.rows[1][2].setValue(0.0)
+    assert page.model is not None and page.model.substructures[0].n_rigid == 2
+    assert page.compare.current["craig-bampton"] is None and "Craig–Bampton" in page.compare.header.text()
+    page.method.setCurrentIndex(page.method.findData("craig-bampton"))
+    assert page.model is None and "K_ii" in page.summary.text()
+    w.close()
+
+
 def test_frf_matrix_page(app):
     import numpy as np
 

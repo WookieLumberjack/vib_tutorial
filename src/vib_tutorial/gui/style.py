@@ -41,3 +41,6 @@ ENERGY_COLORS = {
     "work": FORCE_COLOR,
     "dissipated": "#e76f51",
 }
+
+# Component mode synthesis methods, on the Substructuring page's comparison plot.
+METHOD_COLORS = {"craig-bampton": "#333333", "rubin": "#2a9d8f", "macneal": "#e76f51"}

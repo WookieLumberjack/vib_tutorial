@@ -197,7 +197,7 @@ def test_craig_bampton_structure_and_assembly():
         # Constraint modes: interior at static equilibrium, K_ii Psi + K_ib = 0.
         np.testing.assert_allclose(sub.block(sub.K, "i", "i") @ sub.Psi + sub.block(sub.K, "i", "b"), 0, atol=1e-9)
         k = sub.n_kept
-        np.testing.assert_allclose(sub.K_red[:k, :k], np.diag(sub.fixed_omegas[:k] ** 2), atol=1e-8)
+        np.testing.assert_allclose(sub.K_red[:k, :k], np.diag(sub.omegas[:k] ** 2), atol=1e-8)
         np.testing.assert_allclose(sub.K_red[:k, k:], 0, atol=1e-8)  # K^ is block diagonal
         np.testing.assert_allclose(sub.M_red[:k, :k], np.eye(k), atol=1e-12)
     # Assembling the reduced substructures = reducing the assembled model with the global T.
@@ -282,11 +282,11 @@ def test_compare_modes_damping_ratios():
     full = modal_analysis(s)
     exact = compare_modes(craig_bampton(s, [3], interior_counts(s.n, [3])), full)
     for c in exact:
-        assert c.zeta_cb == pytest.approx(c.zeta_true, rel=1e-8)
+        assert c.zeta_red == pytest.approx(c.zeta_true, rel=1e-8)
     reduced = compare_modes(craig_bampton(s, [3], [1, 1]), full)
     assert reduced[0].zeta_error == pytest.approx(0.0, abs=0.05)
     assert abs(reduced[3].zeta_error) > 0.2  # truncation loses damping faster than frequency accuracy
-    assert reduced[4].zeta_cb is None and reduced[4].zeta_true is not None
+    assert reduced[4].zeta_red is None and reduced[4].zeta_true is not None
 
 
 def test_component_modes_alone_and_coupled():
@@ -304,6 +304,111 @@ def test_component_modes_alone_and_coupled():
     assert all(0 < c.share <= 1 for c in comps)
     # Clamped damping ratio: exact for C = beta K, zeta = beta w / 2.
     assert a1.zeta == pytest.approx(0.005 * 2 * math.pi * a1.fn_hz / 2)
+
+
+def test_free_interface_structure_and_assembly():
+    from vib_tutorial.core import free_interface
+
+    s = _cb_system()
+    for residual_mass in (True, False):
+        model = free_interface(s, [2, 4], [1, 1, 1], residual_mass)
+        # The interface masses are split half and half; the pieces still sum to the full model.
+        for full, attr in zip(s.matrices(), "MCK"):
+            total = np.zeros((s.n, s.n))
+            for sub in model.substructures:
+                total[np.ix_(sub.dofs, sub.dofs)] += getattr(sub, attr)
+            np.testing.assert_allclose(total, full)
+        assert [sub.n_rigid for sub in model.substructures] == [0, 1, 1]  # B and C float
+        for sub in model.substructures:
+            k, ni = sub.n_kept, sub.ni
+            np.testing.assert_allclose(sub.Phi.T @ sub.M @ sub.Phi, np.eye(ni + sub.nb), atol=1e-10)
+            # x_b stays physical: the boundary rows of T are [0, I].
+            np.testing.assert_allclose(sub.T[ni:], np.hstack([np.zeros((sub.nb, k)), np.eye(sub.nb)]))
+            # Residual flexibility is orthogonal to the kept modes: K^_qq = W^2 + Phi_bk^T G_bb^-1 Phi_bk.
+            Gbb_inv = np.linalg.inv(sub.block(sub.G, "b", "b"))
+            Pbk = sub.Phi[ni:, :k]
+            np.testing.assert_allclose(sub.K_red[:k, :k], np.diag(sub.omegas[:k] ** 2) + Pbk.T @ Gbb_inv @ Pbk,
+                                       atol=1e-8)
+            np.testing.assert_allclose(sub.K_red[k:, k:], Gbb_inv, rtol=1e-9)
+        M, C, K = s.matrices()
+        np.testing.assert_allclose(model.K, model.T.T @ K @ model.T, atol=1e-8)
+        if residual_mass:  # Rubin is a Rayleigh-Ritz projection
+            np.testing.assert_allclose(model.M, model.T.T @ M @ model.T, atol=1e-10)
+        else:  # MacNeal: only the kept modes have mass
+            np.testing.assert_allclose(model.M, np.diag([1.0] * 3 + [0.0] * 3))
+            assert model.omegas.size == 3
+
+
+def test_rubin_is_exact_with_all_modes_and_an_upper_bound_otherwise():
+    from vib_tutorial.core import compare_modes, free_interface, interior_counts, kept_ranges
+
+    s = _cb_system()
+    full = modal_analysis(s)
+    assert kept_ranges(s, [3], "rubin") == [(0, 3), (1, 2)]  # B's rigid-body mode is always kept
+    assert kept_ranges(s, [3], "craig-bampton") == [(0, 3), (0, 2)]
+    exact = free_interface(s, [3], interior_counts(s.n, [3]))
+    np.testing.assert_allclose(exact.fn_hz, [m.fn_hz for m in full.modes], rtol=1e-9)
+    for kept in ([0, 1], [1, 1], [2, 2]):
+        errors = [c.error for c in compare_modes(free_interface(s, [3], kept), full) if c.error is not None]
+        assert len(errors) == sum(kept) + 2 and all(e >= -1e-12 for e in errors)
+    # Asking for fewer than the rigid-body modes keeps them anyway.
+    assert free_interface(s, [3], [0, 0]).substructures[1].n_kept == 1
+
+    # MacNeal drops the residual mass: fewer modes, and not exact even with every mode kept.
+    macneal = compare_modes(free_interface(s, [3], interior_counts(s.n, [3]), residual_mass=False), full)
+    assert sum(c.fn_red is not None for c in macneal) == 5
+    assert max(abs(c.error) for c in macneal if c.error is not None) > 1e-3
+
+
+def test_free_interface_beats_craig_bampton_on_the_lowest_mode():
+    from vib_tutorial.core import compare_modes, craig_bampton, free_interface
+
+    s = ChainSystem.uniform(8)
+    full = modal_analysis(s)
+    cb = compare_modes(craig_bampton(s, [3], [1, 1]), full)
+    rubin = compare_modes(free_interface(s, [3], [1, 1]), full)
+    assert 0 < rubin[0].error < cb[0].error / 5
+
+
+def test_free_interface_frf_is_exact_statically_and_with_all_modes():
+    from vib_tutorial.core import free_interface, interior_counts, reduced_frf
+
+    s = _cb_system()
+    tip = s.n - 1
+    f = np.array([0.5, 1.7, 3.3])
+    exact = free_interface(s, [2], interior_counts(s.n, [2]))
+    np.testing.assert_allclose(reduced_frf(exact, f, tip), frf(s, f, tip), rtol=1e-8)
+    # The residual flexibility restores the static flexibility of the discarded modes.
+    for residual_mass in (True, False):
+        fewest = free_interface(s, [2], [0, 0], residual_mass)
+        np.testing.assert_allclose(reduced_frf(fewest, np.array([0.0]), tip), frf(s, np.array([0.0]), tip),
+                                   rtol=1e-9)
+
+
+def test_free_interface_handles_a_floating_interior():
+    from vib_tutorial.core import compare_modes, free_interface
+
+    # k1 = k2 = 0: m1 floats even with the interface held, which Craig-Bampton cannot reduce.
+    # Free-interface modes just treat it as a second rigid-body mode of A.
+    s = ChainSystem([1.0] * 5, [0.0, 0.0, 400.0, 400.0, 400.0], [2.0] * 5)
+    model = free_interface(s, [2], [2, 1])
+    assert model.substructures[0].n_rigid == 2
+    cmp = compare_modes(model, modal_analysis(s))
+    np.testing.assert_allclose([c.fn_red for c in cmp], [c.fn_true for c in cmp], atol=1e-6)
+
+
+def test_free_component_modes_share_the_kinetic_energy():
+    from vib_tutorial.core import component_modes, free_interface
+
+    s = ChainSystem.uniform(8)
+    model = free_interface(s, [3], [1, 1])
+    comps = component_modes(model, modal_analysis(s))
+    # Free modes are complete over the whole substructure: 4 in A, 5 in B (with its interface).
+    assert [(c.substructure, c.index) for c in comps] == [("A", i) for i in range(1, 5)] + [("B", i) for i in range(1, 6)]
+    b1 = comps[4]
+    assert b1.fn_hz == pytest.approx(0.0, abs=1e-6) and b1.zeta is None and b1.kept  # rigid body
+    assert b1.shape == pytest.approx(np.ones(5))
+    assert all(0 < c.share <= 1 for c in comps)
 
 
 def test_frf_matrix_is_symmetric_and_matches_columns():

@@ -30,8 +30,8 @@ uv run pytest         # run the tests
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
 Two more pages work on the same chain: **FRF matrix** shows every term of the receptance
-matrix and how the modes build it up, and **Substructuring (Craig–Bampton)** reduces the
-chain by component mode synthesis (both below).
+matrix and how the modes build it up, and **Substructuring (CMS)** reduces the chain by
+component mode synthesis: Craig–Bampton, Rubin or MacNeal (both below).
 
 ## What you can do
 
@@ -140,33 +140,49 @@ plots (row: response, column: force), on shared axes so their sizes compare dire
 
 ![FRF matrix page: mode 4 left out of the sum; the end-to-end term H14 misses above 5 Hz](docs/images/frf_matrix.png)
 
-### Substructuring (Craig–Bampton)
+### Substructuring (component mode synthesis)
 
-The second page cuts the chain at one *interface* mass into substructure A (grounded) and
-B (free end). The boundary (master) DOFs are the interface and the last mass, which is
-where the force is applied, so the loaded DOF stays physical. Each substructure keeps a
-chosen number of its fixed-interface normal modes plus one constraint mode per boundary
-DOF, and the reduced substructures are assembled on the shared interface DOF.
+The *Substructuring* page cuts the chain at one *interface* mass into substructure A
+(grounded) and B (free end). The boundary (master) DOFs are the interface and the last
+mass, which is where the force is applied, so the loaded DOF stays physical. Each
+substructure keeps a chosen number of its own modes plus one static shape per boundary
+DOF, and the reduced substructures are assembled on the shared interface DOF. The
+*Method* selector chooses the component modes:
 
-- **Comparison table**: true vs reduced natural frequencies, the error (never negative:
-  CB frequencies are upper bounds), and the MAC of the recovered shape.
-- **Substructures on their own**: each substructure's fixed-interface modes (natural
-  frequency and exact damping ratio with its boundary held), whether each is kept, and the
-  coupled mode it becomes (largest share of that mode's strain energy).
+- **Craig–Bampton** (fixed interface): modes with the boundary held, plus constraint modes.
+- **Rubin** (free interface): modes with the boundary free, as a modal test would measure
+  them, plus the *residual flexibility* of the discarded modes. B floats on its own, so its
+  rigid-body mode is always kept.
+- **MacNeal** (free interface): as Rubin, but the residual flexibility is massless, so the
+  boundary DOFs carry no inertia and the model has only as many modes as modes kept.
+
+Everything on the page follows the selector:
+
+- **Comparison table**: true vs reduced natural frequencies, the error (never negative for
+  Craig–Bampton and Rubin, whose frequencies are upper bounds), and the MAC of the recovered
+  shape.
+- **Substructures on their own**: each substructure's own modes (natural frequency and
+  exact damping ratio with its boundary held, or free), whether each is kept, and the
+  coupled mode it becomes (largest share of that mode's energy).
 - **Component shape overlay**: click a row of that table to draw the clamped component
   shape over the coupled mode it becomes.
 - **Basis (T)**: every column of T drawn as a shape along the chain, the set of shapes every
   reduced-model motion is built from.
-- **Modes & FRF**: the selected mode shape, true vs CB, and the tip and interface
+- **Modes & FRF**: the selected mode shape, true vs reduced, and the tip and interface
   receptance of both models for the force at the tip.
+- **Compare methods**: the same cut reduced by all three methods, with the frequency error of
+  every mode, and how the selected mode's error falls as modes are added, one at a time.
 - **Matrices (step by step)**: every stage with the current numbers: the full K and M,
-  each substructure's partitioned matrices, the fixed-interface modes (kept and discarded),
-  the constraint modes Ψ, the transformation T, the reduced matrices, and the assembled
-  reduced model.
+  each substructure's partitioned matrices, its component modes (kept and discarded), the
+  constraint modes Ψ or the residual flexibility G<sub>d</sub>, the transformation T, the
+  reduced matrices, and the assembled reduced model.
 - **Theory**: what a basis is (with a 2-mass worked example) and why Craig–Bampton chooses
   its shapes, original vs substructured formulation side by side, Hurty vs Craig–Bampton,
-  Guyan reduction as the zero-mode case, and a "Try it" walkthrough, and a notation table.
-- **Presets**: *Guyan (0 modes)* and *All modes (exact)*.
+  Guyan reduction as the zero-mode case, why free-interface modes need residual flexibility,
+  MacNeal vs Rubin, the three methods side by side, a "Try it" walkthrough, and a notation
+  table.
+- **Presets**: *Guyan (0 modes)* (*Fewest modes* for the free-interface methods) and *All
+  modes*.
 
 For each substructure, partitioned into interior $i$ and boundary $b$ DOFs,
 
@@ -176,6 +192,19 @@ $$\begin{bmatrix}x_i\\ x_b\end{bmatrix} = \underbrace{\begin{bmatrix}\Phi_k & \P
 where $\Phi_k$ are the $k$ lowest mass-normalized modes of $K_{ii}\phi = \omega^2 M_{ii}\phi$.
 $\hat K$ is block diagonal, $\mathrm{diag}(\omega_k^2)$ and $K_{bb} - K_{bi}K_{ii}^{-1}K_{ib}$, while
 $\hat M$ couples $q$ to $x_b$.
+
+The free-interface methods use the lowest $k$ modes $\Phi_k$ of the whole substructure,
+$K\phi = \omega^2 M\phi$, and keep the static response of the discarded ones through the
+residual flexibility $G_d = \Phi_d\Lambda_d^{-1}\Phi_d^T$. Writing
+$x = \Phi_k q + G_d E_b f_b$ and eliminating the interface forces $f_b$ with the boundary
+rows gives a transformation of the same shape as Craig–Bampton's:
+
+$$T = \begin{bmatrix}\Phi_{ik} - R\,\Phi_{bk} & R\\ 0 & I\end{bmatrix},\qquad R = G_{ib}G_{bb}^{-1}$$
+
+Rubin's method projects with it, $\hat M = T^TMT$; MacNeal's drops the residual mass,
+$\hat M = \mathrm{diag}(I, 0)$. Both have $\hat K = T^TKT$, which now couples $q$ to $x_b$.
+
+![Compare methods: the same cut reduced three ways; Craig–Bampton and Rubin converge to the exact mode 3, MacNeal does not](docs/images/substructuring_compare.png)
 
 ## The math, briefly
 
@@ -267,8 +296,8 @@ $w_k^T W w_k$, so the energy balance closes to rounding error.
 - `core/frf_matrix.py`: the full receptance matrix and its modal (pole–residue) terms.
 - `core/simulator.py`: the exact first-order-hold time stepper and its exact energy ledger.
 - `core/energy.py`: kinetic, potential and stored energy, and the energy in each mode.
-- `core/substructure.py`: Craig–Bampton substructuring, mode comparison (frequency error,
-  MAC) and the reduced-model FRF.
+- `core/substructure.py`: component mode synthesis (Craig–Bampton, Rubin, MacNeal), mode
+  comparison (frequency error, MAC) and the reduced-model FRF.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed.
 
@@ -301,7 +330,12 @@ from vib_tutorial.core import compare_modes, craig_bampton
 
 s = ChainSystem.uniform(8)
 cb = craig_bampton(s, interfaces=[3], n_kept=[1, 1])          # cut at m4, 1 mode each
-[(c.fn_true, c.fn_cb, c.mac) for c in compare_modes(cb, modal_analysis(s))]
+[(c.fn_true, c.fn_red, c.mac) for c in compare_modes(cb, modal_analysis(s))]
+
+from vib_tutorial.core import free_interface
+
+rubin = free_interface(s, interfaces=[3], n_kept=[1, 1])       # B keeps its rigid-body mode
+macneal = free_interface(s, [3], [1, 1], residual_mass=False)  # massless residual: 2 modes
 ```
 
 ## Ideas for extension
@@ -318,5 +352,3 @@ cb = craig_bampton(s, interfaces=[3], n_kept=[1, 1])          # cut at m4, 1 mod
 - Substructuring: more than one interface (three or more substructures); the core
   (`craig_bampton`) already accepts several cuts, so only the controls and schematic need
   extending
-- Substructuring: free-interface component mode synthesis (MacNeal, Rubin) as a comparison
-  with the fixed-interface Craig–Bampton method

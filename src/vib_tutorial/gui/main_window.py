@@ -225,7 +225,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pages.addTab(self.sim_page, "Simulation && modal analysis")
         self.frf_page = FrfMatrixPage()
         self.pages.addTab(self.frf_page, "FRF matrix")
-        self.pages.addTab(self.cms_page, "Substructuring (Craig–Bampton)")
+        self.pages.addTab(self.cms_page, "Substructuring (CMS)")
         self.setCentralWidget(self.pages)
         self.resize(1700, 900)
 
