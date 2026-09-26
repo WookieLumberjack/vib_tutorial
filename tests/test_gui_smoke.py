@@ -49,6 +49,13 @@ def test_window_interactions(app):
     w.table.selectRow(2)
     w._release_mode()
     assert abs(w.sim.displacement).max() == pytest.approx(0.02)
+    # Releasing a mode fits the plot window to it (auto-scale on by default)...
+    assert w.controls.window.value() == pytest.approx(4 / w.modal.modes[2].fn_hz, abs=0.005)
+    # ...but not when auto-scale is off.
+    w.controls.auto_scale.setChecked(False)
+    w.table.selectRow(5)
+    w._release_mode()
+    assert w.controls.window.value() == pytest.approx(4 / w.modal.modes[2].fn_hz, abs=0.005)
     w.close()
 
 

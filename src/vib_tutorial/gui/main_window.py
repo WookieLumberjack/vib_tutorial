@@ -79,6 +79,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "decays at the rate set by ζ.</p>"
             "<p>With <b>non-proportional</b> damping the real (undamped) shape is not an exact "
             "mode, so other modes are excited too and the shape drifts as it decays.</p>"
+            "<p>While <i>Auto-scale animation and plots</i> is on, the plot window is also "
+            "fitted to this mode (Simulation \u2192 Fit window cycles).</p>"
         )
         release.clicked.connect(self._release_mode)
         modal_tab = QtWidgets.QWidget()
@@ -195,7 +197,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.table.selectRow(0)
         self.force.switch_off()
         self.force_panel.refresh()
-        self.sim.set_displacement(self.modal.modes[r].shape * self.release_amp.value() * 1e-3)
+        mode = self.modal.modes[r]
+        self.sim.set_displacement(mode.shape * self.release_amp.value() * 1e-3)
+        if self.controls.auto_scale.isChecked():
+            self.controls.fit_to_mode(mode.index)
 
     # ------------------------------------------------------------ main loop
     def _frame(self) -> None:

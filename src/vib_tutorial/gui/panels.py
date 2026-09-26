@@ -22,13 +22,15 @@ def spin(lo: float, hi: float, value: float, decimals: int, suffix: str = "") ->
     return box
 
 
-def fill_mode_combo(combo: QtWidgets.QComboBox, result: ModalResult, placeholder: str) -> None:
-    """List the modes in a one-shot "pick a mode" combo; item data is fn in Hz."""
+def fill_mode_combo(
+    combo: QtWidgets.QComboBox, result: ModalResult, placeholder: str, data=lambda mode: mode.fn_hz
+) -> None:
+    """List the modes in a one-shot "pick a mode" combo; item data is data(mode)."""
     combo.clear()
     combo.addItem(placeholder)
     for mode in result.modes:
         if mode.fn_hz > 0:  # skip rigid-body modes
-            combo.addItem(f"Mode {mode.index} ({mode.fn_hz:.3g} Hz)", mode.fn_hz)
+            combo.addItem(f"Mode {mode.index} ({mode.fn_hz:.3g} Hz)", data(mode))
 
 
 class ParameterPanel(QtWidgets.QGroupBox):
@@ -273,12 +275,14 @@ class SimControls(QtWidgets.QGroupBox):
         fit_row.addWidget(self.fit_window, 1)
         fit_tip = (
             "Set the plot window to show this many cycles of a mode (window = cycles / f\u2099).\n"
-            "Changing the cycle count re-fits to the last mode picked."
+            "Changing the cycle count re-fits to the last mode picked.\n"
+            "Releasing a mode also fits to it while auto-scale is on."
         )
         for w in (self.cycles, self.fit_window):
             w.setToolTip(fit_tip)
         form.addRow("Fit window:", fit_row)
-        self._fit_item: int | None = None  # combo index of the last mode picked
+        self._fit_mode: int | None = None  # number of the last mode fitted to
+        self._mode_freqs: dict[int, float] = {}  # mode number -> fn [Hz]
 
         self.auto_scale = QtWidgets.QCheckBox("Auto-scale animation and plots")
         self.auto_scale.setChecked(True)
@@ -290,17 +294,23 @@ class SimControls(QtWidgets.QGroupBox):
         form.addRow("Sim time:", self.time_label)
 
     def set_modes(self, result: ModalResult) -> None:
-        fill_mode_combo(self.fit_window, result, "mode…")
+        fill_mode_combo(self.fit_window, result, "mode\u2026", data=lambda mode: mode.index)
+        self._mode_freqs = {m.index: m.fn_hz for m in result.modes if m.fn_hz > 0}
+
+    def fit_to_mode(self, mode_number: int) -> None:
+        """Size the plot window to show `cycles` periods of the given mode."""
+        self._fit_mode = mode_number
+        self._apply_fit()
 
     def _on_fit_window(self, index: int) -> None:
-        if self.fit_window.itemData(index):
-            self._fit_item = index
-            self._apply_fit()
+        mode_number = self.fit_window.itemData(index)
+        if mode_number:
+            self.fit_to_mode(mode_number)
         self.fit_window.setCurrentIndex(0)
 
     def _apply_fit(self) -> None:
         # Look the frequency up each time so it reflects the current parameters.
-        f = self.fit_window.itemData(self._fit_item) if self._fit_item else None
+        f = self._mode_freqs.get(self._fit_mode) if self._fit_mode else None
         if f:
             self.window.setValue(self.cycles.value() / f)
 
