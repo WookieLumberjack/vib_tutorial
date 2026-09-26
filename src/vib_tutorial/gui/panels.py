@@ -22,6 +22,15 @@ def spin(lo: float, hi: float, value: float, decimals: int, suffix: str = "") ->
     return box
 
 
+def fill_mode_combo(combo: QtWidgets.QComboBox, result: ModalResult, placeholder: str) -> None:
+    """List the modes in a one-shot "pick a mode" combo; item data is fn in Hz."""
+    combo.clear()
+    combo.addItem(placeholder)
+    for mode in result.modes:
+        if mode.fn_hz > 0:  # skip rigid-body modes
+            combo.addItem(f"Mode {mode.index} ({mode.fn_hz:.3g} Hz)", mode.fn_hz)
+
+
 class ParameterPanel(QtWidgets.QGroupBox):
     """Mass, spring and damper values for each element of the chain."""
 
@@ -169,10 +178,7 @@ class ForcePanel(QtWidgets.QGroupBox):
         self._apply()
 
     def set_modes(self, result: ModalResult) -> None:
-        self.tune.clear()
-        self.tune.addItem("Tune to…")
-        for mode in result.modes:
-            self.tune.addItem(f"Mode {mode.index} ({mode.fn_hz:.3g} Hz)", mode.fn_hz)
+        fill_mode_combo(self.tune, result, "Tune to…")
 
     def _on_tune(self, index: int) -> None:
         f = self.tune.itemData(index)
@@ -227,6 +233,7 @@ class SimControls(QtWidgets.QGroupBox):
     reset_clicked = QtCore.Signal()
 
     SPEEDS = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0]
+    WINDOW_CYCLES = 10
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__("Simulation", parent)
@@ -250,8 +257,14 @@ class SimControls(QtWidgets.QGroupBox):
         self.speed.setCurrentIndex(self.SPEEDS.index(1.0))
         form.addRow("Speed:", self.speed)
 
-        self.window = spin(0.5, 120.0, 10.0, 1, " s")
-        form.addRow("Plot window:", self.window)
+        window_row = QtWidgets.QHBoxLayout()
+        self.window = spin(0.05, 120.0, 10.0, 2, " s")
+        window_row.addWidget(self.window, 1)
+        self.fit_window = QtWidgets.QComboBox()
+        self.fit_window.setToolTip(f"Set the plot window to show {self.WINDOW_CYCLES} cycles of a mode")
+        self.fit_window.activated.connect(self._on_fit_window)
+        window_row.addWidget(self.fit_window)
+        form.addRow("Plot window:", window_row)
 
         self.auto_scale = QtWidgets.QCheckBox("Auto-scale animation and plots")
         self.auto_scale.setChecked(True)
@@ -261,6 +274,15 @@ class SimControls(QtWidgets.QGroupBox):
 
         self.time_label = QtWidgets.QLabel()
         form.addRow("Sim time:", self.time_label)
+
+    def set_modes(self, result: ModalResult) -> None:
+        fill_mode_combo(self.fit_window, result, f"Fit {self.WINDOW_CYCLES} cycles…")
+
+    def _on_fit_window(self, index: int) -> None:
+        f = self.fit_window.itemData(index)
+        if f:
+            self.window.setValue(self.WINDOW_CYCLES / f)
+        self.fit_window.setCurrentIndex(0)
 
     def _on_run(self, running: bool) -> None:
         self.run.setText("Pause" if running else "Run")

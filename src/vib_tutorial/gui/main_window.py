@@ -137,6 +137,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.table.set_result(self.modal)
         self.mode_plot.set_result(self.modal)
         self.force_panel.set_modes(self.modal)
+        self.controls.set_modes(self.modal)
         notes = []
         if self.modal.is_proportional:
             notes.append("Damping is <b>proportional</b>: modes are real and uncoupled, so ζ modal = ζ exact.")
