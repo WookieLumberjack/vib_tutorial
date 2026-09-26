@@ -27,6 +27,7 @@ ROOT_COLORS = ["#888888", "#b0b0b0", "#606060"]  # non-oscillatory (overdamped) 
 SELECT_COLOR = "#c1121f"
 CELL_BORDER = "#cccccc"
 DIAGONAL_TINT = "#f1f3f8"
+WORST_FRACTION = 0.5  # the shaded band is where the difference is at least this share of its largest
 
 
 class Quantity(enum.Enum):
@@ -85,6 +86,26 @@ def y_range(q: Quantity, values: list[np.ndarray]) -> tuple[float, float]:
         return math.log10(finite.min()) - 0.3, math.log10(finite.max()) + 0.3
     m = float(np.abs(finite).max()) if finite.size else 1.0
     return -1.1 * m, 1.1 * m
+
+
+def worst_band(f: np.ndarray, full: np.ndarray, partial: np.ndarray) -> tuple[float, float, float] | None:
+    """(low, high, peak) frequencies of the band around the largest |partial - full|.
+
+    The band extends from the peak for as long as the difference stays above
+    WORST_FRACTION of its largest value. None if the two agree to rounding.
+    """
+    d = np.abs(partial - full)
+    i = int(np.argmax(d))
+    if d[i] <= 1e-9 * max(np.abs(full).max(), 1e-300):
+        return None
+    above = d >= WORST_FRACTION * d[i]
+    lo = i
+    while lo > 0 and above[lo - 1]:
+        lo -= 1
+    hi = i
+    while hi < d.size - 1 and above[hi + 1]:
+        hi += 1
+    return float(f[max(lo - 1, 0)]), float(f[min(hi + 1, d.size - 1)]), float(f[i])
 
 
 def set_phase_ticks(axis: pg.AxisItem, phase: bool) -> None:
@@ -275,8 +296,13 @@ class FrfDetail(QtWidgets.QWidget):
         terms: list[tuple[str, str, np.ndarray]],
         lines: list[tuple[float, str]],
         header: str,
+        worst: tuple[float, float, float] | None = None,
     ) -> None:
-        """Complex (F,) curves; `terms` are (name, color, values); `lines` are (frequency, color)."""
+        """Complex (F,) curves; `terms` are (name, color, values); `lines` are (frequency, color).
+
+        `worst` = (low, high, peak) frequencies of the band to shade, where the sum
+        differs most from the full solution.
+        """
         self.header.setText(header)
         first = q if q in (Quantity.MAGNITUDE, Quantity.REAL) else q.partner
         self.legend.clear()
@@ -290,6 +316,20 @@ class FrfDetail(QtWidgets.QWidget):
                 p.addItem(pg.InfiniteLine(
                     pos=math.log10(fn), angle=90,
                     pen=pg.mkPen(color, width=1, style=QtCore.Qt.PenStyle.DotLine),
+                ))
+            if worst is not None:
+                lo_f, hi_f, peak_f = worst
+                brush = pg.mkColor(SELECT_COLOR)
+                brush.setAlpha(40)
+                band = pg.LinearRegionItem(
+                    (math.log10(lo_f), math.log10(hi_f)), movable=False, brush=brush,
+                    pen=pg.mkPen(None),
+                )
+                band.setZValue(-10)
+                p.addItem(band)
+                p.addItem(pg.InfiniteLine(
+                    pos=math.log10(peak_f), angle=90,
+                    pen=pg.mkPen(SELECT_COLOR, width=1.5, style=QtCore.Qt.PenStyle.DashLine),
                 ))
             for name, color, values in terms:
                 p.plot(f, part(values, pq), pen=pg.mkPen(color, width=1.5), name=name, connect="finite")
@@ -618,7 +658,9 @@ class FrfMatrixPage(QtWidgets.QWidget):
         else:
             parts = [(f"H{j + 1}{k + 1}: force at m{k + 1}", MASS_COLORS[k], total[:, j, k]) for k in inputs]
         lines = [(t.fn_hz, color) for t, color in zip(self.terms, self.term_colors) if t.fn_hz >= self.freqs[0]]
-        self.detail.set_data(self.freqs, q, full, partial, parts, lines, self._detail_header(j, inputs, sel, full, partial))
+        worst = worst_band(self.freqs, full, partial) if sel.any() else None
+        header = self._detail_header(j, inputs, sel, full, partial, worst)
+        self.detail.set_data(self.freqs, q, full, partial, parts, lines, header, worst)
 
     # -------------------------------------------------------------- text
     def _grid_title(self, n: int, sel: np.ndarray) -> str:
@@ -631,7 +673,15 @@ class FrfMatrixPage(QtWidgets.QWidget):
             "H<sub>jk</sub> = H<sub>kj</sub>."
         )
 
-    def _detail_header(self, j: int, inputs: list[int], sel: np.ndarray, full: np.ndarray, partial: np.ndarray) -> str:
+    def _detail_header(
+        self,
+        j: int,
+        inputs: list[int],
+        sel: np.ndarray,
+        full: np.ndarray,
+        partial: np.ndarray,
+        worst: tuple[float, float, float] | None,
+    ) -> str:
         if len(inputs) == 1:
             k = inputs[0]
             kind = "driving point" if j == k else "transfer"
@@ -651,7 +701,13 @@ class FrfMatrixPage(QtWidgets.QWidget):
         color = "#2a7d2a" if err < 1e-6 else "#b36b00" if err < 0.05 else SELECT_COLOR
         amount = "none (equal to rounding error)" if err < 1e-9 else f"{100 * err:.3g}%"
         verdict = (f"Largest difference from the full solution: <b style='color:{color}'>"
-                   f"{amount}</b> of the peak.")
+                   f"{amount}</b> of the peak")
+        if worst is not None:
+            verdict += (f", at <b>{worst[2]:.3g} Hz</b> (dashed red line). <span style='color:{SELECT_COLOR}'>"
+                        f"Shaded: {worst[0]:.3g}–{worst[1]:.3g} Hz</span>, where the difference is at "
+                        f"least {WORST_FRACTION:.0%} of that.")
+        else:
+            verdict += "."
         if int(sel.sum()) == 0:
             verdict = "No modes ticked: the sum is zero."
         note = f"<br><span style='color:#666'>{self.expansion_note}</span>" if self.expansion_note else ""

@@ -233,12 +233,13 @@ def test_frf_matrix_page(app):
     assert len(page.grid.cells) == n and len(page.mode_checks) == n
     assert (page.output, page.inputs) == (n - 1, {n - 1})
     assert "none" in page.detail.header.text()  # all modes: the sum is the full solution
+    assert "Shaded" not in page.detail.header.text()
 
     # Truncate to mode 1: the driving-point sum now misses the full solution.
     page._check_all(False)
     page.mode_checks[0].setChecked(True)
     assert page.selected_terms().tolist() == [True] + [False] * (n - 1)
-    assert "%" in page.detail.header.text()
+    assert "%" in page.detail.header.text() and "Shaded" in page.detail.header.text()
 
     # Clicking selects a cell; Ctrl+click adds another force in the same row.
     page._on_cell(0, 1, False)
@@ -272,3 +273,18 @@ def test_frf_matrix_page(app):
     assert "not available" in page.detail.header.text()
     app.processEvents()  # let queued axis relayouts run before teardown
     w.close()
+
+
+def test_worst_band_brackets_the_largest_difference():
+    import numpy as np
+
+    from vib_tutorial.gui.frf_matrix import worst_band
+
+    f = np.linspace(1.0, 10.0, 901)
+    full = np.ones(f.size, dtype=complex)
+    partial = full + np.exp(-(((f - 6.0) / 0.5) ** 2))  # difference peaks at 6 Hz, half-height at +/-0.42
+    lo, hi, peak = worst_band(f, full, partial)
+    assert peak == pytest.approx(6.0)
+    assert lo == pytest.approx(6.0 - 0.5 * np.sqrt(np.log(2)), abs=0.02)
+    assert hi == pytest.approx(6.0 + 0.5 * np.sqrt(np.log(2)), abs=0.02)
+    assert worst_band(f, full, full.copy()) is None
