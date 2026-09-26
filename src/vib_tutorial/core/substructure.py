@@ -232,6 +232,49 @@ def _reduce(name, elements, interior, boundary, M, C, K, n_kept) -> Substructure
 
 
 @dataclass(frozen=True)
+class ComponentMode:
+    """A fixed-interface mode of one substructure, and the coupled mode it contributes most to."""
+
+    substructure: str
+    index: int  # 1-based within the substructure
+    fn_hz: float  # boundary clamped, undamped
+    zeta: float | None  # exact, boundary clamped; None if overdamped
+    kept: bool
+    closest: int  # 1-based full-system mode that this component mode carries the most energy of
+    closest_fn_hz: float
+    share: float  # that fraction of the coupled mode's strain energy, 0..1
+
+
+def component_modes(model: CraigBamptonModel, full: ModalResult) -> list[ComponentMode]:
+    """Every substructure's fixed-interface modes, each paired with a full-system mode.
+
+    Each coupled mode phi (mass-normalized) is written in the substructure's
+    Craig-Bampton coordinates: inside the substructure its elastic motion is
+    d = x_i - Psi x_b (the interior motion minus what the boundary drags along
+    statically), with fixed-interface amplitudes q = Phi^T M_ii d. Component
+    mode r then holds w_r^2 q_r^2 of the coupled mode's strain energy
+    phi^T K phi = w^2. The pairing picks the coupled mode where that share is
+    largest: "which mode of the assembled chain does this component mode become?"
+    """
+    Phi = np.array([m.shape_mass_normalized for m in full.modes]).T  # (n, n_modes)
+    energy = np.array([max(m.omega_n, 1e-12) ** 2 for m in full.modes])
+    out = []
+    for sub in model.substructures:
+        if not sub.ni:
+            continue
+        Mii, Cii, Kii = (sub.block(mat, "i", "i") for mat in (sub.M, sub.C, sub.K))
+        zetas = _match_zetas(damped_poles(Mii, Cii, Kii), sub.fixed_omegas)
+        d = Phi[sub.interior] - sub.Psi @ Phi[sub.boundary]
+        q = sub.Phi.T @ Mii @ d  # (ni, n_modes)
+        shares = sub.fixed_omegas[:, None] ** 2 * q**2 / energy[None, :]
+        for r in range(sub.ni):
+            best = int(np.argmax(shares[r]))
+            out.append(ComponentMode(sub.name, r + 1, float(sub.fixed_omegas[r] / TWO_PI), zetas[r],
+                                     r < sub.n_kept, best + 1, full.modes[best].fn_hz, float(shares[r, best])))
+    return out
+
+
+@dataclass(frozen=True)
 class ModeComparison:
     index: int  # 1-based mode number
     fn_true: float  # Hz
@@ -283,9 +326,14 @@ def compare_modes(model: CraigBamptonModel, full: ModalResult) -> list[ModeCompa
 
 def _reduced_zetas(model: CraigBamptonModel) -> list[float | None]:
     """Exact damping ratio of each reduced mode, None where it has no oscillatory pole."""
-    poles = list(damped_poles(model.M, model.C, model.K))
+    return _match_zetas(damped_poles(model.M, model.C, model.K), model.omegas)
+
+
+def _match_zetas(damped: np.ndarray, omegas: np.ndarray) -> list[float | None]:
+    """Damping ratio of the damped pole nearest in |lambda| to each undamped omega."""
+    poles = list(damped)
     out: list[float | None] = []
-    for w in model.omegas:
+    for w in omegas:
         if not poles or w <= 1e-9:
             out.append(None)
             continue

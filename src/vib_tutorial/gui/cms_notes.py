@@ -169,6 +169,11 @@ interface reduction methods exist.</li>
 substructure. The reduced model has 4 DOF (q<sub>A1</sub>, q<sub>B1</sub>, x<sub>4</sub>,
 x<sub>8</sub>) instead of 8. Mode 1 is within 0.2%, mode 4 is 7% high with MAC 0.84, and
 modes 5 to 8 are not in the reduced model at all.</li>
+<li>Scroll down to <i>Substructures on their own</i>. With the interface at m4, A and B are
+identical three-mass pieces, so each has a clamped mode at 2.44 Hz. Coupled, the two split
+into modes 3 (2.84 Hz) and 4 (3.84 Hz), each carrying about half its energy: two equal
+oscillators joined together always split this way. Move the interface to m7: A's three lowest
+modes each become mostly one coupled mode (shares of 74–84%), while the higher ones mix more.</li>
 <li>Click <i>Guyan (0 modes)</i>. Only the two boundary DOFs are left: mode 1 is still
 within 2%, mode 2 is 11% high. On the <i>Modes &amp; FRF</i> tab the reduced FRF matches at
 low frequency and drifts above mode 1.</li>

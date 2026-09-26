@@ -285,3 +285,20 @@ def test_compare_modes_damping_ratios():
     assert reduced[0].zeta_error == pytest.approx(0.0, abs=0.05)
     assert abs(reduced[3].zeta_error) > 0.2  # truncation loses damping faster than frequency accuracy
     assert reduced[4].zeta_cb is None and reduced[4].zeta_true is not None
+
+
+def test_component_modes_alone_and_coupled():
+    from vib_tutorial.core import component_modes, craig_bampton
+
+    s = ChainSystem.uniform(8)
+    model = craig_bampton(s, [3], [1, 1])
+    comps = component_modes(model, modal_analysis(s))
+    assert [(c.substructure, c.index) for c in comps] == [("A", i) for i in (1, 2, 3)] + [("B", i) for i in (1, 2, 3)]
+    assert [c.kept for c in comps] == [True, False, False, True, False, False]
+    # Identical halves: the same clamped mode, which splits into two coupled modes when joined.
+    a1, b1 = comps[0], comps[3]
+    assert a1.fn_hz == pytest.approx(b1.fn_hz)
+    assert {a1.closest, b1.closest} == {3, 4}
+    assert all(0 < c.share <= 1 for c in comps)
+    # Clamped damping ratio: exact for C = beta K, zeta = beta w / 2.
+    assert a1.zeta == pytest.approx(0.005 * 2 * math.pi * a1.fn_hz / 2)

@@ -9,10 +9,12 @@ from .modal import ComplexMode, ModalResult, Mode, frf, modal_analysis, receptan
 from .model import ChainSystem, assemble_chain, state_space
 from .simulator import Simulator, foh_discretize
 from .substructure import (
+    ComponentMode,
     CraigBamptonModel,
     ModeComparison,
     Substructure,
     compare_modes,
+    component_modes,
     craig_bampton,
     damped_poles,
     interior_counts,
@@ -23,6 +25,7 @@ from .substructure import (
 __all__ = [
     "ChainSystem",
     "ComplexMode",
+    "ComponentMode",
     "CraigBamptonModel",
     "ForceController",
     "ForceKind",
@@ -34,6 +37,7 @@ __all__ = [
     "Substructure",
     "assemble_chain",
     "compare_modes",
+    "component_modes",
     "craig_bampton",
     "damped_poles",
     "foh_discretize",

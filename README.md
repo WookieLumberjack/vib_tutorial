@@ -90,6 +90,9 @@ DOF, and the reduced substructures are assembled on the shared interface DOF.
 
 - **Comparison table**: true vs reduced natural frequencies, the error (never negative:
   CB frequencies are upper bounds), and the MAC of the recovered shape.
+- **Substructures on their own**: each substructure's fixed-interface modes (natural
+  frequency and exact damping ratio with its boundary held), whether each is kept, and the
+  coupled mode it becomes (largest share of that mode's strain energy).
 - **Modes & FRF**: the selected mode shape, true vs CB, and the tip and interface
   receptance of both models for the force at the tip.
 - **Matrices (step by step)**: every stage with the current numbers: the full K and M,

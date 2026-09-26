@@ -16,10 +16,12 @@ from PySide6 import QtCore, QtWidgets
 
 from ..core import (
     ChainSystem,
+    ComponentMode,
     CraigBamptonModel,
     ModalResult,
     ModeComparison,
     compare_modes,
+    component_modes,
     craig_bampton,
     frf,
     interior_counts,
@@ -181,6 +183,64 @@ class ComparisonTable(QtWidgets.QTableWidget):
         height += sum(self.rowHeight(r) for r in range(self.rowCount()))
         self.setFixedHeight(height)
         self.selectRow(min(selected, len(comparisons) - 1))
+
+
+class ComponentTable(QtWidgets.QTableWidget):
+    """Each substructure's own modes (boundary clamped) and the coupled mode each one becomes."""
+
+    HEADERS = ["Mode", "fₙ alone [Hz]", "ζ alone", "Kept", "Becomes", "fₙ [Hz]", "Share"]
+    TIPS = [
+        "Fixed-interface mode r of substructure A or B",
+        "Natural frequency of the substructure on its own, with its boundary masses held fixed: "
+        "K_ii φ = ω² M_ii φ",
+        "Exact damping ratio of the substructure on its own (boundary held), from the damped "
+        "eigenvalues of M_ii, C_ii, K_ii",
+        "Whether this mode is one of the fixed-interface modes kept in the reduced model",
+        "The mode of the full, coupled chain that this component mode contributes most to",
+        "Natural frequency of that coupled mode: compare with fₙ alone to see how coupling "
+        "through the interface shifts it",
+        "Fraction of the coupled mode's strain energy carried by this component mode. Each coupled "
+        "mode is written in Craig–Bampton coordinates (fixed-interface amplitudes q plus boundary "
+        "motion); component mode r holds ω_r² q_r² of its energy ω². Well below 100% means the "
+        "coupled mode mixes several component modes and boundary motion.",
+    ]
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(0, len(self.HEADERS), parent)
+        self.setHorizontalHeaderLabels(self.HEADERS)
+        for col, tip in enumerate(self.TIPS):
+            self.horizontalHeaderItem(col).setToolTip(tip)
+        self.verticalHeader().setVisible(False)
+        self.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
+        self.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+
+    def set_rows(self, modes: list[ComponentMode]) -> None:
+        self.setRowCount(len(modes))
+        for r, m in enumerate(modes):
+            cells = [
+                f"{m.substructure}{m.index}",
+                f"{m.fn_hz:.4g}",
+                zeta_text(m.zeta),
+                "yes" if m.kept else "no",
+                f"mode {m.closest}",
+                f"{m.closest_fn_hz:.4g}",
+                f"{100 * m.share:.0f}%",
+            ]
+            color = SUB_COLORS[SUB_NAMES.index(m.substructure)]
+            for col, text in enumerate(cells):
+                item = QtWidgets.QTableWidgetItem(text)
+                item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                if col == 0:
+                    item.setForeground(pg.mkColor(color))
+                elif col == 4:
+                    item.setForeground(pg.mkColor(MODE_COLORS[(m.closest - 1) % len(MODE_COLORS)]))
+                elif col == 3 and not m.kept:
+                    item.setForeground(pg.mkColor("#999"))
+                self.setItem(r, col, item)
+        height = self.horizontalHeader().height() + 2 * self.frameWidth()
+        height += sum(self.rowHeight(r) for r in range(self.rowCount()))
+        self.setFixedHeight(height)
 
 
 def zeta_text(zeta: float | None) -> str:
@@ -360,6 +420,15 @@ class SubstructuringPage(QtWidgets.QWidget):
 
         self.schematic = SubstructureSchematic()
         self.table = ComparisonTable()
+        self.component_title = QtWidgets.QLabel(
+            "<b>Substructures on their own</b> (boundary masses held fixed), and the coupled mode "
+            "each one becomes"
+        )
+        self.component_title.setWordWrap(True)
+        self.component_table = ComponentTable()
+        self.component_note = QtWidgets.QLabel()
+        self.component_note.setWordWrap(True)
+        self.component_note.setStyleSheet("color: #666;")
         self.table.itemSelectionChanged.connect(self._on_row)
         self.summary = QtWidgets.QLabel()
         self.summary.setWordWrap(True)
@@ -369,6 +438,10 @@ class SubstructuringPage(QtWidgets.QWidget):
         lv.addWidget(self.schematic)
         lv.addWidget(self.summary)
         lv.addWidget(self.table)
+        lv.addSpacing(8)
+        lv.addWidget(self.component_title)
+        lv.addWidget(self.component_table)
+        lv.addWidget(self.component_note)
         lv.addStretch(1)
         left_scroll = QtWidgets.QScrollArea()
         left_scroll.setWidget(left)
@@ -459,6 +532,8 @@ class SubstructuringPage(QtWidgets.QWidget):
             reason = error or "Substructuring needs at least 2 masses (an interface and a tip)."
             self.summary.setText(f"<b style='color:#c1121f'>{reason}</b>")
             self.table.setRowCount(0)
+            self.component_table.setRowCount(0)
+            self.component_note.setText("")
             self.matrices.setHtml(f"<p>{reason}</p>")
             self.plots.set_comparisons([], None)
             self.plots.set_frf(system, full, None)
@@ -468,6 +543,9 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.summary.setText(self._summary(model, comparisons))
         self.plots.set_comparisons(comparisons, model)
         self.table.set_rows(comparisons)
+        components = component_modes(model, full)
+        self.component_table.set_rows(components)
+        self.component_note.setText(self._component_note(model, components))
         self._on_row()
         self.plots.set_frf(system, full, model)
         scroll = self.matrices.verticalScrollBar().value()
@@ -500,6 +578,21 @@ class SubstructuringPage(QtWidgets.QWidget):
         freqs = [f"{f:.3g}" for f in sub.fixed_omegas / (2 * math.pi)]
         kept = ", ".join(freqs[: sub.n_kept]) or "none"
         return f"kept: {kept} Hz" + (f"  (next: {freqs[sub.n_kept]} Hz)" if sub.n_kept < sub.ni else "")
+
+    @staticmethod
+    def _component_note(model: CraigBamptonModel, components: list[ComponentMode]) -> str:
+        empty = [s.name for s in model.substructures if not s.ni]
+        note = ""
+        if empty:
+            note = f"{' and '.join(empty)} has no interior masses, so no modes of its own. "
+        if not components:
+            return note
+        return note + (
+            "Coupling through the interface shifts each substructure's modes and mixes them: a "
+            "share well below 100% means the coupled mode is built from several component modes "
+            "plus boundary motion. The Craig–Bampton model keeps the <i>kept</i> rows as its "
+            "modal coordinates q and lets the boundary DOFs do the coupling."
+        )
 
     @staticmethod
     def _summary(model: CraigBamptonModel, comparisons) -> str:
