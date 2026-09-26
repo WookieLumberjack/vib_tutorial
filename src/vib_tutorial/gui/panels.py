@@ -233,7 +233,6 @@ class SimControls(QtWidgets.QGroupBox):
     reset_clicked = QtCore.Signal()
 
     SPEEDS = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0]
-    WINDOW_CYCLES = 10
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__("Simulation", parent)
@@ -257,14 +256,29 @@ class SimControls(QtWidgets.QGroupBox):
         self.speed.setCurrentIndex(self.SPEEDS.index(1.0))
         form.addRow("Speed:", self.speed)
 
-        window_row = QtWidgets.QHBoxLayout()
         self.window = spin(0.05, 120.0, 10.0, 2, " s")
-        window_row.addWidget(self.window, 1)
+        form.addRow("Plot window:", self.window)
+
+        fit_row = QtWidgets.QHBoxLayout()
+        self.cycles = QtWidgets.QSpinBox()
+        self.cycles.setRange(1, 200)
+        self.cycles.setValue(10)
+        self.cycles.setSuffix(" cycles")
+        self.cycles.setKeyboardTracking(False)
+        self.cycles.valueChanged.connect(self._apply_fit)
+        fit_row.addWidget(self.cycles)
+        fit_row.addWidget(QtWidgets.QLabel("of"))
         self.fit_window = QtWidgets.QComboBox()
-        self.fit_window.setToolTip(f"Set the plot window to show {self.WINDOW_CYCLES} cycles of a mode")
         self.fit_window.activated.connect(self._on_fit_window)
-        window_row.addWidget(self.fit_window)
-        form.addRow("Plot window:", window_row)
+        fit_row.addWidget(self.fit_window, 1)
+        fit_tip = (
+            "Set the plot window to show this many cycles of a mode (window = cycles / f\u2099).\n"
+            "Changing the cycle count re-fits to the last mode picked."
+        )
+        for w in (self.cycles, self.fit_window):
+            w.setToolTip(fit_tip)
+        form.addRow("Fit window:", fit_row)
+        self._fit_item: int | None = None  # combo index of the last mode picked
 
         self.auto_scale = QtWidgets.QCheckBox("Auto-scale animation and plots")
         self.auto_scale.setChecked(True)
@@ -276,13 +290,19 @@ class SimControls(QtWidgets.QGroupBox):
         form.addRow("Sim time:", self.time_label)
 
     def set_modes(self, result: ModalResult) -> None:
-        fill_mode_combo(self.fit_window, result, f"Fit {self.WINDOW_CYCLES} cycles…")
+        fill_mode_combo(self.fit_window, result, "mode…")
 
     def _on_fit_window(self, index: int) -> None:
-        f = self.fit_window.itemData(index)
-        if f:
-            self.window.setValue(self.WINDOW_CYCLES / f)
+        if self.fit_window.itemData(index):
+            self._fit_item = index
+            self._apply_fit()
         self.fit_window.setCurrentIndex(0)
+
+    def _apply_fit(self) -> None:
+        # Look the frequency up each time so it reflects the current parameters.
+        f = self.fit_window.itemData(self._fit_item) if self._fit_item else None
+        if f:
+            self.window.setValue(self.cycles.value() / f)
 
     def _on_run(self, running: bool) -> None:
         self.run.setText("Pause" if running else "Run")

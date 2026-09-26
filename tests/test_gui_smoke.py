@@ -30,10 +30,12 @@ def test_window_interactions(app):
     assert w.sim.system.stiffness[0] == 800.0
     assert w.table.item(0, 1).text() != ""
 
-    # Fit the plot window to 10 cycles of mode 2.
+    # Fit the plot window to N cycles of mode 2; changing N re-fits.
     w.controls.fit_window.activated.emit(2)
     assert w.controls.window.value() == pytest.approx(10 / w.modal.modes[1].fn_hz, abs=0.005)
     assert w.controls.fit_window.currentIndex() == 0
+    w.controls.cycles.setValue(4)
+    assert w.controls.window.value() == pytest.approx(4 / w.modal.modes[1].fn_hz, abs=0.005)
 
     # Change number of masses.
     w.params.dof.setValue(6)
