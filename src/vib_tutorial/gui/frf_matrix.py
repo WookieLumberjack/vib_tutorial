@@ -694,7 +694,9 @@ class FrfMatrixPage(QtWidgets.QWidget):
             kind = "driving point" if j == k else "transfer"
             title = (f"<b>H<sub>{j + 1}{k + 1}</sub> = x<sub>{j + 1}</sub> / F<sub>{k + 1}</sub></b> "
                      f"({kind}): response of m{j + 1} to a force at m{k + 1}.")
-            parts = "Coloured: each ticked mode's term."
+            parts = (f"Coloured: each ticked mode's term. <span style='color:{SUM_COLOR}'>Dashed red</span> = "
+                     f"Σ over the ticked modes r of mode r's ({j + 1},{k + 1}) entry only; the other cells "
+                     "are responses to other forces.")
             zeros = (j if j <= k else k) + (self.system.n - 1 - max(j, k))
             parts += (" Undamped, it has no antiresonances (see Theory)." if zeros == 0 else
                       f" Undamped, it has {zeros} antiresonance{'s' if zeros > 1 else ''}"
@@ -703,7 +705,10 @@ class FrfMatrixPage(QtWidgets.QWidget):
             names = ", ".join(f"m{k + 1}" for k in inputs)
             terms = " + ".join(f"H<sub>{j + 1}{k + 1}</sub>" for k in inputs)
             title = (f"<b>x<sub>{j + 1}</sub> for unit in-phase forces at {names}</b> = {terms}.")
-            parts = "Coloured: each force's term (from the ticked modes)."
+            cols = ", ".join(f"({j + 1},{k + 1})" for k in inputs)
+            parts = ("Coloured: each force's term (from the ticked modes). "
+                     f"<span style='color:{SUM_COLOR}'>Dashed red</span> = Σ over these forces and the "
+                     f"ticked modes r of mode r's entries {cols}: the sum along row {j + 1}.")
         err = float(np.abs(partial - full).max() / max(np.abs(full).max(), 1e-300))
         color = "#2a7d2a" if err < 1e-6 else "#b36b00" if err < 0.05 else SELECT_COLOR
         amount = "none (equal to rounding error)" if err < 1e-9 else f"{100 * err:.3g}%"

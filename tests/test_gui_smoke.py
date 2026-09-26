@@ -234,6 +234,7 @@ def test_frf_matrix_page(app):
     assert (page.output, page.inputs) == (n - 1, {n - 1})
     assert "none" in page.detail.header.text()  # all modes: the sum is the full solution
     assert "Shaded" not in page.detail.header.text() and "0% (exact)" in page.detail.header.text()
+    assert f"({n},{n}) entry only" in page.detail.header.text()
 
     # Truncate to mode 1: the driving-point sum now misses the full solution.
     page._check_all(False)
@@ -253,6 +254,7 @@ def test_frf_matrix_page(app):
     assert page.output == 0 and page.inputs == {1, 2}
     assert [c.isChecked() for c in page.input_checks] == [False, True, True, False]
     assert "H<sub>12</sub> + H<sub>13</sub>" in page.detail.header.text()
+    assert "entries (1,2), (1,3)" in page.detail.header.text()
     page._on_cell(0, 2, True)  # Ctrl+click again removes it
     assert page.inputs == {1}
 
