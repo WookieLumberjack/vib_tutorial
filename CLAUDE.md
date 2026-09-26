@@ -8,4 +8,4 @@ Real-time teaching app for an N-mass spring-damper chain (PySide6 + pyqtgraph + 
 - Units are SI throughout (kg, N/m, N·s/m, m, N, Hz in UI / rad/s internally where named `omega`).
 - The simulator uses an exact FOH matrix-exponential discretization. Don't replace it with an explicit integrator, because stiff user inputs must stay stable.
 - `Simulator.advance` caps the number of steps per call (`MAX_STEPS_PER_ADVANCE`). Loop over it for long runs in tests.
-- To check UI changes, grab a screenshot offscreen: build `MainWindow`, run the event loop briefly, then `window.grab().save(path)`.
+- To check UI changes, grab a screenshot offscreen: build `MainWindow`, run the event loop briefly, then `window.grab().save(path)`. First call `pg.setConfigOptions(antialias=True, background="w", foreground="k")` as `gui.run()` does; otherwise pyqtgraph's default black background makes the screenshot unlike the real app.
