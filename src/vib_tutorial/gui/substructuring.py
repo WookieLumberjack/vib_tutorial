@@ -457,7 +457,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         self._on_row()
         self.plots.set_frf(system, full, model)
         scroll = self.matrices.verticalScrollBar().value()
-        self.matrices.setHtml(matrices_html(model))
+        self.matrices.setHtml(matrices_html(model, full))
         self.matrices.verticalScrollBar().setValue(scroll)
 
     def _sync_controls(self, n: int) -> None:

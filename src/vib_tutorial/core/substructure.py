@@ -272,3 +272,37 @@ def reduced_frf(model: CraigBamptonModel, freqs_hz: np.ndarray, input_dof: int) 
     e = np.zeros(model.system.n)
     e[input_dof] = 1.0
     return receptance(model.M, model.C, model.K, freqs_hz, model.T.T @ e) @ model.T.T
+
+
+def damped_poles(M: np.ndarray, C: np.ndarray, K: np.ndarray) -> np.ndarray:
+    """Oscillatory eigenvalues (Im > 0) of M x'' + C x' + K x = 0, ordered by |lambda|.
+
+    Works for a full (non-diagonal) M such as the reduced M^.
+    """
+    n = M.shape[0]
+    A = np.zeros((2 * n, 2 * n))
+    A[:n, n:] = np.eye(n)
+    A[n:, :n] = -np.linalg.solve(M, K)
+    A[n:, n:] = -np.linalg.solve(M, C)
+    lam = scipy.linalg.eigvals(A)
+    tol = 1e-6 * max(1.0, float(np.abs(lam).max()))
+    upper = lam[lam.imag > tol]
+    return upper[np.argsort(np.abs(upper))]
+
+
+def substructure_damping(sub: Substructure) -> tuple[float, float]:
+    """How far C^ is from the block-diagonal form of K^.
+
+    Returns (modal coupling, boundary coupling): the largest off-diagonal term
+    of C^_qq and the largest term of C^_qb, each relative to the diagonal
+    sqrt(C^_rr C^_ss). Both are 0 when the substructure's damping is
+    proportional to its stiffness (C = beta K gives C^ = beta K^).
+    """
+    Cr = sub.C_red
+    d = np.sqrt(np.abs(np.outer(np.diag(Cr), np.diag(Cr))))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rel = np.where(d > 0, np.abs(Cr) / d, 0.0)
+    k = sub.n_kept
+    qq = rel[:k, :k] - np.diag(np.diag(rel[:k, :k]))
+    qb = rel[:k, k:]
+    return (float(qq.max()) if qq.size else 0.0, float(qb.max()) if qb.size else 0.0)

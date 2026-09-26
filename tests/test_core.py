@@ -246,3 +246,28 @@ def test_craig_bampton_rejects_floating_interior():
     # With k1 = k2 = 0, m1 floats even when the boundary is held.
     with pytest.raises(ValueError, match="K_ii"):
         craig_bampton(ChainSystem([1.0] * 5, [0.0, 0.0, 400.0, 400.0, 400.0], [2.0] * 5), [2], [1, 1])
+
+
+def test_craig_bampton_damping():
+    from vib_tutorial.core import (
+        craig_bampton,
+        damped_poles,
+        interior_counts,
+        substructure_damping,
+    )
+
+    # Every c/k equal (C = beta K): C^ = beta K^, block diagonal, no coupling.
+    s = ChainSystem.uniform(8)
+    model = craig_bampton(s, [3], [2, 2])
+    for sub in model.substructures:
+        np.testing.assert_allclose(sub.C_red, (2.0 / 400.0) * sub.K_red, atol=1e-10)
+        assert substructure_damping(sub) == pytest.approx((0.0, 0.0), abs=1e-9)
+    # Non-proportional: C^ couples the modes to the boundary in A (which holds c1).
+    s = ChainSystem([1.0] * 8, [400.0] * 8, [15.0] + [2.0] * 7)
+    model = craig_bampton(s, [3], [2, 2])
+    assert substructure_damping(model.substructures[0])[1] > 0.1
+    assert substructure_damping(model.substructures[1]) == pytest.approx((0.0, 0.0), abs=1e-9)
+    # All modes kept: the reduced damped poles are the full model's.
+    exact = craig_bampton(s, [3], interior_counts(s.n, [3]))
+    true = [m.damped.eigenvalue for m in modal_analysis(s).modes]
+    np.testing.assert_allclose(damped_poles(exact.M, exact.C, exact.K), true, rtol=1e-8)

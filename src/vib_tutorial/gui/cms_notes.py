@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..core import CraigBamptonModel, Substructure
+from ..core import (
+    CraigBamptonModel,
+    ModalResult,
+    Substructure,
+    damped_poles,
+    substructure_damping,
+)
 from ..core.modal import TWO_PI
 
 # Cell tint for each partition block, keyed by the sorted (row, column) group pair.
@@ -73,7 +79,8 @@ boundary <i>not</i> coupled by stiffness</td></tr>
 <tr><td><b>Mass</b></td><td>diagonal M</td>
 <td>M̂ = [ I &nbsp;M̂<sub>qb</sub> ; M̂<sub>bq</sub> &nbsp;M̂<sub>bb</sub> ]: modes couple
 to the boundary through inertia only</td></tr>
-<tr><td><b>Damping</b></td><td>C</td><td>Ĉ = T<sup>T</sup>CT (same basis)</td></tr>
+<tr><td><b>Damping</b></td><td>tridiagonal C, assembled like K</td><td>Ĉ = T<sup>T</sup>CT on the
+undamped basis: not block diagonal unless C<sup>(s)</sup> ∝ K<sup>(s)</sup></td></tr>
 <tr><td><b>Force</b></td><td>f</td><td>f̂ = T<sup>T</sup>f</td></tr>
 <tr><td><b>Size</b></td><td>N</td><td>Σ k<sub>s</sub> + n<sub>b</sub></td></tr>
 <tr><td><b>Accuracy</b></td><td>exact</td>
@@ -143,6 +150,14 @@ and the error shrinks monotonically as modes are added.</li>
 <li><b>Rule of thumb.</b> Keep fixed-interface modes up to about 1.5–2× the highest
 frequency of interest. The Matrices tab lists each component's fixed-interface frequencies,
 kept and discarded.</li>
+<li><b>Damping.</b> The component modes come from K and M only; the damping is then
+projected onto them, Ĉ = T<sup>T</sup>CT, and assembled like K̂. K̂ is block diagonal
+because Ψ is a static solution for K. That is not true for C, so Ĉ in general couples the
+kept modes to each other and to the boundary. Only damping proportional to stiffness inside a
+component (C = βK) keeps Ĉ block diagonal. In practice the modal block is often replaced by
+measured or assumed modal damping, Ĉ<sub>qq</sub> = diag(2ζ<sub>r</sub>ω<sub>r</sub>),
+with joint damping on the boundary. Step 9 of the Matrices tab compares the reduced
+model's exact damping ratios with the true ones.</li>
 <li><b>Interface size.</b> Every boundary DOF stays in the model. On this chain an
 interface is one DOF; on a 3D finite-element model it can be thousands, which is why
 interface reduction methods exist.</li>
@@ -230,11 +245,11 @@ def _join(items: list[str]) -> str:
     return ", ".join(items) if items else "none"
 
 
-def matrices_html(model: CraigBamptonModel) -> str:
+def matrices_html(model: CraigBamptonModel, full: ModalResult | None = None) -> str:
     """Every step of the reduction, with the current numbers."""
     system = model.system
     n = system.n
-    M, _, K = system.matrices()
+    M, C, K = system.matrices()
     subs = model.substructures
     bnd = {int(b) for b in model.boundary}
     groups = ["b" if d in bnd else "i" for d in range(n)]
@@ -246,37 +261,47 @@ def matrices_html(model: CraigBamptonModel) -> str:
     parts.append(
         f"<p>N = {n} physical DOFs. Boundary (master) DOFs: <b>{_join(_dof_labels(model.boundary))}</b> "
         f"(the interface and the loaded tip). Interior: {_join([l for l, g in zip(labels, groups) if g == 'i'])}. "
-        "K [N/m] and M [kg]; C has the same pattern as K.</p>"
+        "K [N/m], C [N·s/m] and M [kg]. C is assembled from the dampers exactly like K from the "
+        "springs, so it has the same tridiagonal pattern.</p>"
     )
     parts.append(_side_by_side(
         matrix_html(K, labels, labels, groups, groups, "K"),
+        matrix_html(C, labels, labels, groups, groups, "C"),
         matrix_html(M, labels, labels, groups, groups, "M"),
     ))
 
     parts.append("<h3>2. Cut into substructures</h3>")
     for sub in subs:
-        springs = ", ".join(f"k<sub>{e + 1}</sub>" for e in sub.elements)
+        springs = ", ".join(f"k<sub>{e + 1}</sub>, c<sub>{e + 1}</sub>" for e in sub.elements)
         parts.append(
-            f"<p><b>Substructure {sub.name}</b>: springs {springs}; interior "
+            f"<p><b>Substructure {sub.name}</b>: springs and dampers {springs}; interior "
             f"{_join(_dof_labels(sub.interior))}; boundary {_join(_dof_labels(sub.boundary))}. "
             "Reordered [interior | boundary]:</p>"
         )
-        parts.append(_side_by_side(_local(sub, sub.K, f"K<sup>({sub.name})</sup>"), _local(sub, sub.M, f"M<sup>({sub.name})</sup>")))
+        parts.append(_side_by_side(
+            _local(sub, sub.K, f"K<sup>({sub.name})</sup>"),
+            _local(sub, sub.C, f"C<sup>({sub.name})</sup>"),
+            _local(sub, sub.M, f"M<sup>({sub.name})</sup>"),
+        ))
     for j in interfaces:
         left = next(s for s in subs if j in s.boundary and j + 1 not in s.dofs)
         right = next(s for s in subs if j in s.boundary and s is not left)
         parts.append(
             f"<p>The interface entry of the full model, K<sub>{j + 1},{j + 1}</sub> = k<sub>{j + 1}</sub> + "
             f"k<sub>{j + 2}</sub> = {fmt(K[j, j], 1)}, is split: {fmt(system.stiffness[j], 1)} goes to "
-            f"{left.name} and {fmt(system.stiffness[j + 1], 1)} to {right.name}. The interface mass "
+            f"{left.name} and {fmt(system.stiffness[j + 1], 1)} to {right.name}. C<sub>{j + 1},{j + 1}</sub> "
+            f"= c<sub>{j + 1}</sub> + c<sub>{j + 2}</sub> = {fmt(C[j, j], 1)} splits the same way "
+            f"({fmt(system.damping[j], 1)} + {fmt(system.damping[j + 1], 1)}). The interface mass "
             f"m<sub>{j + 1}</sub> = {fmt(system.masses[j], 1)} goes to {left.name} (any split works: "
             "assembly adds them back). Every other entry belongs to one substructure only, so "
-            "K = Σ L<sub>s</sub><sup>T</sup>K<sup>(s)</sup>L<sub>s</sub> exactly.</p>"
+            "K = Σ L<sub>s</sub><sup>T</sup>K<sup>(s)</sup>L<sub>s</sub> exactly, and the same for C and M.</p>"
         )
 
     parts.append("<h3>3. Fixed-interface normal modes</h3>")
     parts.append("<p>Boundary clamped (x<sub>b</sub> = 0): K<sub>ii</sub>φ = ω²M<sub>ii</sub>φ, "
-                 "mass-normalized so Φ<sup>T</sup>M<sub>ii</sub>Φ = I.</p>")
+                 "mass-normalized so Φ<sup>T</sup>M<sub>ii</sub>Φ = I. These are <i>undamped</i> modes: "
+                 "C plays no part in choosing the basis (steps 3 to 5). It is only projected onto that "
+                 "basis in step 6.</p>")
     for sub in subs:
         if not sub.ni:
             parts.append(f"<p><b>{sub.name}</b> has no interior DOFs, so it has no fixed-interface modes: "
@@ -320,13 +345,27 @@ def matrices_html(model: CraigBamptonModel) -> str:
     parts.append("<h3>6. Reduced substructure matrices</h3>")
     parts.append("<p>K̂ = T<sup>T</sup>KT is block diagonal: the kept ω² (in rad²/s²) for q, and the "
                  "boundary stiffness K̂<sub>bb</sub> = K<sub>bb</sub> − K<sub>bi</sub>K<sub>ii</sub><sup>−1</sup>"
-                 "K<sub>ib</sub>. M̂ = T<sup>T</sup>MT has I for q and the coupling M̂<sub>qb</sub>.</p>")
+                 "K<sub>ib</sub>. M̂ = T<sup>T</sup>MT has I for q and the coupling M̂<sub>qb</sub>. "
+                 "The damping is projected onto the same basis, Ĉ = T<sup>T</sup>CT:</p>"
+                 "<p>&nbsp;&nbsp;Ĉ<sub>qq</sub> = Φ<sub>k</sub><sup>T</sup>C<sub>ii</sub>Φ<sub>k</sub>, &nbsp; "
+                 "Ĉ<sub>qb</sub> = Φ<sub>k</sub><sup>T</sup>(C<sub>ii</sub>Ψ + C<sub>ib</sub>), &nbsp; "
+                 "Ĉ<sub>bb</sub> = C<sub>bb</sub> + C<sub>bi</sub>Ψ + Ψ<sup>T</sup>C<sub>ib</sub> + "
+                 "Ψ<sup>T</sup>C<sub>ii</sub>Ψ</p>"
+                 "<p>Unlike K̂, Ĉ is <b>not</b> block diagonal in general. Ψ is a static solution for K, "
+                 "not for C, so Ĉ<sub>qb</sub> ≠ 0, and the undamped Φ<sub>k</sub> only diagonalize "
+                 "Ĉ<sub>qq</sub> when the damping is proportional. The exception is damping proportional "
+                 "to stiffness inside the substructure (C<sup>(s)</sup> = βK<sup>(s)</sup>, e.g. every "
+                 "c<sub>i</sub>/k<sub>i</sub> equal): then Ĉ = βK̂ and it inherits K̂'s block-diagonal form. "
+                 "The diagonal of Ĉ<sub>qq</sub> gives each kept fixed-interface mode a damping ratio "
+                 "ζ<sub>r</sub> = Ĉ<sub>rr</sub> / 2ω<sub>r</sub>.</p>")
     for sub in subs:
         red_labels, red_groups = _reduced_labels(sub)
         parts.append(_side_by_side(
             matrix_html(sub.K_red, red_labels, red_labels, red_groups, red_groups, f"K̂<sup>({sub.name})</sup>"),
+            matrix_html(sub.C_red, red_labels, red_labels, red_groups, red_groups, f"Ĉ<sup>({sub.name})</sup>"),
             matrix_html(sub.M_red, red_labels, red_labels, red_groups, red_groups, f"M̂<sup>({sub.name})</sup>"),
         ))
+        parts.append(_damping_note(sub))
 
     parts.append("<h3>7. Assemble the reduced model</h3>")
     shared = _join(_dof_labels(np.array(interfaces)))
@@ -343,17 +382,18 @@ def matrices_html(model: CraigBamptonModel) -> str:
     for j in interfaces:
         g = model.labels.index(f"x{j + 1}")
         pieces = []
-        for attr, sym in (("K_red", "K̂"), ("M_red", "M̂")):
+        for attr, sym, total_mat in (("K_red", "K̂", model.K), ("C_red", "Ĉ", model.C), ("M_red", "M̂", model.M)):
             terms = []
             for sub in subs:
                 if j in sub.boundary:
                     loc = sub.n_kept + int(np.searchsorted(sub.boundary, j))
                     terms.append(fmt(getattr(sub, attr)[loc, loc], 1) + f" ({sub.name})")
-            total = (model.K if attr == "K_red" else model.M)[g, g]
+            total = total_mat[g, g]
             pieces.append(f"{sym}<sub>x{j + 1},x{j + 1}</sub> = {' + '.join(terms)} = {fmt(total, 1)}")
         parts.append(f"<p>At the interface: {'; '.join(pieces)}.</p>")
     parts.append(_side_by_side(
         matrix_html(model.K, glabels, glabels, ggroups, ggroups, "K̂"),
+        matrix_html(model.C, glabels, glabels, ggroups, ggroups, "Ĉ"),
         matrix_html(model.M, glabels, glabels, ggroups, ggroups, "M̂"),
     ))
 
@@ -364,4 +404,59 @@ def matrices_html(model: CraigBamptonModel) -> str:
     parts.append(matrix_html(model.T, labels, glabels, groups, ggroups, "T"))
     freqs = ", ".join(f"{f:.4g}" for f in model.fn_hz)
     parts.append(f"<p>Reduced-model natural frequencies: {freqs} Hz.</p>")
+    parts.append(_damped_comparison(model, full))
     return "".join(parts)
+
+
+def _damping_note(sub: Substructure) -> str:
+    if not sub.n_kept:
+        return (f"<p><b>{sub.name}</b> keeps no modes, so Ĉ<sup>({sub.name})</sup> is just the damping "
+                "seen from the boundary (Ĉ<sub>bb</sub>).</p>")
+    modal, boundary = substructure_damping(sub)
+    zetas = ", ".join(
+        f"{sub.C_red[r, r] / (2 * w):.4f}" for r, w in enumerate(sub.fixed_omegas[: sub.n_kept])
+    )
+    if max(modal, boundary) < 1e-6:
+        verdict = ("Ĉ has the same block-diagonal form as K̂: the damping in this substructure is "
+                   "proportional to its stiffness, so it couples nothing.")
+    else:
+        found = [f"{name} {v:.2f}" for name, v in (("between kept modes", modal), ("mode–boundary", boundary))
+                 if v >= 1e-6]
+        verdict = (f"Ĉ couples what K̂ keeps apart. Largest relative coupling {', '.join(found)} "
+                   "(0 = none, 1 = as large as the diagonal terms).")
+    return f"<p><b>{sub.name}</b>: fixed-interface ζ = {zetas}. {verdict}</p>"
+
+
+def _damped_comparison(model: CraigBamptonModel, full: ModalResult | None) -> str:
+    """Step 9: exact damping ratios of the reduced and the full model, mode by mode."""
+    out = ["<h3>9. Damping in the reduced model</h3>",
+           "<p>The frequencies above ignore damping. The reduced model does include it: Ĉ is used "
+           "for the FRF on the Modes &amp; FRF tab, and the damped eigenvalues of "
+           "M̂η̈ + Ĉη̇ + K̂η = 0 give its damping ratios. Both columns are exact (state-space) "
+           "values, so any difference comes from the reduction alone.</p>"]
+    if full is None:
+        return "".join(out)
+    poles = damped_poles(model.M, model.C, model.K)
+    true = [m.damped for m in full.modes if m.damped is not None]
+    rows = ["<table border='1' cellspacing='0' cellpadding='3'>"
+            "<tr><th>Mode</th><th>ζ true</th><th>ζ CB</th><th>f<sub>d</sub> true [Hz]</th>"
+            "<th>f<sub>d</sub> CB [Hz]</th></tr>"]
+    for r, t in enumerate(true):
+        cells = [str(r + 1), f"{t.zeta:.4f}"]
+        if r < poles.size:
+            p = poles[r]
+            z = -p.real / abs(p)
+            err = (z - t.zeta) / t.zeta if t.zeta > 0 else 0.0
+            color = "#2a7d2a" if abs(err) < 1e-3 else "#b07000" if abs(err) < 0.05 else "#c1121f"
+            cells += [f"<span style='color:{color}'>{z:.4f}</span>", f"{t.fd_hz:.4g}", f"{p.imag / TWO_PI:.4g}"]
+        else:
+            cells += ["<span style='color:#999'>not in model</span>", f"{t.fd_hz:.4g}", "—"]
+        rows.append("<tr>" + "".join(f"<td align='right'>{c}</td>" for c in cells) + "</tr>")
+    rows.append("</table>")
+    out.append("".join(rows))
+    out.append("<p>With stiffness-proportional damping (the default), ζ<sub>r</sub> = βω<sub>r</sub>/2, "
+               "so ζ CB errs exactly as much as the frequency does. With non-proportional damping "
+               "(try c<sub>1</sub> = 15 on the Simulation page), the coupling terms of Ĉ matter, and "
+               "truncating modes also loses the damping they carried: the higher modes' ζ can be off "
+               "by much more than their frequency.</p>")
+    return "".join(out)

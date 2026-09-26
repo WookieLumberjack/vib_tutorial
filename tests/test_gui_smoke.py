@@ -183,7 +183,8 @@ def test_substructuring_page(app):
     assert page.model.labels == ["q_A1", "q_B1", "x4", "x8"]
     assert page.table.rowCount() == 8 and page.table.item(4, 3).text() == "not in model"
     assert "4 DOFs" in page.summary.text()
-    assert "Assemble the reduced model" in page.matrices.toPlainText()
+    text = page.matrices.toPlainText()
+    assert "Assemble the reduced model" in text and "Damping in the reduced model" in text
 
     # Guyan keeps only the boundary; "All modes" is exact.
     page.guyan_button.click()
