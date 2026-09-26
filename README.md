@@ -194,6 +194,18 @@ $x(t) = 2\,\mathrm{Re}(\psi_x e^{\lambda t})$. With non-proportional damping $\p
 complex, so each mass has its own phase. The two methods are linked by matching each
 damped pair to the undamped mode it most resembles (the modal assurance criterion, MAC).
 
+**Modal coordinates.** Each method gives a change of coordinates that the time histories
+can plot. Classical: $x = \Phi q$, so $q = \Phi^T M x$, and the equations become
+
+$$\ddot{q} + \Phi^T C\Phi\,\dot{q} + \mathrm{diag}(\omega_r^2)\,q = \Phi^T f$$
+
+which separate into N single-DOF equations only if $\Phi^T C\Phi$ is diagonal. Otherwise
+damping transfers motion between the $q_r$. State-space: $z = V\eta$, so $\eta = V^{-1}z$,
+and $\dot{\eta} = \Lambda\eta + V^{-1}Bf$ is decoupled for any damping. A conjugate pair
+contributes $2\,\mathrm{Re}(\psi_x\eta_r)$ to $x$. The app scales each coordinate to the
+mode's displacement at the mass where its normalized shape is 1: $\phi_{r,\max}\,q_r$
+and $2\,\mathrm{Re}(\eta_r)$.
+
 **Frequency response.** The receptance is solved directly at each frequency:
 $H(\omega) = (K - \omega^2 M + i\omega C)^{-1}$. It is also a sum of modal terms. With the
 state-space eigenvectors $V$ (and $V^{-1}$), every eigenvalue contributes a residue matrix,
@@ -231,9 +243,20 @@ The `core` package has no Qt dependency, so you can use it from scripts or noteb
 ```python
 from vib_tutorial.core import ChainSystem, modal_analysis
 
-res = modal_analysis(ChainSystem([1.0] * 4, [400.0] * 4, [15.0, 2.0, 2.0, 2.0]))
+chain = ChainSystem([1.0] * 4, [400.0] * 4, [15.0, 2.0, 2.0, 2.0])
+res = modal_analysis(chain)
 [(m.fn_hz, m.zeta_modal, m.damped.zeta) for m in res.modes]    # classical, N modes
 [(m.eigenvalue, m.shape) for m in res.complex_modes]           # state-space, 2N modes
+
+import numpy as np
+from vib_tutorial.core import Simulator, modal_coordinate_map
+
+sim = Simulator(chain)
+sim.set_displacement(0.01 * res.modes[2].shape)                # release classical mode 3
+t, x, v, f = sim.advance(2.0)                                  # per-step samples
+z = np.hstack([x, v])
+q = z @ modal_coordinate_map(chain, res)                       # classical, (steps, N), m
+eta = z @ modal_coordinate_map(chain, res, complex_modes=True) # one per pair, m
 
 from vib_tutorial.core import compare_modes, craig_bampton
 
