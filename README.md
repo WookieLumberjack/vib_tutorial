@@ -9,6 +9,8 @@ you change parameters.
 ground ──[k1,c1]── m1 ──[k2,c2]── m2 ──[k3,c3]── m3 ──[k4,c4]── m4
 ```
 
+![Main window: a harmonic force tuned to mode 2 drives the chain; the modal table and mode shapes are on the right](docs/images/main_window.png)
+
 ## Quick start
 
 Requires [uv](https://docs.astral.sh/uv/).
@@ -19,53 +21,129 @@ uv run vib-tutorial   # launch the app (or: uv run python -m vib_tutorial)
 uv run pytest         # run the tests
 ```
 
+## The window
+
+| Area | What it holds |
+|---|---|
+| **Left** | System parameters (m, k, c for each element, 1 to 8 masses), the applied force, and simulation controls (run/pause, speed, plot window, auto-scale) |
+| **Centre** | Animation of the chain (with a scale bar for the real displacement) above time histories of every mass's displacement and the applied force |
+| **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
+
 ## What you can do
 
 - **Edit any mass, stiffness, or damping value while the simulation runs.** The state is
-  kept, so you see the system respond to the change. You can use 1 to 8 masses.
+  kept, so you see the system respond to the change.
 - **Apply a force to any mass**: a step, a harmonic `F sin(2πft)`, or a rectangular pulse.
   Press **Space** (or the button) to switch it on and off, and watch the transients as it
   starts and stops.
 - **Tune the drive frequency to a natural frequency** from the "Tune to…" menu to see
   resonance build up.
 - **Release a mode**: select a mode in the table and click *Release selected mode*. The
-  masses start from that mode shape and oscillate at its frequency. With proportional
-  damping, only that mode responds.
-- **Slow motion** (0.05× to 2×) for the higher modes, and auto-scaled animation so small
-  motions stay visible. The scale bar shows the real displacement.
+  masses start from that mode shape and vibrate freely. The plot window can be fitted to
+  a number of cycles of any mode.
+- **Switch between two modal-analysis methods** (below), and compare them on the same
+  system.
+- **Slow motion** (0.05× to 2×) for the higher modes, and auto-scaled animation and plots
+  so small motions stay visible.
 
-## Reference panels
+### Two modal-analysis methods
 
-| Panel | What it shows |
-|---|---|
-| Modal table | Undamped natural frequency fₙ, modal damping ratio ζ = φᵀCφ/(2ωₙ), exact ζ and damped frequency f_d from the complex eigenvalues |
-| Mode shapes | Undamped mode shapes vs. position (can be animated) |
-| Frequency response | Receptance magnitude and phase \|X_i/F\| for the forced mass, with natural frequencies and the drive frequency marked |
+The *Method* selector on the Modal analysis tab switches between two ways of solving for
+the modes.
 
-The note under the modal table tells you whether the damping is **proportional**. If it
-is, ζ modal equals ζ exact and the modes are real. Try changing only `c1` to see the
-difference: the modes become complex and ζ modal is only an approximation.
+**Classical: N real modes.** The undamped eigenproblem gives N natural frequencies and
+real mode shapes; damping is estimated per mode. The table compares this estimate
+(ζ modal) with the exact value (ζ exact). The note under the table says whether the
+damping is *proportional*. If it is not, the estimate is only an approximation, and
+releasing a real mode shape excites other modes too. Below, with only `c1` raised to 15,
+the release of mode 3 leaves slow mode-1 motion behind:
 
-## How it works
+![Classical method with non-proportional damping: releasing mode 3 also excites mode 1](docs/images/classical_release_nonproportional.png)
 
-- `core/model.py` assembles the diagonal **M** and the tridiagonal **C** and **K**
-  element by element.
-- `core/modal.py` solves `Kφ = ω²Mφ` (`scipy.linalg.eigh`) for the undamped modes. It
-  solves the eigenvalues of the 2N×2N state matrix for the exact damped poles
-  `λ = −ζωₙ ± iω_d`, and matches the two sets using MAC.
-- `core/simulator.py` integrates `z' = Az + Bu` using the **exact matrix-exponential
-  transition** with a first-order hold on the force. It is unconditionally stable and adds
-  no numerical damping, so any damping you see is physical. The step size adapts to the
-  fastest mode and the drive frequency.
-- `gui/` is the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
+**State-space: 2N complex modes.** The full damped problem is solved in first-order form,
+which gives all 2N eigenvalues: complex-conjugate pairs λ, λ* for oscillatory modes (and
+real eigenvalues for overdamped or rigid-body motion). Selecting a row shows its complex
+mode shape in a complex-plane (phasor) plot, with the amplitude and phase of each mass.
+Phases other than 0° or 180° mean the masses peak at different times. Releasing a
+complex mode sets both displacement and velocity, so on the same system only that mode
+responds and decays cleanly:
+
+![State-space method on the same system: 2N eigenvalues, the complex-plane plot of λ5, and a clean single-mode release](docs/images/state_space_release.png)
+
+### Frequency response
+
+The receptance |X_i / F| and phase of every mass for a force at the selected mass. The
+natural frequencies are dotted and the current drive frequency is dashed.
+
+<img src="docs/images/frequency_response.png" alt="Frequency response magnitude and phase" width="420">
+
+## The math, briefly
+
+The *Background* tab in the app explains this in more depth; this is the outline.
+
+**Model.** Newton's second law for each mass gives
+
+$$M\ddot{x} + C\dot{x} + Kx = f(t)$$
+
+where $M$ is diagonal (the masses) and $C$, $K$ are tridiagonal, assembled element by
+element: each spring or damper between two neighbours adds $\begin{bmatrix}v & -v\\ -v & v\end{bmatrix}$
+to their rows and columns (element 1 connects to ground). Everything is SI.
+
+**Classical modal analysis.** Ignoring damping, $x = \phi\cos\omega t$ gives the symmetric
+generalized eigenproblem $K\phi = \omega^2 M\phi$, which has N real natural frequencies
+$\omega_r$ and real mode shapes $\phi_r$. With mass-normalized shapes collected in $\Phi$,
+$\Phi^T M\Phi = I$ and $\Phi^T K\Phi = \mathrm{diag}(\omega_r^2)$. Damping is estimated
+from the diagonal of $\Phi^T C\Phi$:
+
+$$\zeta_r = \frac{\phi_r^T C\,\phi_r}{2\omega_r}$$
+
+This is exact only if $\Phi^T C\Phi$ is diagonal (*proportional* damping, e.g.
+$C = \alpha M + \beta K$). The app reports a coupling index, the largest off-diagonal term
+relative to the diagonal, to show how far from proportional the damping is.
+
+**State-space (complex) modal analysis.** With $z = [x,\ \dot{x}]$ the N second-order
+equations become 2N first-order ones:
+
+$$\dot{z} = Az + Bf, \qquad A = \begin{bmatrix} 0 & I \\ -M^{-1}K & -M^{-1}C \end{bmatrix}$$
+
+The eigenproblem $A\psi = \lambda\psi$ is exact for any damping. It has 2N eigenvalues,
+$\lambda = -\zeta\omega_n \pm i\omega_d$ in conjugate pairs, and eigenvectors of the form
+$[\psi_x,\ \lambda\psi_x]$. One pair together gives a real motion
+$x(t) = 2\,\mathrm{Re}(\psi_x e^{\lambda t})$. With non-proportional damping $\psi_x$ is
+complex, so each mass has its own phase. The two methods are linked by matching each
+damped pair to the undamped mode it most resembles (the modal assurance criterion, MAC).
+
+**Frequency response.** The receptance is solved directly at each frequency:
+$H(\omega) = (K - \omega^2 M + i\omega C)^{-1}$.
+
+**Time simulation.** The simulator advances $\dot{z} = Az + Bf$ with the exact
+discrete-time solution. Over a step $h$, with the force varying linearly across the step
+(first-order hold),
+
+$$z_{k+1} = e^{Ah}z_k + \Gamma_0 f_k + \Gamma_1 f_{k+1}$$
+
+where $e^{Ah}$, $\Gamma_0$ and $\Gamma_1$ come from a single matrix exponential of an augmented
+matrix. The free response is exact, so the scheme is unconditionally stable and adds no
+numerical damping, however stiff the springs are made: any decay you see is physical. The
+step size adapts to the fastest mode, the drive frequency and the pulse length.
+
+## Code layout
+
+- `core/model.py`: assembles $M$, $C$, $K$ and the state-space matrices.
+- `core/modal.py`: classical modes (`scipy.linalg.eigh`), all 2N state-space eigenpairs
+  (`scipy.linalg.eig`), the MAC pairing, and the frequency response.
+- `core/simulator.py`: the exact first-order-hold time stepper.
+- `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed.
 
 The `core` package has no Qt dependency, so you can use it from scripts or notebooks:
 
 ```python
 from vib_tutorial.core import ChainSystem, modal_analysis
-res = modal_analysis(ChainSystem.uniform(4, mass=1.0, stiffness=400.0, damping=2.0))
-[(m.fn_hz, m.damped.zeta) for m in res.modes]
+
+res = modal_analysis(ChainSystem([1.0] * 4, [400.0] * 4, [15.0, 2.0, 2.0, 2.0]))
+[(m.fn_hz, m.zeta_modal, m.damped.zeta) for m in res.modes]    # classical, N modes
+[(m.eigenvalue, m.shape) for m in res.complex_modes]           # state-space, 2N modes
 ```
 
 ## Ideas for extension
