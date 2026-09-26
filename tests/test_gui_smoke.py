@@ -457,3 +457,51 @@ def test_rigid_body_mode_title(app):
     plots.set_comparisons([ModeComparison(1, 0.0, 0.0, 1.0, shape, shape)], None)
     plots.set_highlight(0)  # error is None for f_true = 0: used to raise TypeError
     assert "error —" in plots.shape.titleLabel.text
+
+
+def test_modal_test_page(app):
+    from vib_tutorial.core import Excitation, Window
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    p = w.test_page
+    assert p.acq is None  # nothing is measured until the page is shown
+    w.show()
+    w.pages.setCurrentWidget(p)
+    assert p.acq is not None and p.fs_auto.isChecked()
+    while not p.acq.done:
+        p._measure_some()
+    assert p.progress.text().startswith("10 / 10")
+    assert p.window.currentData() is Window.FORCE_EXPONENTIAL  # picked for the impact test
+    first = p.acq
+
+    # Noise and processing reuse the same measurement.
+    p.force_noise.setValue(5.0)
+    p.window.setCurrentIndex(list(Window).index(Window.RECTANGULAR))
+    assert p.acq is first
+    # Test settings measure again; the excitation picks its usual window.
+    p.excitation.setCurrentIndex(list(Excitation).index(Excitation.RANDOM))
+    assert p.acq is not first and p.window.currentData() is Window.HANN
+    assert p.overlap.isVisibleTo(p) and not p.tip.isVisibleTo(p)
+
+    # Fewer averages are processed at once, from the data already measured.
+    while not p.acq.done:
+        p._measure_some()
+    p.averages.setValue(3)
+    assert p.estimator.estimate().count == 3
+
+    p.excitation.setCurrentIndex(list(Excitation).index(Excitation.STEPPED_SINE))
+    p.points.setValue(12)
+    while not p.acq.done:
+        p._measure_some()
+    assert p.progress.text().startswith("12 / 12") and not p.window.isEnabled()
+    assert "Points in it" in p.check.toHtml()
+
+    # The chain changes on the Simulation page: the test follows, with fs re-chosen.
+    fs = p.fs.value()
+    w.params.dof.setValue(6)
+    assert p.acq.n == 6 and p.output.count() == 6 and p.fs.value() > fs
+    p.output.setCurrentIndex(0)
+    p.anti_alias.setChecked(False)
+    assert not p.acq.settings.anti_alias
+    w.close()

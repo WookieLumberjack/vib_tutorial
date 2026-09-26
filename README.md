@@ -29,9 +29,10 @@ uv run pytest         # run the tests
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion, in physical or modal coordinates |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
-Two more pages work on the same chain: **FRF matrix** shows every term of the receptance
-matrix and how the modes build it up, and **Substructuring (CMS)** reduces the chain by
-component mode synthesis: Craig–Bampton, Rubin or MacNeal (both below).
+Three more pages work on the same chain: **FRF matrix** shows every term of the receptance
+matrix and how the modes build it up, **Substructuring (CMS)** reduces the chain by
+component mode synthesis (Craig–Bampton, Rubin or MacNeal), and **Virtual modal test**
+measures the FRF from simulated force and response signals, as in a lab (all below).
 
 ## What you can do
 
@@ -206,6 +207,34 @@ $\hat M = \mathrm{diag}(I, 0)$. Both have $\hat K = T^TKT$, which now couples $q
 
 ![Compare methods: the same cut reduced three ways; Craig–Bampton and Rubin converge to the exact mode 3, MacNeal does not](docs/images/substructuring_compare.png)
 
+### Virtual modal test
+
+The **Virtual modal test** page measures the FRF the way a lab does: from sampled force and
+response signals alone, never from M, C and K. A force excites one mass, every mass's
+displacement is recorded, and the FRF column is estimated and drawn over the exact one.
+Each step of the measurement, and each error it can bring in, can be switched on and off.
+
+- **Excitation**: impact hammer (the tip sets the pulse length, and so how high it
+  excites), continuous random, burst random, periodic random, periodic chirp, or stepped
+  sine. The response is simulated with the same exact first-order-hold discretization as
+  the simulator.
+- **Acquisition**: sample rate (automatic, or set by hand), block size (which sets
+  Δf = f<sub>s</sub>/N<sub>b</sub>), averages, overlap, and an anti-alias filter. Turn the filter
+  off and a mode above Nyquist folds back into the band.
+- **Noise** on the force and on the responses, as a percentage of each channel's peak.
+- **Processing**: rectangular, Hann, flat-top, or force + exponential windows, and the H1 or
+  H2 estimator, with coherence. With the exponential window, a dashed curve shows the exact
+  FRF with the damping the window adds.
+- Noise and processing act on the data already measured, so the same test can be compared
+  with different windows, estimators or noise levels. Blocks are measured a few per frame,
+  so the average can be watched settling.
+- **Setup check**: each mode's half-power bandwidth against Δf, how much of a hit is left
+  at the end of the block, the hammer's level at each mode, and aliasing.
+- **Theory**: sampling and aliasing, the DFT and leakage, windows, averaging, H1 against H2,
+  coherence, and the excitation types.
+
+![Virtual modal test: a short block with an exponential window; the measured FRF follows the exact one with the window's extra damping](docs/images/virtual_modal_test.png)
+
 ## The math, briefly
 
 The *Background* tab in the app explains this in more depth; this is the outline.
@@ -296,6 +325,9 @@ $w_k^T W w_k$, so the energy balance closes to rounding error.
 - `core/frf_matrix.py`: the full receptance matrix and its modal (pole–residue) terms.
 - `core/simulator.py`: the exact first-order-hold time stepper and its exact energy ledger.
 - `core/energy.py`: kinetic, potential and stored energy, and the energy in each mode.
+- `core/measurement.py`: the virtual modal test: excitation signals, a fast exact response
+  (the FOH update diagonalized into one first-order filter per eigenvalue), anti-alias
+  filtering and sampling, noise, windows, and the H1/H2 and coherence estimates.
 - `core/substructure.py`: component mode synthesis (Craig–Bampton, Rubin, MacNeal), mode
   comparison (frequency error, MAC) and the reduced-model FRF.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
@@ -336,6 +368,16 @@ from vib_tutorial.core import free_interface
 
 rubin = free_interface(s, interfaces=[3], n_kept=[1, 1])       # B keeps its rigid-body mode
 macneal = free_interface(s, [3], [1, 1], residual_mass=False)  # massless residual: 2 modes
+
+from vib_tutorial.core import (Acquisition, Excitation, FrfEstimator, MeasurementSettings,
+                               Processing, Window)
+
+acq = Acquisition(chain, MeasurementSettings(excitation=Excitation.RANDOM, input_dof=3,
+                                             fs=20.0, block=1024, averages=20, overlap=0.5))
+while not acq.done:
+    acq.step()                                                 # one block per step
+est = FrfEstimator(acq, Processing(window=Window.HANN, response_noise=0.02)).estimate()
+est.freqs, est.H, est.coherence                                # (F,), (F, N), (F, N)
 ```
 
 ## Ideas for extension

@@ -24,6 +24,7 @@ from .background import COUPLING_TIP, make_background_view
 from .energy import EnergyPanel, EnergyState
 from .frf_matrix import FrfMatrixPage
 from .history import History
+from .modal_test import ModalTestPage
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, PhasorPanel, TimeHistoryPlot
@@ -226,6 +227,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.frf_page = FrfMatrixPage()
         self.pages.addTab(self.frf_page, "FRF matrix")
         self.pages.addTab(self.cms_page, "Substructuring (CMS)")
+        self.test_page = ModalTestPage()
+        self.pages.addTab(self.test_page, "Virtual modal test")
         self.setCentralWidget(self.pages)
         self.resize(1700, 900)
 
@@ -243,6 +246,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cms_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
         self.frf_page.dof_requested.connect(self.params.dof.setValue)
         self.frf_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
+        self.test_page.dof_requested.connect(self.params.dof.setValue)
+        self.test_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
 
         self._apply_dof(system.n)
         self._refresh_modal()
@@ -278,6 +283,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.modal = modal_analysis(self.sim.system)
         self.cms_page.set_system(self.sim.system, self.modal)
         self.frf_page.set_system(self.sim.system, self.modal)
+        self.test_page.set_system(self.sim.system, self.modal)
         self._refresh_modal_views()
 
     def _on_method_changed(self) -> None:

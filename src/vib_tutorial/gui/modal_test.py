@@ -1,0 +1,807 @@
+"""Virtual modal test page: measure the chain's FRF as in a lab and compare it with the exact one.
+
+Left: the test (excitation, acquisition, noise, processing). Centre: the
+latest recorded block and force spectrum above the estimated FRF and its
+coherence. Right: a check of the settings against the chain's modes, and
+theory. The data are measured a few blocks per frame, so the average can be
+watched settling; changing only noise or processing reuses the same data.
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import pyqtgraph as pg
+from PySide6 import QtCore, QtWidgets
+
+from ..core import (
+    Acquisition,
+    ChainSystem,
+    Estimate,
+    Estimator,
+    Excitation,
+    FrfEstimator,
+    ModalResult,
+    Processing,
+    MeasurementSettings,
+    Window,
+    frf,
+    impact_spectrum,
+    modal_analysis,
+    transfer,
+)
+from ..core.measurement import AA_CUTOFF
+from .panels import spin
+from .style import FORCE_COLOR, MASS_COLORS, MAX_DOF, MODE_COLORS
+
+FRAME_MS = 30
+STEP_BUDGET_MS = 25  # measuring per frame, so the page stays responsive
+BLOCK_SIZES = [256, 512, 1024, 2048, 4096, 8192]
+OVERLAPS = [0.0, 0.5, 0.75]
+EXACT_COLOR = "#000000"
+WINDOW_COLOR = "#888888"
+BAND_SHADE = (0, 0, 0, 18)
+
+# The window each excitation is normally measured with; picked when the excitation changes.
+RECOMMENDED_WINDOW = {
+    Excitation.IMPACT: Window.FORCE_EXPONENTIAL,
+    Excitation.RANDOM: Window.HANN,
+    Excitation.BURST_RANDOM: Window.RECTANGULAR,
+    Excitation.PERIODIC_RANDOM: Window.RECTANGULAR,
+    Excitation.CHIRP: Window.RECTANGULAR,
+    Excitation.STEPPED_SINE: Window.RECTANGULAR,
+}
+
+EXCITATION_TIPS = {
+    Excitation.IMPACT: "A hammer hit: a short half-sine pulse at the start of each block. Quick, and "
+    "no shaker needed. The tip sets how short the pulse is, and so how high it excites.",
+    Excitation.RANDOM: "A shaker driven by continuous band-limited noise. Never periodic in the "
+    "block, so it leaks without a window (Hann). Averaging reduces noise and non-linearity.",
+    Excitation.BURST_RANDOM: "Noise for the first part of each block, then silence while the "
+    "response dies away. If it dies away inside the block, no window is needed.",
+    Excitation.PERIODIC_RANDOM: "A random signal exactly one block long, repeated until the "
+    "response is steady, so both signals are periodic in the block: no leakage.",
+    Excitation.CHIRP: "A sine sweeping from 0 to the band edge in one block, repeated. Periodic "
+    "in the block, like periodic random.",
+    Excitation.STEPPED_SINE: "One frequency at a time: wait for steady state, then fit a sine to "
+    "force and response. Slow, but the most accurate, with no windows or leakage.",
+}
+
+WINDOW_TIPS = {
+    Window.RECTANGULAR: "No window. Right when the signals are periodic in the block or have died "
+    "away by its end; otherwise it leaks.",
+    Window.HANN: "Tapers both ends to zero, which cuts leakage for random signals. It also blurs "
+    "sharp peaks a little, and it wipes out a hammer hit at the start of the block.",
+    Window.FLAT_TOP: "Very wide main lobe: accurate amplitudes of pure tones, but blurs resonances.",
+    Window.FORCE_EXPONENTIAL: "For impact tests. Force: keeps the hit and zeroes the noise after "
+    "it. Exponential on both channels: makes the response die away inside the block, which adds "
+    "known extra damping to every mode.",
+}
+
+
+def suggested_fs(result: ModalResult) -> float:
+    """A sample rate whose passband (AA_CUTOFF x Nyquist) clears the highest mode by 25%."""
+    f_top = max((m.fn_hz for m in result.complex_modes if m.is_oscillatory), default=1.0)
+    need = 1.25 * f_top * 2.0 / AA_CUTOFF
+    scale = 10.0 ** (math.floor(math.log10(need)) - 1)
+    return math.ceil(need / scale) * scale
+
+
+def percent(fraction: float) -> str:
+    return "&lt; 0.01%" if fraction < 1e-4 else f"{100 * fraction:.2g}%"
+
+
+def phase_deg(h: np.ndarray) -> np.ndarray:
+    """Phase in degrees, wrapped to (-190, 170] so a phase near -180 does not flicker to +180."""
+    return (np.degrees(np.angle(h)) + 190.0) % 360.0 - 190.0
+
+
+class SignalView(pg.GraphicsLayoutWidget):
+    """The latest block: force and one response against time (with the windows), and the force spectrum."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.force = self.addPlot(row=0, col=0)
+        self.force.setLabel("left", "Force", units="N")
+        self.spectrum = self.addPlot(row=0, col=1, rowspan=2)
+        self.spectrum.setLabel("left", "Force spectrum", units="dB")
+        self.spectrum.setLabel("bottom", "Frequency", units="Hz")
+        self.spectrum.showGrid(x=True, y=True, alpha=0.3)
+        self.response = self.addPlot(row=1, col=0)
+        self.response.setLabel("bottom", "Time in block", units="s")
+        self.response.setXLink(self.force)
+        for p in (self.force, self.response):
+            p.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#bbb", width=1)))
+        self.ci.layout.setColumnStretchFactor(0, 3)
+        self.ci.layout.setColumnStretchFactor(1, 2)
+        dash = QtCore.Qt.PenStyle.DashLine
+        self.f_curve = self.force.plot(pen=pg.mkPen(FORCE_COLOR, width=1))
+        self.f_window = self.force.plot(pen=pg.mkPen(WINDOW_COLOR, width=1, style=dash))
+        self.x_curve = self.response.plot(pen=pg.mkPen(MASS_COLORS[0], width=1))
+        self.x_window = self.response.plot(pen=pg.mkPen(WINDOW_COLOR, width=1, style=dash))
+        self.s_curve = self.spectrum.plot(pen=pg.mkPen(FORCE_COLOR, width=1))
+        self.s_tip = self.spectrum.plot(pen=pg.mkPen(EXACT_COLOR, width=1, style=dash))
+        self.band = pg.LinearRegionItem(movable=False, brush=pg.mkBrush(*BAND_SHADE), pen=pg.mkPen(None))
+        self.spectrum.addItem(self.band)
+
+    def set_data(self, est: Estimate, j: int, settings: MeasurementSettings, stepped: bool) -> None:
+        self.f_curve.setData(est.t, est.f)
+        self.x_curve.setPen(pg.mkPen(MASS_COLORS[j], width=1))
+        self.x_curve.setData(est.t, est.x[:, j])
+        self.response.setLabel("left", f"x{j + 1}", units="m")
+        for curve, window, signal in ((self.f_window, est.force_window, est.f), (self.x_window, est.response_window, est.x[:, j])):
+            if window is None:
+                curve.setData([], [])
+            else:
+                curve.setData(est.t, window * float(np.abs(signal).max() or 1.0))
+        self.force.setTitle("Last stepped-sine frequency (fitted)" if stepped else
+                            f"Block {est.count}: signals as measured · dashed: window (scaled)", size="9pt")
+        spec = est.force_spectrum
+        with np.errstate(divide="ignore"):
+            db = 10.0 * np.log10(spec / spec.max()) if spec.size and spec.max() > 0 else spec
+        self.s_curve.setData(est.freqs, db, connect="finite", symbol="o" if stepped else None,
+                             symbolSize=4, symbolPen=None, symbolBrush=FORCE_COLOR)
+        nyq = settings.fs / 2
+        if settings.excitation is Excitation.IMPACT:
+            f = np.linspace(0.0, nyq, 400)
+            with np.errstate(divide="ignore"):
+                self.s_tip.setData(f, 20.0 * np.log10(impact_spectrum(settings.tip_width, f)), connect="finite")
+        else:
+            self.s_tip.setData([], [])
+        self.band.setRegion((settings.band, nyq))
+        self.spectrum.setXRange(0.0, nyq, padding=0)
+        self.spectrum.setYRange(-60.0, 5.0, padding=0)
+        self.spectrum.setTitle("Averaged |F|² (dB re peak)" + (" · dashed: ideal hammer pulse" if
+                               settings.excitation is Excitation.IMPACT else ""), size="9pt")
+
+
+class FrfView(pg.GraphicsLayoutWidget):
+    """Estimated receptance of one response against the exact one: magnitude, phase, coherence."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.mag = self.addPlot(row=0, col=0)
+        self.mag.setLogMode(x=False, y=True)
+        self.mag.setLabel("left", "|H|  [m/N]")
+        self.mag.getAxis("left").enableAutoSIPrefix(False)
+        self.mag.addLegend(offset=(-5, 5))
+        self.phase = self.addPlot(row=1, col=0)
+        self.phase.setLabel("left", "Phase", units="deg")
+        self.phase.getAxis("left").setTickSpacing(90.0, 45.0)
+        self.coh = self.addPlot(row=2, col=0)
+        self.coh.setLabel("left", "Coherence γ²")
+        self.coh.setLabel("bottom", "Frequency", units="Hz")
+        self.coh.setYRange(0.0, 1.05, padding=0)
+        for p in (self.mag, self.phase, self.coh):
+            p.showGrid(x=True, y=True, alpha=0.3)
+            if p is not self.mag:
+                p.setXLink(self.mag)
+        self.phase.setYRange(-195.0, 175.0, padding=0)
+        self.ci.layout.setRowStretchFactor(0, 3)
+        self.ci.layout.setRowStretchFactor(1, 2)
+        self.ci.layout.setRowStretchFactor(2, 1)
+        self._key: tuple | None = None
+        self.measured: list[pg.PlotDataItem] = []  # magnitude, phase, coherence
+
+    def set_data(
+        self,
+        est: Estimate,
+        j: int,
+        system: ChainSystem,
+        result: ModalResult,
+        settings: MeasurementSettings,
+        processing: Processing,
+        stepped: bool,
+    ) -> None:
+        # The exact curves, mode lines and bands change only with the test; while it runs,
+        # only the measured curves are updated.
+        key = (id(system), id(result), settings.fs, settings.input_dof, j, stepped,
+               processing.window, processing.exp_end, processing.estimator)
+        if key != self._key:
+            self._key = key
+            self._draw_reference(j, system, result, settings, processing, stepped)
+        keep = est.freqs > 0
+        fm, Hm = est.freqs[keep], est.H[keep, j]
+        with np.errstate(invalid="ignore"):
+            mag = np.where(np.abs(Hm) > 0, np.abs(Hm), np.nan)
+        mag_curve, phase_curve, coh_curve = self.measured
+        mag_curve.setData(fm, mag, connect="finite")
+        phase_curve.setData(fm, phase_deg(Hm), connect="finite")
+        if est.coherence is not None:
+            coh_curve.setData(fm, est.coherence[keep, j], connect="finite")
+        noun = "frequencies" if stepped else "averages"
+        self.mag.legend.getLabel(mag_curve).setText(f"Measured {processing.estimator.name} ({est.count} {noun})")
+
+    def _draw_reference(
+        self,
+        j: int,
+        system: ChainSystem,
+        result: ModalResult,
+        settings: MeasurementSettings,
+        processing: Processing,
+        stepped: bool,
+    ) -> None:
+        for p in (self.mag, self.phase, self.coh):
+            p.clear()
+        self.mag.legend.clear()
+        nyq = settings.fs / 2
+        f = np.linspace(nyq / 2000, nyq, 2000)
+        peaks = [m.damped.fd_hz for m in result.modes if m.damped is not None and m.damped.fd_hz < nyq]
+        f = np.unique(np.concatenate([f, peaks]))
+        exact = frf(system, f, settings.input_dof)[:, j]
+        dash = QtCore.Qt.PenStyle.DashLine
+        self.mag.plot(f, np.abs(exact), pen=pg.mkPen(EXACT_COLOR, width=1.5), name="Exact")
+        self.phase.plot(f, phase_deg(exact), pen=pg.mkPen(EXACT_COLOR, width=1.5))
+        if processing.window is Window.FORCE_EXPONENTIAL and processing.exp_end < 1.0 and not stepped:
+            damped = transfer(system, 1j * 2 * np.pi * f + 1.0 / processing.exp_tau(settings), settings.input_dof)[:, j]
+            pen = pg.mkPen("#777", width=1, style=dash)
+            self.mag.plot(f, np.abs(damped), pen=pen, name="Exact + window damping")
+            self.phase.plot(f, phase_deg(damped), pen=pen)
+
+        color = MASS_COLORS[j]
+        symbol = dict(symbol="o", symbolSize=5, symbolPen=None, symbolBrush=color) if stepped else {}
+        self.measured = [
+            self.mag.plot(pen=pg.mkPen(color, width=1.5), name="Measured", **symbol),
+            self.phase.plot(pen=pg.mkPen(color, width=1), **symbol),
+            self.coh.plot(pen=pg.mkPen(color, width=1)),
+        ]
+        if stepped:
+            label = pg.TextItem("A stepped sine has no coherence (one reading per frequency)", color="#666")
+            label.setPos(0.02 * nyq, 0.6)
+            self.coh.addItem(label)
+
+        for r, m in enumerate(result.modes):
+            if m.damped is None or m.damped.fd_hz >= nyq:
+                continue
+            pen = pg.mkPen(MODE_COLORS[r % len(MODE_COLORS)], width=1, style=QtCore.Qt.PenStyle.DotLine)
+            for p in (self.mag, self.phase, self.coh):
+                p.addItem(pg.InfiniteLine(pos=m.damped.fd_hz, angle=90, pen=pen))
+        for p in (self.mag, self.phase, self.coh):
+            band = pg.LinearRegionItem((settings.band, nyq), movable=False, brush=pg.mkBrush(*BAND_SHADE),
+                                       pen=pg.mkPen(None))
+            band.setZValue(-10)
+            p.addItem(band)
+        finite = np.abs(exact[np.isfinite(exact)])
+        if finite.size:
+            lo, hi = math.log10(finite.min()), math.log10(finite.max())
+            self.mag.setYRange(lo - 1.0, hi + 0.5, padding=0)
+        self.mag.setXRange(0.0, nyq, padding=0)
+        drive = "driving point" if j == settings.input_dof else "transfer"
+        self.mag.setTitle(f"H<sub>{j + 1}{settings.input_dof + 1}</sub> = x{j + 1} / F at m{settings.input_dof + 1} "
+                          f"({drive}) · dotted: damped natural frequencies · shaded: above the "
+                          "anti-alias passband", size="9pt")
+
+
+class ModalTestPage(QtWidgets.QWidget):
+    """Controls on the left, signals and FRF in the centre, setup check and theory on the right."""
+
+    dof_requested = QtCore.Signal(int)  # the user changed N here; the main window owns the system
+    edit_parameters = QtCore.Signal()  # the user wants the Simulation page's parameter panel
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.system: ChainSystem | None = None
+        self.result: ModalResult | None = None
+        self.acq: Acquisition | None = None
+        self.estimator: FrfEstimator | None = None
+        self._dirty = False
+        self._timer = QtCore.QTimer(self)
+        self._timer.setInterval(FRAME_MS)
+        self._timer.timeout.connect(self._measure_some)
+        self._clock = QtCore.QElapsedTimer()
+
+        # --- test setup
+        setup = QtWidgets.QGroupBox("Test")
+        form = QtWidgets.QFormLayout(setup)
+        self.dof = QtWidgets.QSpinBox()
+        self.dof.setRange(1, MAX_DOF)
+        self.dof.setToolTip("Same chain as the Simulation page; changing it here changes it there too.")
+        self.dof.valueChanged.connect(self.dof_requested)
+        form.addRow("Number of masses:", self.dof)
+        self.excitation = QtWidgets.QComboBox()
+        for i, e in enumerate(Excitation):
+            self.excitation.addItem(e.value, e)
+            self.excitation.setItemData(i, EXCITATION_TIPS[e], QtCore.Qt.ItemDataRole.ToolTipRole)
+        form.addRow("Excitation:", self.excitation)
+        self.input = QtWidgets.QComboBox()
+        self.input.setToolTip("Where the force is applied. Every mass's displacement is measured.")
+        form.addRow("Force at:", self.input)
+        self.tip = spin(1.0, 2000.0, 50.0, 1, " ms")
+        self.tip.setToolTip(
+            "<p>Duration of the hammer's half-sine pulse. A hard (metal) tip gives a short pulse, "
+            "a soft (rubber) tip a long one.</p><p>The pulse's spectrum is flat at low frequency, "
+            "rolls off above about 1/τ and first reaches zero at 1.5/τ. Modes above that are "
+            "barely excited, so noise swamps them.</p>"
+        )
+        self.tip_label = QtWidgets.QLabel("Hammer pulse τ:")
+        form.addRow(self.tip_label, self.tip)
+        self.burst = spin(5.0, 100.0, 50.0, 0, " %")
+        self.burst.setToolTip("How much of each block the shaker is on. The rest lets the response die away.")
+        self.burst_label = QtWidgets.QLabel("Burst length:")
+        form.addRow(self.burst_label, self.burst)
+        self.overlap = QtWidgets.QComboBox()
+        for o in OVERLAPS:
+            self.overlap.addItem(f"{o:.0%}", o)
+        self.overlap.setCurrentIndex(1)
+        self.overlap.setToolTip("Consecutive blocks share this much data. With a Hann window, 50% "
+                                "overlap uses the data the window tapers away and gives more "
+                                "averages from the same measuring time.")
+        self.overlap_label = QtWidgets.QLabel("Block overlap:")
+        form.addRow(self.overlap_label, self.overlap)
+        self.points = QtWidgets.QSpinBox()
+        self.points.setRange(10, 400)
+        self.points.setValue(100)
+        self.points.setKeyboardTracking(False)
+        self.points.setToolTip("Frequencies measured, evenly spaced up to the band edge.")
+        self.points_label = QtWidgets.QLabel("Frequencies:")
+        form.addRow(self.points_label, self.points)
+        link = QtWidgets.QLabel("Masses, springs and dampers are edited on the <a href='#sim'>Simulation page</a>.")
+        link.setStyleSheet("color: #666;")
+        link.setWordWrap(True)
+        link.linkActivated.connect(lambda _: self.edit_parameters.emit())
+        form.addRow(link)
+
+        # --- acquisition
+        daq = QtWidgets.QGroupBox("Acquisition")
+        form = QtWidgets.QFormLayout(daq)
+        fs_row = QtWidgets.QHBoxLayout()
+        self.fs = spin(0.5, 10000.0, 20.0, 2, " Hz")
+        self.fs.setToolTip("Samples per second on every channel. Nyquist frequency fs/2 is the "
+                           "highest frequency the samples can represent.")
+        self.fs_auto = QtWidgets.QCheckBox("Auto")
+        self.fs_auto.setChecked(True)
+        self.fs_auto.setToolTip("Follow the chain: choose fs so the highest mode is well inside "
+                                f"the anti-alias passband ({AA_CUTOFF:.0%} of Nyquist).")
+        fs_row.addWidget(self.fs, 1)
+        fs_row.addWidget(self.fs_auto)
+        form.addRow("Sample rate fs:", fs_row)
+        self.block = QtWidgets.QComboBox()
+        for b in BLOCK_SIZES:
+            self.block.addItem(str(b), b)
+        self.block.setCurrentIndex(BLOCK_SIZES.index(1024))
+        self.block.setToolTip("Samples per block Nb. The block lasts T = Nb/fs and the FRF lines "
+                              "are Δf = 1/T apart: longer blocks resolve narrower peaks.")
+        self.block_label = QtWidgets.QLabel("Block size Nb:")
+        form.addRow(self.block_label, self.block)
+        self.averages = QtWidgets.QSpinBox()
+        self.averages.setRange(1, 100)
+        self.averages.setValue(10)
+        self.averages.setKeyboardTracking(False)
+        self.averages.setToolTip("Blocks averaged. Noise in the estimate falls as 1/√(averages).")
+        self.averages_label = QtWidgets.QLabel("Averages:")
+        form.addRow(self.averages_label, self.averages)
+        self.anti_alias = QtWidgets.QCheckBox("Anti-alias filter")
+        self.anti_alias.setChecked(True)
+        self.anti_alias.setToolTip(
+            "<p>A steep low-pass on every channel before sampling, with its passband edge at "
+            f"{AA_CUTOFF:.0%} of Nyquist (the shaded band on the plots is above it).</p>"
+            "<p>Without it, response above fs/2 is not lost but folds back: a mode at f "
+            "appears at |f − k·fs|, mixed in with the real response.</p>"
+        )
+        form.addRow(self.anti_alias)
+        self.daq_info = QtWidgets.QLabel()
+        self.daq_info.setWordWrap(True)
+        self.daq_info.setStyleSheet("color: #666;")
+        form.addRow(self.daq_info)
+
+        # --- noise
+        noise = QtWidgets.QGroupBox("Measurement noise")
+        form = QtWidgets.QFormLayout(noise)
+        noise_tip = ("Random noise added to the channel, as a percentage of the channel's peak in "
+                     "each block (the range an analyzer would set). Changing it reuses the same "
+                     "measurement, so you can compare like with like.")
+        self.force_noise = spin(0.0, 100.0, 0.0, 2, " %")
+        self.force_noise.setToolTip(noise_tip + " Noise on the force biases H1 low.")
+        form.addRow("Force channel:", self.force_noise)
+        self.response_noise = spin(0.0, 100.0, 0.0, 2, " %")
+        self.response_noise.setToolTip(noise_tip + " Noise on the response biases H2 high.")
+        form.addRow("Response channels:", self.response_noise)
+
+        # --- processing
+        proc = QtWidgets.QGroupBox("Processing")
+        form = QtWidgets.QFormLayout(proc)
+        self.window = QtWidgets.QComboBox()
+        for i, w in enumerate(Window):
+            self.window.addItem(w.value, w)
+            self.window.setItemData(i, WINDOW_TIPS[w], QtCore.Qt.ItemDataRole.ToolTipRole)
+        self.window.setToolTip("Multiplies each block before the FFT. Choosing an excitation picks its "
+                               "usual window; change it to see what the others do to the same data.")
+        form.addRow("Window:", self.window)
+        self.exp_end = spin(0.1, 100.0, 100.0, 1, " %")
+        self.exp_end.setToolTip(
+            "<p>The exponential window's value at the end of the block; 100% = no exponential "
+            "(force window only).</p><p>e<sup>−t/τ</sup> multiplies the response, so every "
+            "pole moves 1/τ to the left: each mode looks more damped by Δζ = 1/(τω). The dashed "
+            "grey curve is the exact FRF with that extra damping.</p>"
+        )
+        self.exp_label = QtWidgets.QLabel("Exponential at block end:")
+        form.addRow(self.exp_label, self.exp_end)
+        self.estimator_combo = QtWidgets.QComboBox()
+        for e in Estimator:
+            self.estimator_combo.addItem(e.value, e)
+        self.estimator_combo.setToolTip(
+            "<p><b>H1</b> = G<sub>xf</sub>/G<sub>ff</sub>: noise on the response averages out; "
+            "noise on the force inflates G<sub>ff</sub> and biases H1 low.</p>"
+            "<p><b>H2</b> = G<sub>xx</sub>/G<sub>fx</sub>: noise on the force averages out; "
+            "noise on the response inflates G<sub>xx</sub> and biases H2 high.</p>"
+            "<p>The true FRF lies between them. Where coherence is 1 they agree.</p>"
+        )
+        form.addRow("Estimator:", self.estimator_combo)
+
+        run_row = QtWidgets.QHBoxLayout()
+        self.again = QtWidgets.QPushButton("Measure again")
+        self.again.setToolTip("Repeat the test with new random signals and noise.")
+        self.again.clicked.connect(self.restart)
+        self.progress = QtWidgets.QLabel()
+        run_row.addWidget(self.again)
+        run_row.addWidget(self.progress, 1)
+
+        left = QtWidgets.QWidget()
+        lv = QtWidgets.QVBoxLayout(left)
+        for w in (setup, daq, noise, proc):
+            lv.addWidget(w)
+        lv.addLayout(run_row)
+        lv.addStretch(1)
+        left_scroll = QtWidgets.QScrollArea()
+        left_scroll.setWidget(left)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setMinimumWidth(340)
+        left_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        # --- centre
+        self.signals = SignalView()
+        self.frf_view = FrfView()
+        self.output = QtWidgets.QComboBox()
+        self.output.currentIndexChanged.connect(self.redraw)
+        out_row = QtWidgets.QHBoxLayout()
+        out_row.setContentsMargins(6, 0, 0, 0)
+        out_row.addWidget(QtWidgets.QLabel("Show response of:"))
+        out_row.addWidget(self.output)
+        out_row.addStretch(1)
+        frf_box = QtWidgets.QWidget()
+        fv = QtWidgets.QVBoxLayout(frf_box)
+        fv.setContentsMargins(0, 0, 0, 0)
+        fv.addLayout(out_row)
+        fv.addWidget(self.frf_view, 1)
+        centre = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        centre.addWidget(self.signals)
+        centre.addWidget(frf_box)
+        centre.setSizes([260, 560])
+
+        # --- right
+        self.check = QtWidgets.QTextBrowser()
+        self.theory = QtWidgets.QTextBrowser()
+        self.theory.setHtml(THEORY_HTML)
+        self.tabs = QtWidgets.QTabWidget()
+        self.tabs.addTab(self.check, "Setup check")
+        self.tabs.addTab(self.theory, "Theory")
+
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        splitter.addWidget(left_scroll)
+        splitter.addWidget(centre)
+        splitter.addWidget(self.tabs)
+        splitter.setSizes([360, 850, 480])
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(splitter)
+
+        # --- wiring: test settings measure again; processing and noise reuse the data.
+        self.excitation.currentIndexChanged.connect(self._on_excitation)
+        for w in (self.input, self.block, self.overlap):
+            w.currentIndexChanged.connect(self.restart)
+        for w in (self.tip, self.burst, self.fs):
+            w.valueChanged.connect(self.restart)
+        self.points.valueChanged.connect(self.restart)
+        self.anti_alias.toggled.connect(self.restart)
+        self.fs_auto.toggled.connect(self._on_fs_auto)
+        self.averages.valueChanged.connect(self._on_averages)
+        for w in (self.window, self.estimator_combo):
+            w.currentIndexChanged.connect(self._reprocess)
+        for w in (self.exp_end, self.force_noise, self.response_noise):
+            w.valueChanged.connect(self._reprocess)
+        self._select_window(Excitation.IMPACT)
+        self._show_rows()
+
+    # ------------------------------------------------------------ inputs
+    def set_system(self, system: ChainSystem, result: ModalResult | None = None) -> None:
+        """New chain parameters. Measured now if visible, else when the page is shown."""
+        self.system = system
+        self.result = result
+        self._dirty = True
+        if self.isVisible():
+            self.restart()
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().showEvent(event)
+        if self._dirty:
+            self.restart()
+        elif self.acq is not None and not self.acq.done:
+            self._timer.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().hideEvent(event)
+        self._timer.stop()
+
+    def settings(self) -> MeasurementSettings:
+        n = self.system.n if self.system else 1
+        return MeasurementSettings(
+            excitation=self.excitation.currentData(),
+            input_dof=min(max(0, self.input.currentIndex()), n - 1),
+            fs=self.fs.value(),
+            block=self.block.currentData(),
+            averages=self.averages.value(),
+            overlap=self.overlap.currentData(),
+            anti_alias=self.anti_alias.isChecked(),
+            tip_width=self.tip.value() * 1e-3,
+            burst=self.burst.value() / 100.0,
+            sine_points=self.points.value(),
+        )
+
+    def processing(self) -> Processing:
+        return Processing(
+            window=self.window.currentData(),
+            exp_end=self.exp_end.value() / 100.0,
+            estimator=self.estimator_combo.currentData(),
+            force_noise=self.force_noise.value() / 100.0,
+            response_noise=self.response_noise.value() / 100.0,
+        )
+
+    def _on_excitation(self) -> None:
+        self._select_window(self.excitation.currentData())
+        self._show_rows()
+        self.restart()
+
+    def _select_window(self, excitation: Excitation) -> None:
+        self.window.blockSignals(True)
+        self.window.setCurrentIndex(list(Window).index(RECOMMENDED_WINDOW[excitation]))
+        self.window.blockSignals(False)
+
+    def _show_rows(self) -> None:
+        e = self.excitation.currentData()
+        rows = {
+            (self.tip_label, self.tip): e is Excitation.IMPACT,
+            (self.burst_label, self.burst): e is Excitation.BURST_RANDOM,
+            (self.overlap_label, self.overlap): e is Excitation.RANDOM,
+            (self.points_label, self.points): e is Excitation.STEPPED_SINE,
+            (self.averages_label, self.averages): e is not Excitation.STEPPED_SINE,
+            (self.block_label, self.block): e is not Excitation.STEPPED_SINE,
+            (self.exp_label, self.exp_end): self.window.currentData() is Window.FORCE_EXPONENTIAL,
+        }
+        for widgets, on in rows.items():
+            for w in widgets:
+                w.setVisible(on)
+        self.window.setEnabled(e is not Excitation.STEPPED_SINE)
+
+    def _on_fs_auto(self, on: bool) -> None:
+        self.fs.setEnabled(not on)
+        if on:
+            self.restart()
+
+    def _on_averages(self) -> None:
+        if self.acq is None:
+            return
+        self.acq.settings.averages = self.averages.value()
+        self.redraw()
+        if not self.acq.done and self.isVisible():
+            self._timer.start()
+
+    def _reprocess(self) -> None:
+        self._show_rows()
+        if self.acq is not None:
+            self.estimator = FrfEstimator(self.acq, self.processing())
+        self.redraw()
+
+    # ----------------------------------------------------------- measure
+    def restart(self) -> None:
+        """Start a new measurement with the current settings."""
+        if self.system is None:
+            return
+        self._dirty = False
+        system = self.system
+        n = system.n
+        if self.result is None:
+            self.result = modal_analysis(system)
+        self.dof.blockSignals(True)
+        self.dof.setValue(n)
+        self.dof.blockSignals(False)
+        if self.input.count() != n:
+            for combo, default in ((self.input, n - 1), (self.output, n - 1)):
+                combo.blockSignals(True)
+                combo.clear()
+                combo.addItems([f"m{j + 1}" for j in range(n)])
+                combo.setCurrentIndex(default)
+                combo.blockSignals(False)
+        self.fs.setEnabled(not self.fs_auto.isChecked())
+        if self.fs_auto.isChecked():
+            self.fs.blockSignals(True)
+            self.fs.setValue(suggested_fs(self.result))
+            self.fs.blockSignals(False)
+        self.acq = Acquisition(system, self.settings(), self.result)
+        self.estimator = FrfEstimator(self.acq, self.processing())
+        self._update_info()
+        self.check.setHtml(self._setup_check())
+        self._measure_some()
+        if not self.acq.done and self.isVisible():
+            self._timer.start()
+
+    def _measure_some(self) -> None:
+        if self.acq is None:
+            return
+        self._clock.start()
+        while not self.acq.done and self._clock.elapsed() < STEP_BUDGET_MS:
+            self.acq.step()
+        if self.acq.done:
+            self._timer.stop()
+        self.redraw()
+
+    def redraw(self) -> None:
+        if self.acq is None or self.estimator is None:
+            return
+        done, wanted = self.acq.progress
+        noun = "frequencies" if self.acq.stepped else "averages"
+        self.progress.setText(f"{done} / {wanted} {noun}" + ("" if done >= wanted else " …"))
+        est = self.estimator.estimate()
+        if est is None:
+            return
+        j = max(0, self.output.currentIndex())
+        s = self.acq.settings
+        self.signals.set_data(est, j, s, self.acq.stepped)
+        self.frf_view.set_data(est, j, self.acq.system, self.acq.result, s, self.processing(), self.acq.stepped)
+
+    # -------------------------------------------------------------- text
+    def _update_info(self) -> None:
+        s, a = self.acq.settings, self.acq
+        if a.stepped:
+            text = f"{s.sine_points} frequencies, {s.band / s.sine_points:.4g} Hz apart<br>"
+        else:
+            text = f"T = Nb/fs = {s.duration:.4g} s · Δf = 1/T = {s.resolution:.4g} Hz<br>"
+        text += f"Nyquist fs/2 = {s.fs / 2:.4g} Hz · passband and excitation to {s.band:.4g} Hz"
+        if s.excitation.settles:
+            text += f"<br>Waits {a.settle:.3g} s for steady state (transients down to 0.1%)"
+        elif s.excitation.waits:
+            text += f"<br>Waits {a.settle:.3g} s between hits for the response to die away (to 0.1%)"
+        self.daq_info.setText(text)
+
+    def _setup_check(self) -> str:
+        """The settings against the chain's modes: what each mode will suffer from."""
+        s, a = self.acq.settings, self.acq
+        T, nyq = s.duration, s.fs / 2
+        df = s.band / s.sine_points if a.stepped else s.resolution
+        rows = []
+        warnings = []
+        for m in a.result.modes:
+            d = m.damped
+            if d is None:
+                continue
+            color = MODE_COLORS[(m.index - 1) % len(MODE_COLORS)]
+            bw = 2.0 * d.zeta * d.fn_hz
+            lines = bw / df
+            left = math.exp(d.eigenvalue.real * T)
+            notes = []
+            if d.fd_hz > nyq:
+                alias = abs(d.fd_hz - s.fs * round(d.fd_hz / s.fs))
+                notes.append("above Nyquist: " + ("removed by the filter" if s.anti_alias else
+                                                  f"<b>aliases to {alias:.3g} Hz</b>"))
+            elif d.fd_hz > s.band:
+                notes.append("in the filter's roll-off" if s.anti_alias else
+                             f"above the usable band ({AA_CUTOFF:.0%} of Nyquist)")
+            if lines < 2.0 and d.fd_hz <= nyq:
+                notes.append("<b>under-resolved</b>: " + ("the peak falls between frequencies" if a.stepped
+                                                          else "peak too low, looks too damped"))
+            if s.excitation in (Excitation.IMPACT, Excitation.BURST_RANDOM) and left > 0.01:
+                notes.append("<b>still ringing at block end</b>: leakage unless a window is used")
+            tip = ""
+            if s.excitation is Excitation.IMPACT:
+                level = 20.0 * math.log10(max(float(impact_spectrum(s.tip_width, np.array([d.fd_hz]))[0]), 1e-12))
+                tip = f"{round(level) + 0:.0f} dB"
+                if level < -20.0:
+                    notes.append("<b>hardly excited by this tip</b>: noise will dominate")
+            rows.append(
+                f"<tr><td style='color:{color}'><b>{m.index}</b></td><td>{d.fd_hz:.4g}</td>"
+                f"<td>{d.zeta:.4f}</td><td>{bw:.3g}</td><td>{lines:.3g}</td>"
+                + ("" if a.stepped else f"<td>{percent(left)}</td>")
+                + (f"<td>{tip}</td>" if s.excitation is Excitation.IMPACT else "")
+                + f"<td>{'; '.join(notes) or 'ok'}</td></tr>"
+            )
+        head = ("<tr><th>Mode</th><th>f<sub>d</sub> [Hz]</th><th>ζ</th><th>2ζf<sub>n</sub> [Hz]</th>"
+                + ("<th>Points in it</th>" if a.stepped else "<th>Lines in it</th><th>Left at T</th>")
+                + ("<th>Hammer level</th>" if s.excitation is Excitation.IMPACT else "") + "<th>Notes</th></tr>")
+        e = s.excitation
+        w = self.window.currentData()
+        if e is Excitation.IMPACT and not s.anti_alias and s.tip_width < 2.0 / s.fs:
+            warnings.append("The hit lasts less than 2 samples. Without the anti-alias filter to spread it "
+                            "out, the samples can miss most of it, and the measured force is wrong.")
+        if e is Excitation.IMPACT and w is Window.HANN:
+            warnings.append("A Hann window is zero at the start of the block, where the hit is: it throws the force away.")
+        if e is Excitation.RANDOM and w is Window.RECTANGULAR:
+            warnings.append("Continuous random is not periodic in the block: without a window it leaks.")
+        if e in (Excitation.PERIODIC_RANDOM, Excitation.CHIRP) and w is not Window.RECTANGULAR:
+            warnings.append("The signals are periodic in the block, so no window is needed; one only blurs the peaks.")
+        warn = "".join(f"<p style='color:#b36b00'>{t}</p>" for t in warnings)
+        return (
+            f"<p><b>{e.value}</b>, force at m{s.input_dof + 1}. {EXCITATION_TIPS[e]}</p>{warn}"
+            f"<table border='1' cellspacing='0' cellpadding='3' width='100%'>{head}{''.join(rows)}</table>"
+            "<p style='color:#666'>2ζf<sub>n</sub> is the half-power bandwidth of each peak; "
+            "with fewer than about 2 lines (Δf apart, or stepped-sine frequencies) across it, the peak is missed. "
+            "<i>Left at T</i> is how much of a free decay is left at the end of a block "
+            "(e<sup>σT</sup>): a hit or burst that has not died away is cut off, which leaks.</p>"
+        )
+
+
+THEORY_HTML = """
+<h3>A virtual modal test</h3>
+<p>In a lab the FRF is not computed from M, C and K: it is <i>measured</i>. A known force
+excites the structure, sensors record the force and the responses, and the FRF is estimated
+from those signals. This page does the same with the simulated chain, so each step of the
+measurement, and each error it can bring in, can be compared with the exact answer.</p>
+
+<h3>Sampling</h3>
+<p>Each channel is sampled at f<sub>s</sub>. Only frequencies up to the <b>Nyquist frequency</b>
+f<sub>s</sub>/2 can be represented; anything above <b>aliases</b>, appearing at
+|f − k f<sub>s</sub>| as if it were real response. So an <b>anti-alias filter</b> removes it
+before sampling. The filter rolls off below Nyquist, so only the lower part of the band
+(here 80%) is usable. The same filter on the force and every response cancels in their ratio.</p>
+
+<h3>Blocks, the DFT and leakage</h3>
+<p>The analyzer takes blocks of N<sub>b</sub> samples, lasting T = N<sub>b</sub>/f<sub>s</sub>,
+and takes their discrete Fourier transform (FFT). That gives spectral lines Δf = 1/T apart.
+The DFT treats the block as one period of a signal that repeats forever.
+If the signal is not periodic in the block, the repeat has a jump at the join, and energy at
+one frequency spreads into its neighbours. That is <b>leakage</b>: resonance peaks come out too
+low and too wide, which looks like too much damping.</p>
+<ul>
+<li><b>Periodic in the block</b> (periodic random, chirp, a hit or burst that dies away inside
+the block): no leakage, no window needed.</li>
+<li><b>Not periodic</b> (continuous random): taper each block with a <b>window</b> (Hann), which
+trades leakage for a slightly wider peak.</li>
+<li><b>Resolution:</b> a peak's half-power bandwidth is 2ζf<sub>n</sub>. A lightly damped mode
+needs a long block to get lines across it.</li>
+</ul>
+
+<h3>Averaging and estimators</h3>
+<p>With F and X the spectra of a block, averaging over blocks gives the auto-spectra
+G<sub>ff</sub> = ⟨|F|²⟩, G<sub>xx</sub> = ⟨|X|²⟩ and the cross-spectrum
+G<sub>xf</sub> = ⟨X F*⟩. Then</p>
+<p>&nbsp;&nbsp;<b>H1 = G<sub>xf</sub>/G<sub>ff</sub></b>, &nbsp;&nbsp;
+<b>H2 = G<sub>xx</sub>/G<sub>fx</sub></b></p>
+<p>Noise uncorrelated with the force averages out of G<sub>xf</sub> but adds to the
+auto-spectrum of its own channel. So noise on the response leaves H1 unbiased and pushes H2
+up, and noise on the force pushes H1 down and leaves H2 unbiased. In practice the response is
+noisiest near antiresonances, where it is small, so H1 is used there; the force is noisiest at
+resonances, where the structure barely resists it, so H2 is used there.</p>
+<p>The <b>coherence</b> γ² = |G<sub>xf</sub>|²/(G<sub>ff</sub>G<sub>xx</sub>) = H1/H2 is between
+0 and 1. It is 1 when the response is entirely explained by the measured force, linearly.
+Noise, leakage and aliasing all lower it. With one average it is always 1, which is why at
+least a few averages are needed.</p>
+
+<h3>Excitation</h3>
+<ul>
+<li><b>Impact hammer:</b> quick and portable. The tip sets the pulse length τ, and the force
+spectrum is flat only up to about 1/τ. A <b>force window</b> keeps the hit and zeroes the noise
+after it. An <b>exponential window</b> forces a slowly decaying response to die away inside
+the block. It multiplies the impulse response by e<sup>−t/τ<sub>w</sub></sup>, which moves every
+pole left by 1/τ<sub>w</sub>. So every mode looks more damped, by Δζ = 1/(τ<sub>w</sub>ω), which
+has to be subtracted when damping is identified.</li>
+<li><b>Random</b> (shaker): excites the whole band at once, and averaging removes noise, but it
+leaks unless windowed.</li>
+<li><b>Burst random:</b> random, then silence. If the response dies away inside the block,
+there is no leakage.</li>
+<li><b>Periodic random / chirp:</b> the same signal every block, after waiting for steady state,
+so both signals are exactly periodic. No leakage.</li>
+<li><b>Stepped sine:</b> one frequency at a time, a sine fitted to each signal. Slowest,
+most accurate, and with the best signal-to-noise ratio.</li>
+</ul>
+
+<h3>Where to look</h3>
+<ul>
+<li>Put the force on a mass at a node of a mode: that mode is not excited and drops out of
+every FRF. In the default uniform 4-mass chain, m3 does not move in mode 2.</li>
+<li>Add 5% force noise and compare H1 with H2 at the resonances. Add response noise and look
+at the antiresonances.</li>
+<li>Make the block short so a hit is still ringing at the end: the rectangular window leaks,
+the exponential window fixes the leakage but adds damping (dashed grey curve).</li>
+<li>Turn the anti-alias filter off and raise the stiffness until the top mode is above
+Nyquist: it appears at the wrong frequency.</li>
+</ul>
+"""

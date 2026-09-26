@@ -7,6 +7,19 @@ notebooks, and tests.
 from .energy import kinetic_energy, modal_energies, potential_energy, stored_energy
 from .forcing import ForceController, ForceKind, ForceSettings
 from .frf_matrix import ModalTerm, frf_matrix, modal_frf_terms
+from .measurement import (
+    Acquisition,
+    ChainResponse,
+    Estimate,
+    Estimator,
+    Excitation,
+    FrfEstimator,
+    MeasurementSettings,
+    Processing,
+    Window,
+    impact_spectrum,
+    transfer,
+)
 from .modal import ComplexMode, ModalResult, Mode, frf, modal_analysis, modal_coordinate_map, receptance
 from .model import ChainSystem, assemble_chain, state_space
 from .simulator import Simulator, foh_discretize, foh_quadratic_integrals
@@ -31,6 +44,17 @@ from .substructure import (
 )
 
 __all__ = [
+    "Acquisition",
+    "ChainResponse",
+    "Estimate",
+    "Estimator",
+    "Excitation",
+    "FrfEstimator",
+    "MeasurementSettings",
+    "Processing",
+    "Window",
+    "impact_spectrum",
+    "transfer",
     "METHODS",
     "METHOD_NAMES",
     "CMSModel",
