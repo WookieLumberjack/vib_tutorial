@@ -95,7 +95,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.force_panel.settings_changed.connect(self._on_force_changed)
         self.controls.run_toggled.connect(self._on_run_toggled)
         self.controls.reset_clicked.connect(self._reset)
-        self.controls.auto_scale.toggled.connect(lambda on: setattr(self.chain, "auto_scale", on))
+        self.controls.auto_scale.toggled.connect(self._on_auto_scale)
         self.animate_modes.toggled.connect(lambda on: on or self.mode_plot.animate(1.0))
         self.table.itemSelectionChanged.connect(
             lambda: self.mode_plot.set_highlight(self.table.currentRow() if self.table.selectedItems() else None)
@@ -108,8 +108,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clock.start()
         self._last_wall = 0.0
         self._sim_target = 0.0
+        # Single-shot timer re-armed after each frame: if a frame runs long, the
+        # event loop still gets to handle input before the next one starts.
         self._timer = QtCore.QTimer(self)
-        self._timer.timeout.connect(self._tick)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._frame)
         self._timer.start(FRAME_MS)
 
     # --------------------------------------------------------------- events
@@ -153,6 +156,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.frf_plot.set_system(self.sim.system, self.modal, s.target)
         self.frf_plot.set_drive(s.freq_hz if s.kind is ForceKind.HARMONIC else None)
 
+    def _on_auto_scale(self, on: bool) -> None:
+        self.chain.auto_scale = on
+        self.time_plot.set_auto_range(on)
+
     def _on_run_toggled(self, running: bool) -> None:
         self.running = running
         self._sim_target = self.sim.t
@@ -173,6 +180,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sim.set_displacement(self.modal.modes[r].shape * self.release_amp.value() * 1e-3)
 
     # ------------------------------------------------------------ main loop
+    def _frame(self) -> None:
+        start = self._clock.elapsed()
+        try:
+            self._tick()
+        finally:
+            spent = self._clock.elapsed() - start
+            self._timer.start(max(1, FRAME_MS - spent))
+
     def _tick(self) -> None:
         now = self._clock.elapsed() / 1000.0
         dt = min(now - self._last_wall, 0.1)  # don't jump after a stall

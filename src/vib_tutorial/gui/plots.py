@@ -19,35 +19,80 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
         super().__init__(parent)
         self.x_plot = self.addPlot(row=0, col=0)
         self.x_plot.setLabel("left", "Displacement", units="m")
-        self.x_plot.showGrid(x=True, y=True, alpha=0.3)
         self.x_plot.addLegend(offset=(5, 5), colCount=4)
         self.f_plot = self.addPlot(row=1, col=0)
         self.f_plot.setLabel("left", "Force", units="N")
         self.f_plot.setLabel("bottom", "Time", units="s")
-        self.f_plot.showGrid(x=True, y=True, alpha=0.3)
         self.f_plot.setXLink(self.x_plot)
         self.ci.layout.setRowStretchFactor(0, 3)
         self.ci.layout.setRowStretchFactor(1, 1)
+        # Performance: these plots scroll and redraw every frame. No grid (its
+        # lines cost more than the data) and 1 px pens (Qt's fast path; wider
+        # antialiased lines were ~2x slower, and much worse on Retina displays).
         for p in (self.x_plot, self.f_plot):
-            p.setClipToView(True)
-            p.setDownsampling(auto=True, mode="peak")
             p.setMouseEnabled(x=False, y=True)
-        self.f_curve = self.f_plot.plot(pen=pg.mkPen(FORCE_COLOR, width=2))
+            p.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#bbb", width=1)))
+        self.f_curve = self.f_plot.plot(pen=pg.mkPen(FORCE_COLOR, width=1))
+        self.auto_range = True
         self.x_curves: list[pg.PlotDataItem] = []
 
     def set_dof(self, n: int) -> None:
         for c in self.x_curves:
             self.x_plot.removeItem(c)
         self.x_curves = [
-            self.x_plot.plot(pen=pg.mkPen(MASS_COLORS[i], width=2), name=f"x{i + 1}") for i in range(n)
+            self.x_plot.plot(pen=pg.mkPen(MASS_COLORS[i], width=1), name=f"x{i + 1}") for i in range(n)
         ]
 
+    def set_auto_range(self, on: bool) -> None:
+        """Auto-fit the y axes each frame, or freeze them at their current range."""
+        self.auto_range = on
+        for p in (self.x_plot, self.f_plot):
+            if on:
+                p.enableAutoRange(axis="y")
+            else:
+                p.disableAutoRange(axis="y")
+
     def update_data(self, t: np.ndarray, x: np.ndarray, f: np.ndarray, window: float) -> None:
+        # Hand Qt at most MAX_POINTS per curve: drawing tens of thousands of
+        # antialiased segments every frame is what made the app lag.
+        idx = decimation_index(np.column_stack([x, f]), MAX_POINTS)
+        td = t[idx]
         for i, c in enumerate(self.x_curves):
-            c.setData(t, x[:, i])
-        self.f_curve.setData(t, f)
+            c.setData(td, x[idx, i])
+        self.f_curve.setData(td, f[idx])
         t_end = t[-1] if t.size else 0.0
         self.x_plot.setXRange(max(0.0, t_end - window), max(window, t_end), padding=0)
+        if self.auto_range:
+            # Auto-fit, but never zoom in below +/-MIN_Y_SPAN (same reason as
+            # MIN_AUTO_PEAK in the animation: decaying motion -> float noise).
+            peak = float(np.abs(x).max()) if x.size else 0.0
+            if peak < MIN_Y_SPAN:
+                self.x_plot.setYRange(-MIN_Y_SPAN, MIN_Y_SPAN, padding=0.05)
+            else:
+                self.x_plot.enableAutoRange(axis="y")
+
+
+MAX_POINTS = 3000
+MIN_Y_SPAN = 1e-6  # m
+
+
+def decimation_index(y: np.ndarray, max_points: int) -> np.ndarray:
+    """Indices that keep the min and max of y within each bucket.
+
+    Preserves the visual envelope of oscillations (unlike plain striding, which
+    can alias). With multiple columns, the extremes of every column are kept.
+    """
+    k = y.shape[0]
+    if k <= max_points:
+        return np.arange(k)
+    blocks_per_sample = 1 + 2 * (y.shape[1] if y.ndim > 1 else 1)  # start + min + max per column
+    bucket = int(math.ceil(blocks_per_sample * k / max_points))
+    m = k // bucket
+    blocks = y[: m * bucket].reshape(m, bucket, -1)
+    base = (np.arange(m) * bucket)[:, None]
+    picks = [base, base + blocks.argmin(axis=1), base + blocks.argmax(axis=1)]
+    idx = np.concatenate([p.ravel() for p in picks] + [np.arange(m * bucket, k)])
+    return np.unique(idx)
 
 
 class ModalTable(QtWidgets.QTableWidget):

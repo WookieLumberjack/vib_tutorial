@@ -14,6 +14,10 @@ BASE_HEIGHT = 0.5
 SPRING_Y = 0.13
 DAMPER_Y = -0.13
 MAX_SWING = 0.3 * SPACING  # auto-scale target for the largest displacement
+# Never magnify motion smaller than this: as vibration decays toward zero the
+# gain would otherwise grow without bound (magnifying float noise and driving
+# Qt's drawing transforms to absurd values).
+MIN_AUTO_PEAK = 1e-6  # m
 
 
 def spring_path(x0: float, x1: float, y: float, coils: int = 6, amp: float = 0.05):
@@ -33,11 +37,18 @@ def spring_path(x0: float, x1: float, y: float, coils: int = 6, amp: float = 0.0
 def damper_path(x0: float, x1: float, y: float, rest_gap: float, h: float = 0.045):
     """Dashpot: open cylinder fixed to x0, piston rod fixed to x1.
 
+    The piston tracks the relative motion but is clamped inside the cylinder,
+    and the rod always runs from the piston to x1, so the two halves stay
+    connected however far the ends move (the rod just gets longer/shorter).
+
     Returned as one polyline with NaN breaks (drawn with connect='finite').
     """
     cyl0 = x0 + 0.15 * rest_gap
     cyl1 = x0 + 0.7 * rest_gap
     piston = x1 - 0.5 * rest_gap  # sits mid-cylinder at rest
+    piston = min(max(piston, cyl0 + 0.05 * rest_gap), cyl1 - 0.02 * rest_gap)
+    if x1 < piston:  # ends have crossed (extreme compression): collapse the rod
+        piston = x1
     nan = np.nan
     xs = [x0, cyl0, nan,
           cyl1, cyl0, cyl0, cyl1, nan,  # cylinder: top, back wall, bottom
@@ -138,8 +149,8 @@ class ChainView(pg.PlotWidget):
         peak is the largest recent |x| used for auto-scaling; force_scale is
         the force magnitude that maps to a full-length arrow.
         """
-        if self.auto_scale and peak > 1e-12:
-            target = MAX_SWING / peak
+        if self.auto_scale:
+            target = MAX_SWING / max(peak, MIN_AUTO_PEAK)
             # Shrink immediately, grow slowly: keeps the view calm as motion decays.
             self.gain = target if target < self.gain else self.gain + 0.03 * (target - self.gain)
         self._scale_text.setText(f"= {_fmt_len(MAX_SWING / self.gain)}")

@@ -253,9 +253,10 @@ class SimControls(QtWidgets.QGroupBox):
         self.window = spin(0.5, 120.0, 10.0, 1, " s")
         form.addRow("Plot window:", self.window)
 
-        self.auto_scale = QtWidgets.QCheckBox("Auto-scale animation")
+        self.auto_scale = QtWidgets.QCheckBox("Auto-scale animation and plots")
         self.auto_scale.setChecked(True)
-        self.auto_scale.setToolTip("Magnify displacements so the largest recent motion is clearly visible")
+        self.auto_scale.setToolTip("On: magnify the animation and fit the plot axes to the recent motion.\n"
+            "Off: freeze the current magnification and plot ranges (drag an axis to adjust).")
         form.addRow(self.auto_scale)
 
         self.time_label = QtWidgets.QLabel()
