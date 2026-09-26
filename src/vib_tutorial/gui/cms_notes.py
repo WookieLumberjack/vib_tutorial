@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..core import (
-    CraigBamptonModel,
+    CMSModel,
     ModalResult,
     Substructure,
     compare_modes,
@@ -43,7 +43,13 @@ be changed or re-analysed without touching the others. <b>Component mode synthes
 (CMS)</b> does the reduction with each component's own mode shapes.</p>
 <p>On this page the chain is cut at one <i>interface</i> mass into two substructures,
 <b>A</b> (grounded) and <b>B</b> (free end). The interface mass belongs to both: A owns its
-mass and the springs to its left, B owns the springs to its right.</p>
+mass and the springs to its left, B owns the springs to its right. (The free-interface methods
+split the interface mass half and half instead, so that each substructure has mass wherever it
+can move.)</p>
+<p>The <i>Method</i> selector chooses how each substructure is reduced: <b>Craig–Bampton</b>
+(fixed interface, the next few sections) or <b>Rubin</b> and <b>MacNeal</b> (free interface,
+from <a href="#free">Free-interface methods</a> on). The <i>Compare methods</i> tab runs all
+three on the same cut.</p>
 
 <h3>Boundary (master) and interior DOFs</h3>
 <ul>
@@ -236,7 +242,99 @@ often called Hurty/Craig–Bampton, and still the industry standard (for example
 coupled-loads analysis of spacecraft on launchers).</p>
 <p>Other CMS families use <i>free-interface</i> component modes instead (MacNeal, Rubin,
 Craig–Chang), which are closer to what a modal test measures but need residual-flexibility
-corrections.</p>
+corrections. They are next.</p>
+
+<h3><a name="free"></a>Free-interface methods: MacNeal and Rubin</h3>
+<h4>Why a free interface?</h4>
+<p>Craig–Bampton clamps each component's boundary. That is easy in a computer and hard in a
+laboratory: nobody can hold a satellite's interface ring perfectly still while shaking it.
+What a <b>modal test</b> measures is a component hanging freely (on soft bungees), so its
+<i>free-interface</i> modes. They also belong to the component alone, not to how it will be
+held, so a supplier can deliver them without knowing the rest of the structure.</p>
+
+<h4>Free modes alone converge badly</h4>
+<p>Solve Kφ = ω²Mφ for the whole substructure, boundary free, and describe its motion with the
+lowest few free modes (Hou's and Goldman's methods, 1969). The trouble is at the interface. In
+the assembled structure the neighbour <i>pushes</i> on the interface, and the local static
+deflection under that push is spread over <i>all</i> the free modes, mostly the high ones that
+were thrown away. A truncated set of free modes is therefore far too stiff at exactly the place
+the components meet.</p>
+
+<h4>The fix: residual flexibility</h4>
+<p>The discarded modes are high in frequency, so under the interface forces f<sub>b</sub> they
+respond almost statically. Their static response is kept even though the modes are not:</p>
+<p>&nbsp;&nbsp;x = Φ<sub>k</sub>q + G<sub>d</sub> E<sub>b</sub> f<sub>b</sub>, &nbsp;&nbsp;
+G<sub>d</sub> = Σ<sub>discarded</sub> φ<sub>r</sub>φ<sub>r</sub><sup>T</sup> / ω<sub>r</sub>²
+= K<sup>−1</sup> − Φ<sub>k</sub>Λ<sub>k</sub><sup>−1</sup>Φ<sub>k</sub><sup>T</sup></p>
+<p>G<sub>d</sub> is the <b>residual flexibility</b>: the flexibility of the component minus the
+part the kept modes already describe. The second form needs no discarded modes at all, which is
+how it is done in practice (from K<sup>−1</sup>, or from a static test). Its columns at the
+boundary, G<sub>d</sub>E<sub>b</sub>, are <b>residual attachment modes</b>: the static
+deflection under a unit force at one boundary DOF, less what the kept modes carry. They are
+stiffness-orthogonal to the kept modes: Φ<sub>k</sub><sup>T</sup>KG<sub>d</sub> = 0.</p>
+
+<h4>Making the boundary physical again</h4>
+<p>Forces are awkward coordinates for joining components. The boundary rows of the equation above
+give x<sub>b</sub> = Φ<sub>bk</sub>q + G<sub>bb</sub>f<sub>b</sub>, so
+f<sub>b</sub> = G<sub>bb</sub><sup>−1</sup>(x<sub>b</sub> − Φ<sub>bk</sub>q). Substituting back:</p>
+<p>&nbsp;&nbsp;[x<sub>i</sub>; x<sub>b</sub>] = T [q; x<sub>b</sub>], &nbsp;&nbsp;
+T = [ Φ<sub>ik</sub> − RΦ<sub>bk</sub> &nbsp; R ; 0 &nbsp; I ], &nbsp;&nbsp;
+R = G<sub>ib</sub>G<sub>bb</sub><sup>−1</sup></p>
+<p>This has <i>exactly</i> the shape of the Craig–Bampton T: modal columns that vanish on the
+boundary, and boundary columns that are 1 at their own DOF and 0 at the others. So the same
+assembly works: shared x<sub>b</sub>, entries added. (This form is due to Craig and Chang, 1977.)
+The stiffness is no longer block diagonal:</p>
+<p>&nbsp;&nbsp;K̂ = [ Λ<sub>k</sub> + Φ<sub>bk</sub><sup>T</sup>G<sub>bb</sub><sup>−1</sup>Φ<sub>bk</sub>
+&nbsp; −Φ<sub>bk</sub><sup>T</sup>G<sub>bb</sub><sup>−1</sup> ; −G<sub>bb</sub><sup>−1</sup>Φ<sub>bk</sub>
+&nbsp; G<sub>bb</sub><sup>−1</sup> ]</p>
+<p>G<sub>bb</sub><sup>−1</sup> is the residual stiffness seen from the boundary: a spring from each
+boundary DOF to the modal motion.</p>
+
+<h4>MacNeal (1971) and Rubin (1975)</h4>
+<ul>
+<li><b>MacNeal</b> treats the residual flexibility as a <i>massless spring</i>: only the kept modes
+carry inertia, M̂ = [ I 0 ; 0 0 ]. The boundary DOFs then have no mass: they follow
+the modes statically and are condensed out, so the model has only as many modes as modes kept.
+Dropping mass raises frequencies and adding the residual flexibility lowers them, so there is no
+bound, and the method is not exact even with every mode there is room for.</li>
+<li><b>Rubin</b> adds the <i>residual mass</i>: the inertia of the residual attachment modes. Here
+this is done as a full Rayleigh–Ritz projection, M̂ = T<sup>T</sup>MT (the Craig–Chang form of
+Rubin's method). It has all of Craig–Bampton's guarantees: upper bounds that
+fall as modes are added, and exact with every mode kept.</li>
+</ul>
+<p>Damping is not part of either original method. Here both project it like the stiffness,
+Ĉ = T<sup>T</sup>CT, so the two differ only in the residual mass.</p>
+
+<h4>Rigid-body modes</h4>
+<p>B is joined to the chain only through the interface, so on its own it floats: its first free
+mode is a <b>rigid-body mode</b> at 0 Hz, moving every mass by the same amount. It has infinite
+flexibility (K is singular, K<sup>−1</sup> does not exist), so it cannot be part of G<sub>d</sub>
+and must always be kept, which is why B's spin box starts at 1. In practice G<sub>d</sub> of a
+floating component comes from <i>inertia relief</i>: the flexibility of the component held
+statically determinate, with the rigid-body part projected out. On this page G<sub>d</sub> is
+built directly from the discarded elastic modes, which gives the same matrix.</p>
+
+<h4>Three methods side by side</h4>
+<table border="1" cellspacing="0" cellpadding="4">
+<tr><th></th><th>Craig–Bampton</th><th>Rubin</th><th>MacNeal</th></tr>
+<tr><td><b>Component modes</b></td><td>boundary held (fixed interface)</td>
+<td colspan="2">boundary free (free interface), rigid-body modes always kept</td></tr>
+<tr><td><b>Static shapes</b></td><td>constraint modes Ψ = −K<sub>ii</sub><sup>−1</sup>K<sub>ib</sub></td>
+<td colspan="2">residual attachment modes R = G<sub>ib</sub>G<sub>bb</sub><sup>−1</sup></td></tr>
+<tr><td><b>Coordinates</b></td><td colspan="3">[q, x<sub>b</sub>]: the same size for the same number
+of modes kept, joined the same way</td></tr>
+<tr><td><b>Modes coupled to the boundary by</b></td><td>mass only (K̂ block diagonal)</td>
+<td>mass and stiffness</td><td>stiffness only (boundary massless)</td></tr>
+<tr><td><b>Number of modes</b></td><td colspan="2">n<sub>red</sub></td><td>modes kept only</td></tr>
+<tr><td><b>Accuracy</b></td><td colspan="2">upper bounds; exact with all modes</td>
+<td>no bound; never exact</td></tr>
+<tr><td><b>Component modes from a test?</b></td><td>hard (the boundary must be clamped)</td>
+<td colspan="2">natural (free-free test), plus a residual flexibility measurement</td></tr>
+</table>
+<p>With the same number of coordinates, Rubin is usually more accurate for the lowest modes and
+Craig–Bampton for the higher ones: the residual flexibility is a <i>static</i> correction, so it
+helps most well below the discarded frequencies. Also, B's first kept free mode is its rigid-body
+mode, which Craig–Bampton gets for free inside its constraint modes.</p>
 
 <h3>Properties worth knowing</h3>
 <ul>
@@ -291,6 +389,26 @@ the reduction happens in A. With 1 mode kept in A the model has 3 DOFs and mode 
 too high (MAC 0.27). Keep 3 modes in A (up to 3.97 Hz) and modes 1 to 4 fall within
 0.2%: the rule of thumb in action.</li>
 </ol>
+<p><b>Free interface</b> (back to 8 masses, the interface at m4, 1 mode each):</p>
+<ol start="8">
+<li>Choose <i>Rubin</i>. The model is the same size (4 DOFs), but B's one kept mode is now its
+rigid-body mode. Mode 1 is within 0.003% (Craig–Bampton: 0.02%) and mode 2 within 0.9%, but mode
+4 is 10% high against Craig–Bampton's 7%. Open <i>Substructures on their own</i>: B1 is at 0 Hz and
+carries 83% of coupled mode 1's kinetic energy.</li>
+<li>Open the <i>Basis</i> tab. The boundary columns are no longer the straight-line "tent" and
+ramp: they are residual attachment modes, the static deflection of the discarded modes, which
+already bend like the higher modes.</li>
+<li>Choose <i>MacNeal</i>. Still 4 coordinates, but the boundary DOFs are massless, so there are
+only 2 modes: mode 1 is 0.6% high and mode 2 22%. Click <i>All modes</i>: 6 modes now, still not
+exact (mode 6 is 66% high), because the mass of B's discarded modes is gone.</li>
+<li>Open <i>Compare methods</i> and select mode 3 in the table on the left. Every curve falls as
+modes are added. Craig–Bampton and Rubin reach the exact answer with all modes (drawn at the
+floor); MacNeal is still 0.8% high. For mode 3 Craig–Bampton and Rubin take turns in the lead; select
+mode 1 and Rubin is ahead at every size.</li>
+<li>Set k<sub>1</sub> = k<sub>2</sub> = 0 on the Simulation page, with the interface at m4.
+Craig–Bampton fails (m1 and m2 float when the boundary is held), but the free-interface methods
+simply find more rigid-body modes in A.</li>
+</ol>
 
 <h3><a name="notation"></a>Notation</h3>
 <table border="1" cellspacing="0" cellpadding="4">
@@ -319,10 +437,16 @@ too high (MAC 0.27). Keep 3 modes in A (up to 3.97 Hz) and modes 1 to 4 fall wit
 <tr><td>η</td><td>mode shape of the reduced model in coordinates [q, x<sub>b</sub>]; x = Tη recovers it physically</td><td>mixed</td></tr>
 <tr><td>f<sub>n</sub>, f<sub>d</sub></td><td>undamped natural frequency ω<sub>n</sub>/2π, damped frequency ω<sub>d</sub>/2π</td><td>Hz</td></tr>
 <tr><td>λ</td><td>damped eigenvalue −ζω<sub>n</sub> ± iω<sub>d</sub></td><td>1/s</td></tr>
-<tr><td>ζ</td><td>damping ratio: −Re λ / |λ| ("alone": of a substructure with its boundary held)</td><td>—</td></tr>
+<tr><td>ζ</td><td>damping ratio: −Re λ / |λ| ("alone": of a substructure with its boundary held, or free for Rubin and MacNeal)</td><td>—</td></tr>
 <tr><td>MAC</td><td>modal assurance criterion (φ<sup>T</sup>x)² / (φ<sup>T</sup>φ · x<sup>T</sup>x): shape similarity, 0 to 1</td><td>—</td></tr>
-<tr><td>Share</td><td>fraction of a coupled mode's strain energy carried by one fixed-interface mode</td><td>—</td></tr>
+<tr><td>Share</td><td>fraction of a coupled mode's strain energy carried by one fixed-interface mode (Craig–Bampton), or of its kinetic energy carried by one free-interface mode (Rubin, MacNeal)</td><td>—</td></tr>
 <tr><td>H(ω)</td><td>receptance (FRF) X/F = (K − ω²M + iωC)<sup>−1</sup></td><td>m/N</td></tr>
+<tr><td>Φ (free), Φ<sub>ik</sub>, Φ<sub>bk</sub></td><td>free-interface modes of a whole substructure (boundary free), mass-normalized: Φ<sup>T</sup>MΦ = I; the interior and boundary rows of the kept ones</td><td>1/√kg</td></tr>
+<tr><td>Φ<sub>d</sub>, Λ<sub>d</sub></td><td>the discarded free-interface modes and their ω²</td><td>1/√kg, rad²/s²</td></tr>
+<tr><td>G<sub>d</sub>, G<sub>bb</sub>, G<sub>ib</sub></td><td>residual flexibility Φ<sub>d</sub>Λ<sub>d</sub><sup>−1</sup>Φ<sub>d</sub><sup>T</sup> and its partitions</td><td>m/N</td></tr>
+<tr><td>f<sub>b</sub></td><td>interface (connection) forces on a substructure's boundary DOFs</td><td>N</td></tr>
+<tr><td>R</td><td>residual attachment modes G<sub>ib</sub>G<sub>bb</sub><sup>−1</sup>: interior shape for a unit displacement of each boundary DOF (free-interface methods)</td><td>m/m</td></tr>
+<tr><td>E<sub>b</sub></td><td>Boolean matrix picking the boundary columns</td><td>—</td></tr>
 <tr><td>CB</td><td>Craig–Bampton (the reduced model); "true" = the full N-DOF model</td><td>—</td></tr>
 </table>
 """
@@ -388,7 +512,7 @@ def _join(items: list[str]) -> str:
     return ", ".join(items) if items else "none"
 
 
-def matrices_html(model: CraigBamptonModel, full: ModalResult | None = None) -> str:
+def matrices_html(model: CMSModel, full: ModalResult | None = None) -> str:
     """Every step of the reduction, with the current numbers."""
     system = model.system
     n = system.n
@@ -435,10 +559,26 @@ def matrices_html(model: CraigBamptonModel, full: ModalResult | None = None) -> 
             f"{left.name} and {fmt(system.stiffness[j + 1], 1)} to {right.name}. C<sub>{j + 1},{j + 1}</sub> "
             f"= c<sub>{j + 1}</sub> + c<sub>{j + 2}</sub> = {fmt(C[j, j], 1)} splits the same way "
             f"({fmt(system.damping[j], 1)} + {fmt(system.damping[j + 1], 1)}). The interface mass "
-            f"m<sub>{j + 1}</sub> = {fmt(system.masses[j], 1)} goes to {left.name} (any split works: "
-            "assembly adds them back). Every other entry belongs to one substructure only, so "
+            f"m<sub>{j + 1}</sub> = {fmt(system.masses[j], 1)} "
+            + (f"is split half and half, {fmt(system.masses[j] / 2, 1)} to each, so that both have mass "
+               "at every DOF their free modes can move (any split works: assembly adds them back). "
+               if model.free else
+               f"goes to {left.name} (any split works: assembly adds them back). ")
+            + "Every other entry belongs to one substructure only, so "
             "K = Σ L<sub>s</sub><sup>T</sup>K<sup>(s)</sup>L<sub>s</sub> exactly, and the same for C and M.</p>"
         )
+    if model.free:
+        parts += _free_steps(model)
+    else:
+        parts += _fixed_steps(model)
+    parts += _assembly_steps(model, full)
+    return "".join(parts)
+
+
+def _fixed_steps(model: CMSModel) -> list[str]:
+    """Craig-Bampton steps 3 to 6: fixed-interface modes, constraint modes, T, reduced matrices."""
+    subs = model.substructures
+    parts = []
 
     parts.append("<h3>3. Fixed-interface normal modes</h3>")
     parts.append("<p>Boundary clamped (x<sub>b</sub> = 0): K<sub>ii</sub>φ = ω²M<sub>ii</sub>φ, "
@@ -452,7 +592,7 @@ def matrices_html(model: CraigBamptonModel, full: ModalResult | None = None) -> 
             continue
         freqs = ", ".join(
             (f"<b>{f:.4g}</b>" if r < sub.n_kept else f"<span style='color:#999'>{f:.4g}</span>")
-            for r, f in enumerate(sub.fixed_omegas / TWO_PI)
+            for r, f in enumerate(sub.omegas / TWO_PI)
         )
         parts.append(
             f"<p><b>{sub.name}</b>: f = {freqs} Hz (<b>bold</b>: kept, {sub.n_kept} of {sub.ni}; "
@@ -509,7 +649,111 @@ def matrices_html(model: CraigBamptonModel, full: ModalResult | None = None) -> 
             matrix_html(sub.M_red, red_labels, red_labels, red_groups, red_groups, f"M̂<sup>({sub.name})</sup>"),
         ))
         parts.append(_damping_note(sub))
+    return parts
 
+
+def _free_steps(model: CMSModel) -> list[str]:
+    """Rubin / MacNeal steps 3 to 6: free-interface modes, residual flexibility, T, reduced matrices."""
+    subs = model.substructures
+    parts = ["<h3>3. Free-interface normal modes</h3>",
+             "<p>Boundary free: Kφ = ω²Mφ over <i>all</i> the substructure's DOFs, mass-normalized so "
+             "Φ<sup>T</sup>MΦ = I. Every mode moves the boundary too. Rigid-body modes (ω = 0) come first "
+             "and are always kept. These are <i>undamped</i> modes: C plays no part in choosing the "
+             "basis.</p>"]
+    for sub in subs:
+        if not sub.ni:
+            parts.append(f"<p><b>{sub.name}</b> has no interior DOFs, so there is nothing to reduce: it is "
+                         "kept as its physical boundary DOFs.</p>")
+            continue
+        freqs = ", ".join(
+            (f"<b>{f:.4g}</b>" if r < sub.n_kept else f"<span style='color:#999'>{f:.4g}</span>")
+            for r, f in enumerate(np.where(sub.omegas > 1e-9, sub.omegas, 0.0) / TWO_PI)
+        )
+        rigid = (f" {sub.n_rigid} rigid-body mode{'s' if sub.n_rigid > 1 else ''} at 0 Hz." if sub.n_rigid
+                 else "")
+        parts.append(f"<p><b>{sub.name}</b>: f = {freqs} Hz (<b>bold</b>: kept, {sub.n_kept} of "
+                     f"{sub.omegas.size}; grey: discarded).{rigid}</p>")
+        cols = [f"φ<sub>{r + 1}</sub>" for r in range(sub.omegas.size)]
+        parts.append(matrix_html(sub.Phi, _dof_labels(sub.dofs), cols, ["i"] * sub.ni + ["b"] * sub.nb,
+                                 ["q"] * sub.omegas.size, f"Φ<sup>({sub.name})</sup>", dim_cols=sub.n_kept))
+
+    parts.append("<h3>4. Residual flexibility</h3>")
+    parts.append("<p>G<sub>d</sub> = Φ<sub>d</sub>Λ<sub>d</sub><sup>−1</sup>Φ<sub>d</sub><sup>T</sup> "
+                 "[m/N]: the static flexibility of the <i>discarded</i> modes, which respond almost "
+                 "statically to the interface forces because they are high in frequency. Without "
+                 "rigid-body modes it equals K<sup>−1</sup> − Φ<sub>k</sub>Λ<sub>k</sub><sup>−1</sup>"
+                 "Φ<sub>k</sub><sup>T</sup>, so in practice the discarded modes are never computed. "
+                 "Only its boundary columns are used: G<sub>d</sub>E<sub>b</sub> are the residual "
+                 "attachment modes. Scaled to a unit boundary displacement, "
+                 "R = G<sub>ib</sub>G<sub>bb</sub><sup>−1</sup>.</p>")
+    for sub in subs:
+        if not sub.ni:
+            continue
+        groups = ["i"] * sub.ni + ["b"] * sub.nb
+        labels = _dof_labels(sub.dofs)
+        parts.append(_side_by_side(
+            matrix_html(sub.G, labels, labels, groups, groups, f"G<sub>d</sub><sup>({sub.name})</sup>"),
+            matrix_html(sub.Psi, _dof_labels(sub.interior), _dof_labels(sub.boundary), ["i"] * sub.ni,
+                        ["b"] * sub.nb, f"R<sup>({sub.name})</sup>"),
+        ))
+
+    parts.append("<h3>5. Transformation</h3>")
+    parts.append("<p>x = Φ<sub>k</sub>q + G<sub>d</sub>E<sub>b</sub>f<sub>b</sub>. Its boundary rows "
+                 "give f<sub>b</sub> = G<sub>bb</sub><sup>−1</sup>(x<sub>b</sub> − Φ<sub>bk</sub>q), and "
+                 "substituting: [x<sub>i</sub>; x<sub>b</sub>] = T [q; x<sub>b</sub>] with "
+                 "T = [ Φ<sub>ik</sub> − RΦ<sub>bk</sub> &nbsp;R ; 0 &nbsp;I ]. The same shape as "
+                 "Craig–Bampton's T, so x<sub>b</sub> is physical and assembly is unchanged. The modal "
+                 "columns are the kept free modes with their boundary motion taken out.</p>")
+    tables = []
+    for sub in subs:
+        red_labels, red_groups = _reduced_labels(sub)
+        tables.append(matrix_html(sub.T, _dof_labels(sub.dofs), red_labels, ["i"] * sub.ni + ["b"] * sub.nb,
+                                  red_groups, f"T<sup>({sub.name})</sup>"))
+    parts.append(_side_by_side(*tables))
+
+    parts.append("<h3>6. Reduced substructure matrices</h3>")
+    parts.append("<p>K̂ = T<sup>T</sup>KT = [ Λ<sub>k</sub> + Φ<sub>bk</sub><sup>T</sup>G<sub>bb</sub><sup>−1</sup>"
+                 "Φ<sub>bk</sub> &nbsp;−Φ<sub>bk</sub><sup>T</sup>G<sub>bb</sub><sup>−1</sup> ; "
+                 "−G<sub>bb</sub><sup>−1</sup>Φ<sub>bk</sub> &nbsp;G<sub>bb</sub><sup>−1</sup> ]: unlike "
+                 "Craig–Bampton, the modes are coupled to the boundary by stiffness. G<sub>bb</sub><sup>−1</sup> "
+                 "is the residual stiffness at the boundary.</p>")
+    if model.method == "rubin":
+        parts.append("<p><b>Rubin</b>: M̂ = T<sup>T</sup>MT, a Rayleigh–Ritz projection. The residual "
+                     "attachment modes carry mass (the <i>residual mass</i>), so the modes are coupled to "
+                     "the boundary by mass as well. The damping is projected the same way, "
+                     "Ĉ = T<sup>T</sup>CT.</p>")
+    else:
+        parts.append("<p><b>MacNeal</b>: the residual flexibility is a massless spring. Only the kept "
+                     "modes carry inertia: M̂ = [ I 0 ; 0 0 ], so the boundary rows of M̂ are zero. The "
+                     "damping is projected like the stiffness, Ĉ = T<sup>T</sup>CT (damping was not part "
+                     "of MacNeal's method; this way it differs from Rubin's only in the mass).</p>")
+    for sub in subs:
+        red_labels, red_groups = _reduced_labels(sub)
+        parts.append(_side_by_side(
+            matrix_html(sub.K_red, red_labels, red_labels, red_groups, red_groups, f"K̂<sup>({sub.name})</sup>"),
+            matrix_html(sub.C_red, red_labels, red_labels, red_groups, red_groups, f"Ĉ<sup>({sub.name})</sup>"),
+            matrix_html(sub.M_red, red_labels, red_labels, red_groups, red_groups, f"M̂<sup>({sub.name})</sup>"),
+        ))
+        if sub.ni and sub.n_kept:
+            Pk = sub.Phi[:, : sub.n_kept]
+            modal = np.diag(Pk.T @ sub.C @ Pk)
+            zetas = ", ".join("rigid" if w < 1e-9 else f"{c / (2 * w):.4f}"
+                              for c, w in zip(modal, sub.omegas[: sub.n_kept]))
+            parts.append(f"<p><b>{sub.name}</b>: kept free-interface ζ = φ<sub>r</sub><sup>T</sup>Cφ<sub>r</sub>"
+                         f" / 2ω<sub>r</sub> = {zetas}.</p>")
+    return parts
+
+
+def _assembly_steps(model: CMSModel, full: ModalResult | None) -> list[str]:
+    """Steps 7 to 9, the same for every method: assemble, solve and recover, damping."""
+    system = model.system
+    n = system.n
+    subs = model.substructures
+    bnd = {int(b) for b in model.boundary}
+    groups = ["b" if d in bnd else "i" for d in range(n)]
+    labels = _dof_labels(np.arange(n))
+    interfaces = [int(b) for b in model.boundary[:-1]]
+    parts = []
     parts.append("<h3>7. Assemble the reduced model</h3>")
     shared = _join(_dof_labels(np.array(interfaces)))
     parts.append(
@@ -544,11 +788,17 @@ def matrices_html(model: CraigBamptonModel, full: ModalResult | None = None) -> 
     parts.append("<p>K̂η = ω²M̂η gives the reduced model's modes; the physical shapes are x = Tη, with "
                  "the global T below (rows: physical DOFs, columns: reduced coordinates). The comparison "
                  "table and the Modes &amp; FRF tab compare them with the full model.</p>")
+    if model.method == "macneal":
+        parts.append("<p>MacNeal's M̂ is zero on the boundary rows, so the boundary DOFs have no inertia: "
+                     "they follow the modes statically. They are condensed out first, "
+                     "K̂<sub>c</sub> = K̂<sub>qq</sub> − K̂<sub>qb</sub>K̂<sub>bb</sub><sup>−1</sup>K̂<sub>bq</sub>, "
+                     f"which leaves {model.omegas.size} modes, and recovered as "
+                     "x<sub>b</sub> = −K̂<sub>bb</sub><sup>−1</sup>K̂<sub>bq</sub>q.</p>")
     parts.append(matrix_html(model.T, labels, glabels, groups, ggroups, "T"))
     freqs = ", ".join(f"{f:.4g}" for f in model.fn_hz)
     parts.append(f"<p>Reduced-model natural frequencies: {freqs} Hz.</p>")
     parts.append(_damped_comparison(model, full))
-    return "".join(parts)
+    return parts
 
 
 def _damping_note(sub: Substructure) -> str:
@@ -557,7 +807,7 @@ def _damping_note(sub: Substructure) -> str:
                 "seen from the boundary (Ĉ<sub>bb</sub>).</p>")
     modal, boundary = substructure_damping(sub)
     zetas = ", ".join(
-        f"{sub.C_red[r, r] / (2 * w):.4f}" for r, w in enumerate(sub.fixed_omegas[: sub.n_kept])
+        f"{sub.C_red[r, r] / (2 * w):.4f}" for r, w in enumerate(sub.omegas[: sub.n_kept])
     )
     if max(modal, boundary) < 1e-6:
         verdict = ("Ĉ has the same block-diagonal form as K̂: the damping in this substructure is "
@@ -570,7 +820,7 @@ def _damping_note(sub: Substructure) -> str:
     return f"<p><b>{sub.name}</b>: fixed-interface ζ = {zetas}. {verdict}</p>"
 
 
-def _damped_comparison(model: CraigBamptonModel, full: ModalResult | None) -> str:
+def _damped_comparison(model: CMSModel, full: ModalResult | None) -> str:
     """Step 9: exact damping ratios of the reduced and the full model, mode by mode."""
     out = ["<h3>9. Damping in the reduced model</h3>",
            "<p>The frequencies above ignore damping. The reduced model does include it: Ĉ is used "
@@ -580,17 +830,17 @@ def _damped_comparison(model: CraigBamptonModel, full: ModalResult | None) -> st
     if full is None:
         return "".join(out)
     rows = ["<table border='1' cellspacing='0' cellpadding='3'>"
-            "<tr><th>Mode</th><th>ζ true</th><th>ζ CB</th><th>ζ error</th></tr>"]
+            f"<tr><th>Mode</th><th>ζ true</th><th>ζ {model.short_name}</th><th>ζ error</th></tr>"]
     for c in compare_modes(model, full):
         cells = [str(c.index), "overdamped" if c.zeta_true is None else f"{c.zeta_true:.4f}"]
-        if c.fn_cb is None:
+        if c.fn_red is None:
             cells += ["<span style='color:#999'>not in model</span>", "—"]
-        elif c.zeta_cb is None:
+        elif c.zeta_red is None:
             cells += ["overdamped", "—"]
         else:
             err = c.zeta_error
             color = "#000" if err is None else "#2a7d2a" if abs(err) < 1e-3 else "#b07000" if abs(err) < 0.05 else "#c1121f"
-            cells += [f"{c.zeta_cb:.4f}", "—" if err is None else f"<span style='color:{color}'>{100 * err:+.3g}%</span>"]
+            cells += [f"{c.zeta_red:.4f}", "—" if err is None else f"<span style='color:{color}'>{100 * err:+.3g}%</span>"]
         rows.append("<tr>" + "".join(f"<td align='right'>{x}</td>" for x in cells) + "</tr>")
     rows.append("</table>")
     out.append("".join(rows))
