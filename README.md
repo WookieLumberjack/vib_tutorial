@@ -201,3 +201,11 @@ cb = craig_bampton(s, interfaces=[3], n_kept=[1, 1])          # cut at m4, 1 mod
 - Energy bars (kinetic, potential, dissipated) and modal-coordinate time histories
 - Tuned mass damper and vibration absorber presets
 - Save and load parameter presets for classroom exercises
+- Substructuring: time-simulate the Craig–Bampton reduced model alongside the full one
+  under the same tip force, so the reduction error shows up in the animation and time
+  histories
+- Substructuring: more than one interface (three or more substructures); the core
+  (`craig_bampton`) already accepts several cuts, so only the controls and schematic need
+  extending
+- Substructuring: free-interface component mode synthesis (MacNeal, Rubin) as a comparison
+  with the fixed-interface Craig–Bampton method
