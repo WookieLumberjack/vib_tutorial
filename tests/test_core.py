@@ -79,7 +79,7 @@ def test_free_vibration_matches_analytic():
     sim = Simulator(ChainSystem([m], [k], [c]))
     x0 = 0.1
     sim.set_displacement(np.array([x0]))
-    ts, xs, _ = sim.advance(1.0)
+    ts, xs, _, _ = sim.advance(1.0)
     wn = math.sqrt(k / m)
     z = c / (2 * math.sqrt(k * m))
     wd = wn * math.sqrt(1 - z**2)
@@ -107,7 +107,7 @@ def test_harmonic_steady_state_matches_frf():
     force.switch_on()
     while sim.t < 60.0:  # let transients decay (advance() caps steps per call)
         sim.advance(5.0)
-    _, xs, _ = sim.advance(5.0)
+    _, xs, _, _ = sim.advance(5.0)
     measured = (xs.max(axis=0) - xs.min(axis=0)) / 2
     expected = 5.0 * np.abs(frf(s, np.array([f_hz]), 1)[0])
     np.testing.assert_allclose(measured, expected, rtol=2e-3)
@@ -162,7 +162,7 @@ def test_releasing_complex_mode_excites_only_that_mode():
     sim = Simulator(s)
     z0 = m.state_vector.real
     sim.set_state(z0[: s.n], z0[s.n :])
-    ts, xs, _ = sim.advance(1.0)
+    ts, xs, _, _ = sim.advance(1.0)
     exact = (m.shape[None, :] * np.exp(m.eigenvalue * ts)[:, None]).real
     np.testing.assert_allclose(xs, exact, atol=1e-9)
 
@@ -352,3 +352,61 @@ def test_exact_modal_terms_refuse_a_defective_eigenvalue():
     f = np.geomspace(0.1, 20.0, 100)
     terms = modal_frf_terms(free, modal_analysis(free), exact=False)  # proportional, so still exact
     np.testing.assert_allclose(sum(t.evaluate(f) for t in terms), frf_matrix(free, f), rtol=1e-9)
+
+
+def _coordinates(s, res, sim, complex_modes):
+    """Run 1 s and return (t, x, y) with y the modal coordinates, including t = 0."""
+    from vib_tutorial.core import modal_coordinate_map
+
+    z0 = sim.state.copy()
+    ts, xs, vs, _ = sim.advance(1.0)
+    zs = np.vstack([z0, np.hstack([xs, vs])])
+    return np.r_[0.0, ts], zs[:, : s.n], zs @ modal_coordinate_map(s, res, complex_modes)
+
+
+def test_classical_modal_coordinates_rebuild_the_motion():
+    s = ChainSystem([1.0, 2.0, 0.5, 1.0], [400.0, 300.0, 500.0, 200.0], [15.0, 2.0, 2.0, 2.0])
+    res = modal_analysis(s)
+    sim = Simulator(s)
+    sim.set_state(np.array([0.01, -0.02, 0.03, 0.005]), np.array([0.1, 0.0, -0.2, 0.3]))
+    _, xs, ys = _coordinates(s, res, sim, complex_modes=False)
+    shapes = np.column_stack([m.shape for m in res.modes])
+    np.testing.assert_allclose(ys @ shapes.T, xs, atol=1e-12)
+
+
+def test_classical_release_stays_in_its_coordinate_only_if_proportional():
+    for c1, leaks in ((2.0, False), (15.0, True)):
+        s = ChainSystem([1.0] * 4, [400.0] * 4, [c1, 2.0, 2.0, 2.0])
+        res = modal_analysis(s)
+        sim = Simulator(s)
+        sim.set_displacement(0.01 * res.modes[2].shape)
+        _, _, ys = _coordinates(s, res, sim, complex_modes=False)
+        others = np.abs(np.delete(ys, 2, axis=1)).max()
+        assert np.abs(ys[0, 2]) == pytest.approx(0.01)
+        assert (others > 1e-4) if leaks else (others < 1e-12)
+
+
+def test_complex_modal_coordinates_decouple_any_damping():
+    s = ChainSystem([1.0] * 4, [400.0] * 4, [15.0, 2.0, 2.0, 2.0])
+    res = modal_analysis(s)
+    m = res.complex_modes[4]
+    sim = Simulator(s)
+    z0 = m.state_vector.real
+    sim.set_state(z0[: s.n], z0[s.n :])
+    ts, xs, ys = _coordinates(s, res, sim, complex_modes=True)
+    assert ys.shape[1] == s.n  # one coordinate per conjugate pair
+    j = m.index // 2  # column of lambda5's pair
+    # Released with x0 = Re(psi): the coordinate is Re(e^{lambda t}), since psi = 1 at its peak mass.
+    np.testing.assert_allclose(ys[:, j], np.exp(m.eigenvalue * ts).real, atol=1e-9)
+    assert np.abs(np.delete(ys, j, axis=1)).max() < 1e-9
+    peak = np.argmax(np.abs(m.shape))
+    np.testing.assert_allclose(ys[:, j], xs[:, peak], atol=1e-9)
+
+
+def test_complex_modal_coordinates_with_real_roots():
+    from vib_tutorial.core import modal_coordinate_map
+
+    s = ChainSystem([1.0, 1.0], [100.0, 100.0], [80.0, 0.0])  # one pair, two real roots
+    res = modal_analysis(s)
+    P = modal_coordinate_map(s, res, complex_modes=True)
+    assert P.shape == (4, 3)

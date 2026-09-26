@@ -192,6 +192,47 @@ def _state_space_modes(system: ChainSystem) -> list[ComplexMode]:
     return out
 
 
+def modal_coordinate_map(system: ChainSystem, result: ModalResult, complex_modes: bool = False) -> np.ndarray:
+    """Real matrix P, shape (2N, m), mapping states to modal coordinates: y = z @ P.
+
+    z holds states [x, v] as rows. Each coordinate is scaled to metres: it is
+    the mode's contribution to the displacement of the mass the mode moves
+    most (the mass where its normalized shape is 1).
+
+    Classical (N columns, in mode order): with mass-normalized phi_r,
+    q_r = phi_r^T M x and x = sum_r phi_r q_r = sum_r shape_r y_r, so
+    y_r = phi_r[max] q_r. Velocities do not enter.
+
+    Complex (one column per conjugate pair or real root, in the order of
+    ``result.complex_modes`` without the second member of each pair): with the
+    state eigenvectors V as columns, z = V eta, so eta = V^-1 z. A pair adds
+    psi eta + conj(psi eta) = 2 Re(psi eta) to x, which is 2 Re(eta) at the
+    mass where psi = 1; a real root adds eta there. Unlike the classical q,
+    these coordinates decouple for any damping.
+    """
+    n = system.n
+    if not complex_modes:
+        M = system.matrices()[0]
+        Phi = np.column_stack([m.shape_mass_normalized for m in result.modes])
+        peak = Phi[np.argmax(np.abs(Phi), axis=0), np.arange(n)]
+        P = np.zeros((2 * n, n))
+        P[:n] = M @ Phi * peak
+        return P
+
+    V = np.column_stack([m.state_vector for m in result.complex_modes])
+    # pinv, not inv: a defective eigenvalue (the lambda = 0 of a free chain)
+    # makes V singular, and pinv still gives finite coordinates there.
+    Vinv = np.linalg.pinv(V)
+    cols = []
+    for m in result.complex_modes:
+        row = Vinv[m.index - 1]
+        if m.conjugate is None:
+            cols.append(row.real)
+        elif m.conjugate > m.index:
+            cols.append(2.0 * row.real)
+    return np.column_stack(cols)
+
+
 def _mac(real_shape: np.ndarray, complex_shape: np.ndarray) -> float:
     num = abs(np.vdot(real_shape, complex_shape)) ** 2
     den = np.vdot(real_shape, real_shape).real * np.vdot(complex_shape, complex_shape).real

@@ -7,7 +7,15 @@ import math
 import numpy as np
 from PySide6 import QtCore, QtWidgets
 
-from ..core import ChainSystem, ForceController, ForceKind, ForceSettings, Simulator, modal_analysis
+from ..core import (
+    ChainSystem,
+    ForceController,
+    ForceKind,
+    ForceSettings,
+    Simulator,
+    modal_analysis,
+    modal_coordinate_map,
+)
 from .animation import ChainView
 from .background import COUPLING_TIP, make_background_view
 from .frf_matrix import FrfMatrixPage
@@ -49,6 +57,26 @@ RELEASE_TIP = {
     "<p>λ and its conjugate λ* give the same real motion, so releasing either one does "
     "the same thing. A real eigenvalue releases a non-oscillatory decay.</p>",
 }
+COORDS_TIP_COMMON = (
+    "<p><b>Physical coordinates:</b> the displacement x<sub>i</sub> of each mass.</p>"
+    "<p><b>Modal coordinates:</b> the same motion split into one curve per mode, "
+    "in mode colors. Each curve is that mode's share of the displacement of the mass it "
+    "moves most (where its shape is 1), so its size compares directly with x. "
+    "The past motion is projected onto the modes of the current parameters.</p>"
+)
+COORDS_TIP = {
+    Method.CLASSICAL: COORDS_TIP_COMMON
+    + "<p><b>Classical:</b> q = Φ<sup>T</sup>Mx with the real mode shapes, and "
+    "x = Σ φ<sub>r</sub> q<sub>r</sub> exactly. With <b>proportional</b> damping each "
+    "q<sub>r</sub> is an independent damped oscillator: release a mode and only its curve "
+    "moves. With <b>non-proportional</b> damping the damping couples them, so the other "
+    "curves pick up motion too.</p>",
+    Method.STATE_SPACE: COORDS_TIP_COMMON
+    + "<p><b>State-space:</b> η = V<sup>−1</sup>z with the complex eigenvectors "
+    "V = [ψ; λψ], using velocities as well as displacements. A conjugate pair adds "
+    "2 Re(ψη) to x, so its curve is 2 Re(η); a real root's curve is η. These decouple "
+    "for <i>any</i> damping: release a complex mode and only its curve moves.</p>",
+}
 RELEASE_FIT_TIP = (
     "<p>While <i>Auto-scale animation and plots</i> is on, the plot window is also "
     "fitted to this mode (Simulation \u2192 Fit window cycles).</p>"
@@ -86,9 +114,25 @@ class MainWindow(QtWidgets.QMainWindow):
         # --- center: animation + time histories
         self.chain = ChainView()
         self.time_plot = TimeHistoryPlot()
+        self.coords_combo = QtWidgets.QComboBox()
+        self.coords_combo.addItem("Physical: mass displacements x", False)
+        self.coords_combo.addItem("Modal: one curve per mode", True)
+        coords_label = QtWidgets.QLabel("Plot coordinates:")
+        self._modal_map = np.zeros((0, 0))  # states -> modal coordinates, set with the modes
+        plot_box = QtWidgets.QWidget()
+        pv = QtWidgets.QVBoxLayout(plot_box)
+        pv.setContentsMargins(0, 0, 0, 0)
+        coords_row = QtWidgets.QHBoxLayout()
+        coords_row.setContentsMargins(6, 0, 0, 0)
+        coords_row.addWidget(coords_label)
+        coords_row.addWidget(self.coords_combo)
+        coords_row.addStretch(1)
+        pv.addLayout(coords_row)
+        pv.addWidget(self.time_plot, 1)
+        self._coords_widgets = (coords_label, self.coords_combo)
         center = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         center.addWidget(self.chain)
-        center.addWidget(self.time_plot)
+        center.addWidget(plot_box)
         center.setSizes([300, 450])
 
         # --- right: modal reference
@@ -183,6 +227,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.animate_modes.toggled.connect(lambda on: on or self._animate_modes(0.0))
         self.table.itemSelectionChanged.connect(self._on_mode_selected)
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
+        self.coords_combo.currentIndexChanged.connect(self._set_plot_curves)
         self.cms_page.dof_requested.connect(self.params.dof.setValue)
         self.cms_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
         self.frf_page.dof_requested.connect(self.params.dof.setValue)
@@ -216,7 +261,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.history.reset(n)
         self._sim_target = self.sim.t
         self.chain.set_masses(self.sim.system.masses)
-        self.time_plot.set_dof(n)
         self.force_panel.set_dof(n)
 
     def _refresh_modal(self) -> None:
@@ -241,6 +285,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.force_panel.set_modes(self.entries)
         self.controls.set_modes(self.entries)
         self.release_button.setToolTip(RELEASE_TIP[self.method] + RELEASE_FIT_TIP)
+        for w in self._coords_widgets:
+            w.setToolTip(COORDS_TIP[self.method])
+        self._modal_map = modal_coordinate_map(self.sim.system, self.modal, complex_modes=state_space)
+        self._set_plot_curves()
         self.modal_note.setText(self._modal_note())
         self._on_force_changed()
 
@@ -286,6 +334,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mode_plot.animate(theta)
         if self.phasor_plot.isVisible():
             self.phasor_plot.animate(theta)
+
+    @property
+    def modal_view(self) -> bool:
+        return bool(self.coords_combo.currentData())
+
+    def _set_plot_curves(self) -> None:
+        """Mass displacements, or one modal coordinate per mode of the selected method."""
+        if not self.modal_view:
+            self.time_plot.set_dof(self.sim.system.n)
+            return
+        # One coordinate per classical mode, conjugate pair or real root: the
+        # entries with a legend, in the column order of modal_coordinate_map.
+        # Legend text is e.g. "Mode 2: 3.1 Hz" or "λ3,4: 3.0 Hz"; keep the name.
+        curves = [(e.legend.split(":")[0], e.color) for e in self.entries if e.legend is not None]
+        self.time_plot.set_curves("Modal coordinate", curves)
 
     def _on_force_changed(self) -> None:
         s = self.force.settings
@@ -339,18 +402,23 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sim_target += dt * speed
             # If the simulator can't keep up (very stiff system), drop the backlog.
             self._sim_target = min(self._sim_target, self.sim.t + 0.25 * speed + 0.05)
-            ts, xs, fs = self.sim.advance(self._sim_target - self.sim.t)
-            self.history.extend(ts, xs, fs)
+            ts, xs, vs, fs = self.sim.advance(self._sim_target - self.sim.t)
+            self.history.extend(ts, xs, vs, fs)
 
         # The simulation keeps running behind the other pages; skip drawing it.
         if self.pages.currentWidget() is not self.sim_page:
             return
         window = self.controls.window.value()
-        t, x, f = self.history.window(window)
+        t, x, v, f = self.history.window(window)
         peak = float(np.abs(x[-min(len(x), 20_000) :]).max()) if x.size else 0.0
         s = self.force.settings
         self.chain.update_state(self.sim.displacement, peak, self.force.value(), s.target, abs(s.amplitude))
-        self.time_plot.update_data(t, x, f, window)
+        if self.modal_view:
+            n = self.sim.system.n
+            y = x @ self._modal_map[:n] + v @ self._modal_map[n:]
+        else:
+            y = x
+        self.time_plot.update_data(t, y, f, window)
         if self.animate_modes.isChecked():
             self._animate_modes(2 * math.pi * MODE_ANIMATION_HZ * now)
         self.controls.time_label.setText(f"{self.sim.t:8.3f} s   (step {self.sim.step_size() * 1e3:.3g} ms)")

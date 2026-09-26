@@ -296,3 +296,46 @@ def test_worst_band_brackets_the_largest_difference():
     assert lo == pytest.approx(6.0 - 0.5 * np.sqrt(np.log(2)), abs=0.02)
     assert hi == pytest.approx(6.0 + 0.5 * np.sqrt(np.log(2)), abs=0.02)
     assert worst_band(f, full, full.copy()) is None
+
+
+def test_modal_coordinates_view(app):
+    import numpy as np
+
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.modes import Method
+
+    w = MainWindow()
+    w.params.rows[0][3].setValue(15.0)  # non-proportional: classical coordinates couple
+    n = w.sim.system.n
+    w.coords_combo.setCurrentIndex(1)
+    assert w.modal_view and len(w.time_plot.x_curves) == n
+    assert w.time_plot.x_curves[0].name() == "Mode 1"
+
+    def release_and_run(row):
+        w._reset()
+        w.table.selectRow(row)
+        w._release_mode()
+        for _ in range(5):
+            w._sim_target = w.sim.t + 0.2
+            w._tick()
+        return np.array([np.abs(c.getData()[1]).max() for c in w.time_plot.x_curves])
+
+    # Classical release of mode 3 with coupled damping: the other coordinates pick up motion.
+    amp = release_and_run(2)
+    assert amp[2] > 0.015
+    assert np.delete(amp, 2).max() > 1e-4
+
+    # State-space: one curve per conjugate pair, and a released complex mode stays in its own.
+    w.method_combo.setCurrentIndex(list(Method).index(Method.STATE_SPACE))
+    assert len(w.time_plot.x_curves) == n
+    assert w.time_plot.x_curves[2].name() == "λ5,6"
+    amp = release_and_run(4)
+    assert amp[2] > 0.015 and np.delete(amp, 2).max() < 1e-9
+
+    # Changing the number of masses rebuilds the modal curves.
+    w.params.dof.setValue(6)
+    w._tick()
+    assert len(w.time_plot.x_curves) == 6
+    w.coords_combo.setCurrentIndex(0)
+    assert w.time_plot.x_curves[0].name() == "x1"
+    w.close()
