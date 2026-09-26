@@ -10,6 +10,7 @@ from PySide6 import QtCore, QtWidgets
 from ..core import ChainSystem, ForceController, ForceKind, ForceSettings, Simulator, modal_analysis
 from .animation import ChainView
 from .background import COUPLING_TIP, make_background_view
+from .frf_matrix import FrfMatrixPage
 from .history import History
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
@@ -167,6 +168,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pages = QtWidgets.QTabWidget()
         self.pages.setDocumentMode(True)
         self.pages.addTab(self.sim_page, "Simulation && modal analysis")
+        self.frf_page = FrfMatrixPage()
+        self.pages.addTab(self.frf_page, "FRF matrix")
         self.pages.addTab(self.cms_page, "Substructuring (Craig–Bampton)")
         self.setCentralWidget(self.pages)
         self.resize(1700, 900)
@@ -182,6 +185,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
         self.cms_page.dof_requested.connect(self.params.dof.setValue)
         self.cms_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
+        self.frf_page.dof_requested.connect(self.params.dof.setValue)
+        self.frf_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
 
         self._apply_dof(system.n)
         self._refresh_modal()
@@ -217,6 +222,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _refresh_modal(self) -> None:
         self.modal = modal_analysis(self.sim.system)
         self.cms_page.set_system(self.sim.system, self.modal)
+        self.frf_page.set_system(self.sim.system, self.modal)
         self._refresh_modal_views()
 
     def _on_method_changed(self) -> None:
@@ -336,7 +342,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ts, xs, fs = self.sim.advance(self._sim_target - self.sim.t)
             self.history.extend(ts, xs, fs)
 
-        # The simulation keeps running behind the Substructuring page; skip drawing it.
+        # The simulation keeps running behind the other pages; skip drawing it.
         if self.pages.currentWidget() is not self.sim_page:
             return
         window = self.controls.window.value()

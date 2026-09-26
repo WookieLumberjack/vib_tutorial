@@ -10,7 +10,9 @@ from vib_tutorial.core import (
     ForceSettings,
     Simulator,
     frf,
+    frf_matrix,
     modal_analysis,
+    modal_frf_terms,
     state_space,
 )
 
@@ -302,3 +304,51 @@ def test_component_modes_alone_and_coupled():
     assert all(0 < c.share <= 1 for c in comps)
     # Clamped damping ratio: exact for C = beta K, zeta = beta w / 2.
     assert a1.zeta == pytest.approx(0.005 * 2 * math.pi * a1.fn_hz / 2)
+
+
+def test_frf_matrix_is_symmetric_and_matches_columns():
+    s = ChainSystem([1.0, 2.0, 1.0, 1.5], [400.0, 300.0, 500.0, 200.0], [15.0, 2.0, 0.0, 1.0])
+    f = np.geomspace(0.1, 20.0, 200)
+    H = frf_matrix(s, f)
+    np.testing.assert_allclose(H, H.transpose(0, 2, 1), atol=1e-15)  # reciprocity
+    for k in range(s.n):
+        np.testing.assert_allclose(H[:, :, k], frf(s, f, k))
+
+
+@pytest.mark.parametrize(
+    "system",
+    [
+        ChainSystem.uniform(4),  # proportional
+        ChainSystem([1.0, 2.0, 1.0, 1.5], [400.0, 300.0, 500.0, 200.0], [15.0, 2.0, 0.0, 1.0]),
+        ChainSystem([1.0] * 3, [400.0] * 3, [200.0, 2.0, 2.0]),  # mode 2 overdamped: real roots
+    ],
+)
+def test_exact_modal_terms_sum_to_the_frf_matrix(system):
+    f = np.geomspace(0.1, 20.0, 200)
+    H = frf_matrix(system, f)
+    terms = modal_frf_terms(system, modal_analysis(system), exact=True)
+    total = sum(t.evaluate(f) for t in terms)
+    np.testing.assert_allclose(total, H, atol=1e-12 * np.abs(H).max())
+
+
+def test_classical_modal_terms_exact_only_for_proportional_damping():
+    f = np.geomspace(0.1, 20.0, 200)
+    prop = ChainSystem.uniform(4)
+    terms = modal_frf_terms(prop, modal_analysis(prop), exact=False)
+    np.testing.assert_allclose(sum(t.evaluate(f) for t in terms), frf_matrix(prop, f), atol=1e-14)
+    # Each term is phi_r phi_r^T / (w_r^2 - w^2 + i w c_r); the lowest dominates at its resonance.
+    assert [t.mode for t in terms] == [1, 2, 3, 4]
+
+    nonprop = ChainSystem([1.0] * 4, [400.0] * 4, [15.0, 2.0, 2.0, 2.0])
+    H = frf_matrix(nonprop, f)
+    total = sum(t.evaluate(f) for t in modal_frf_terms(nonprop, modal_analysis(nonprop), exact=False))
+    assert np.abs(total - H).max() > 1e-3 * np.abs(H).max()
+
+
+def test_exact_modal_terms_refuse_a_defective_eigenvalue():
+    free = ChainSystem([1.0] * 3, [0.0, 400.0, 400.0], [0.0, 2.0, 2.0])  # rigid-body lambda = 0 (double)
+    with pytest.raises(ValueError):
+        modal_frf_terms(free, modal_analysis(free), exact=True)
+    f = np.geomspace(0.1, 20.0, 100)
+    terms = modal_frf_terms(free, modal_analysis(free), exact=False)  # proportional, so still exact
+    np.testing.assert_allclose(sum(t.evaluate(f) for t in terms), frf_matrix(free, f), rtol=1e-9)

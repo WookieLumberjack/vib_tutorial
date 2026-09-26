@@ -29,8 +29,9 @@ uv run pytest         # run the tests
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) above time histories of every mass's displacement and the applied force |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
-A second page, **Substructuring (Craig–Bampton)**, reduces the same chain by component
-mode synthesis (below).
+Two more pages work on the same chain: **FRF matrix** shows every term of the receptance
+matrix and how the modes build it up, and **Substructuring (Craig–Bampton)** reduces the
+chain by component mode synthesis (both below).
 
 ## What you can do
 
@@ -79,6 +80,27 @@ The receptance |X_i / F| and phase of every mass for a force at the selected mas
 natural frequencies are dotted and the current drive frequency is dashed.
 
 <img src="docs/images/frequency_response.png" alt="Frequency response magnitude and phase" width="420">
+
+### FRF matrix
+
+The *Frequency response* tab shows one column of the receptance matrix. The **FRF matrix**
+page shows all N × N terms H<sub>jk</sub> = x<sub>j</sub>/F<sub>k</sub> as a grid of small
+plots (row: response, column: force), on shared axes so their sizes compare directly.
+
+- **Show** magnitude, phase (unwrapped), real part or imaginary part. The large plot on the right
+  shows the selected term as magnitude with phase, or real with imaginary part.
+- **Modes included in the sum**: each term is a sum of one term per mode. Untick modes to see
+  the truncated modal sum (dashed red) against the full solution (black), and each mode's term
+  in its own colour. The real part shows best how the terms add.
+- **Exact or classical terms**: the exact expansion uses the complex (state-space) modes and
+  always sums to the full solution. The classical one uses the real modes with ζ modal, and
+  misses even with every mode when damping is non-proportional.
+- **Several forces at once**: Ctrl+click more plots in a row, or tick more forces, to see
+  x<sub>j</sub> = Σ<sub>k</sub> H<sub>jk</sub>F<sub>k</sub> built from its terms.
+- **Theory**: reciprocity, modal constants, why antiresonances appear (and how many), and
+  truncation.
+
+![FRF matrix page: mode 4 left out of the sum; the end-to-end term H14 misses above 5 Hz](docs/images/frf_matrix.png)
 
 ### Substructuring (Craig–Bampton)
 
@@ -154,7 +176,13 @@ complex, so each mass has its own phase. The two methods are linked by matching 
 damped pair to the undamped mode it most resembles (the modal assurance criterion, MAC).
 
 **Frequency response.** The receptance is solved directly at each frequency:
-$H(\omega) = (K - \omega^2 M + i\omega C)^{-1}$.
+$H(\omega) = (K - \omega^2 M + i\omega C)^{-1}$. It is also a sum of modal terms. With the
+state-space eigenvectors $V$ (and $V^{-1}$), every eigenvalue contributes a residue matrix,
+
+$$H(\omega) = \sum_{r=1}^{2N} \frac{R_r}{i\omega - \lambda_r}, \qquad R_r = (V)_{x,r}\,(V^{-1})_{r,\dot{x}}\,M^{-1}$$
+
+which is exact for any damping. For proportional damping it reduces to the classical
+$H = \sum_r \phi_r\phi_r^T / (\omega_r^2 - \omega^2 + 2i\zeta_r\omega_r\omega)$.
 
 **Time simulation.** The simulator advances $\dot{z} = Az + Bf$ with the exact
 discrete-time solution. Over a step $h$, with the force varying linearly across the step
@@ -172,6 +200,7 @@ step size adapts to the fastest mode, the drive frequency and the pulse length.
 - `core/model.py`: assembles $M$, $C$, $K$ and the state-space matrices.
 - `core/modal.py`: classical modes (`scipy.linalg.eigh`), all 2N state-space eigenpairs
   (`scipy.linalg.eig`), the MAC pairing, and the frequency response.
+- `core/frf_matrix.py`: the full receptance matrix and its modal (pole–residue) terms.
 - `core/simulator.py`: the exact first-order-hold time stepper.
 - `core/substructure.py`: Craig–Bampton substructuring, mode comparison (frequency error,
   MAC) and the reduced-model FRF.

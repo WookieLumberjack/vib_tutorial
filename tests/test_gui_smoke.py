@@ -216,3 +216,59 @@ def test_substructuring_page(app):
     w._tick()
     assert w.sim.t > 0.1
     w.close()
+
+
+def test_frf_matrix_page(app):
+    import numpy as np
+
+    from vib_tutorial.gui.frf_matrix import Expansion, Quantity
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    page = w.frf_page
+    w.show()
+    w.pages.setCurrentWidget(page)
+    app.processEvents()
+    n = w.sim.system.n
+    assert len(page.grid.cells) == n and len(page.mode_checks) == n
+    assert (page.output, page.inputs) == (n - 1, {n - 1})
+    assert "none" in page.detail.header.text()  # all modes: the sum is the full solution
+
+    # Truncate to mode 1: the driving-point sum now misses the full solution.
+    page._check_all(False)
+    page.mode_checks[0].setChecked(True)
+    assert page.selected_terms().tolist() == [True] + [False] * (n - 1)
+    assert "%" in page.detail.header.text()
+
+    # Clicking selects a cell; Ctrl+click adds another force in the same row.
+    page._on_cell(0, 1, False)
+    page._on_cell(0, 2, True)
+    assert page.output == 0 and page.inputs == {1, 2}
+    assert [c.isChecked() for c in page.input_checks] == [False, True, True, False]
+    assert "H<sub>12</sub> + H<sub>13</sub>" in page.detail.header.text()
+    page._on_cell(0, 2, True)  # Ctrl+click again removes it
+    assert page.inputs == {1}
+
+    for q in Quantity:
+        page.quantity.setCurrentIndex(list(Quantity).index(q))
+    page.show_terms.setChecked(True)
+
+    # Non-proportional damping: classical misses even with every mode; exact does not.
+    page._check_all(True)
+    w.params.rows[0][3].setValue(15.0)
+    page.expansion.setCurrentIndex(list(Expansion).index(Expansion.CLASSICAL))
+    assert "none" not in page.detail.header.text()
+    page.expansion.setCurrentIndex(list(Expansion).index(Expansion.EXACT))
+    assert "none" in page.detail.header.text()
+
+    # N set on this page drives the shared chain; the grid follows.
+    page.dof.setValue(6)
+    assert w.sim.system.n == 6 and len(page.grid.cells) == 6 and len(page.input_checks) == 6
+    np.testing.assert_allclose(page.H[:, 2, 4], page.H[:, 4, 2])
+
+    # A free (rigid-body) chain falls back to the classical expansion.
+    w.params.rows[0][2].setValue(0.0)
+    w.params.rows[0][3].setValue(0.0)
+    assert "not available" in page.detail.header.text()
+    app.processEvents()  # let queued axis relayouts run before teardown
+    w.close()

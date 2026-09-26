@@ -387,6 +387,19 @@ class PhasorPanel(QtWidgets.QWidget):
                 self.table.setItem(i, c, item)
 
 
+def frequency_grid(result: ModalResult, points: int) -> np.ndarray:
+    """Log-spaced FRF frequencies [Hz] spanning the modes, plus every peak."""
+    freqs_n = np.array([m.fn_hz for m in result.modes])
+    # A rigid-body mode's frequency is 0 up to rounding; H is singular there.
+    freqs_n = freqs_n[freqs_n > 1e-6 * max(freqs_n.max(), 1e-300)]
+    lo = 0.2 * freqs_n.min() if freqs_n.size else 0.1
+    hi = 2.5 * freqs_n.max() if freqs_n.size else 10.0
+    f = np.geomspace(lo, hi, points)
+    # Include the damped peaks so lightly damped resonances are not clipped.
+    peaks = [m.damped.fd_hz for m in result.modes if m.damped is not None and lo < m.damped.fd_hz < hi]
+    return np.unique(np.concatenate([f, peaks, freqs_n]))
+
+
 class FrfPlot(pg.GraphicsLayoutWidget):
     """Receptance |X_i / F| and phase for a force applied at the target mass."""
 
@@ -416,13 +429,9 @@ class FrfPlot(pg.GraphicsLayoutWidget):
         self.phase.addItem(self.drive_lines[1])
 
     def set_system(self, system: ChainSystem, result: ModalResult, input_dof: int) -> None:
-        freqs_n = np.array([m.fn_hz for m in result.modes if m.fn_hz > 0])
-        lo = 0.2 * freqs_n.min() if freqs_n.size else 0.1
-        hi = 2.5 * freqs_n.max() if freqs_n.size else 10.0
-        f = np.geomspace(lo, hi, 1500)
-        # Include the damped peaks so lightly damped resonances are not clipped.
-        peaks = [m.damped.fd_hz for m in result.modes if m.damped is not None and lo < m.damped.fd_hz < hi]
-        f = np.unique(np.concatenate([f, peaks, freqs_n]))
+        f = frequency_grid(result, 1500)
+        lo, hi = f[0], f[-1]
+        freqs_n = np.array([m.fn_hz for m in result.modes if lo < m.fn_hz])
         H = frf(system, f, input_dof)
 
         for c in self.mag_curves + self.mode_lines:
