@@ -375,3 +375,36 @@ def test_energy_bars(app):
     assert early[2] > 0.85 and late[0] > 0.5  # mode 3 loses ~10% to the others within 0.02 s
     w.energy.bars.grab()
     w.close()
+
+
+def test_basis_plots_survive_changes_of_n(app):
+    # Rebuilding the basis PlotItems on every change of N segfaulted after ~13 changes
+    # (freed C++ objects still painted); the plots are now pooled and reused.
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    page = w.cms_page
+    w.show()
+    w.pages.setCurrentWidget(page)
+    page.tabs.setCurrentWidget(page.basis)
+    for n in [5, 6, 7, 8, 7, 6, 5, 4, 3, 2, 1, 2, 3, 4, 5, 6, 7, 8, 4, 8]:
+        page.dof.setValue(n)
+        app.processEvents()
+        page.basis.plots.grab()  # paint
+        expected = len(page.model.labels) if page.model else 0
+        assert len(page.basis.plots.ci.items) == expected
+    assert page.basis.shown == expected and len(page.basis._slots) <= 8  # reused, not rebuilt
+    w.close()
+
+
+def test_rigid_body_mode_title(app):
+    import numpy as np
+
+    from vib_tutorial.core import ModeComparison
+    from vib_tutorial.gui.substructuring import ComparisonPlots
+
+    shape = np.ones(3)
+    plots = ComparisonPlots()
+    plots.set_comparisons([ModeComparison(1, 0.0, 0.0, 1.0, shape, shape)], None)
+    plots.set_highlight(0)  # error is None for f_true = 0: used to raise TypeError
+    assert "error —" in plots.shape.titleLabel.text

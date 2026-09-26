@@ -330,7 +330,9 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
             self._cb_curve.setPen(pg.mkPen("#000", width=2, style=CB_PEN_STYLE))
             self._cb_curve.setSymbolPen(pg.mkPen("#000", width=2))
             self.shape_legend.addItem(self._cb_curve, f"Mode {c.index} CB: {c.fn_cb:.4g} Hz")
-            self.shape.setTitle(f"Mode {c.index}: error {100 * c.error:+.3g}%, MAC {c.mac:.3f}", size="10pt")
+            # No relative error for a rigid-body mode (f_true = 0 when k1 = 0).
+            err = "—" if c.error is None else f"{100 * c.error:+.3g}%"
+            self.shape.setTitle(f"Mode {c.index}: error {err}, MAC {c.mac:.3f}", size="10pt")
         # Keep an overlay only while it belongs to this coupled mode.
         keep = self.component is not None and self.component.closest == c.index
         self.set_component(self.component if keep else None)
@@ -392,7 +394,12 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
 
 
 class BasisPlots(QtWidgets.QWidget):
-    """Every column of the global T drawn as a shape along the chain: the reduced model's basis."""
+    """Every column of the global T drawn as a shape along the chain: the reduced model's basis.
+
+    The plots are pooled and reused rather than rebuilt: destroying a PlotItem
+    that has been in a GraphicsLayout can leave the scene pointing at freed
+    C++ objects, which crashed the app after a few changes of N.
+    """
 
     COLS = 2
 
@@ -404,9 +411,19 @@ class BasisPlots(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self.header)
         layout.addWidget(self.plots, 1)
+        self._slots: list[_BasisSlot] = []  # every plot ever made; the first `shown` are in the layout
+        self.shown = 0
+
+    def _slot(self, c: int) -> _BasisSlot:
+        while len(self._slots) <= c:
+            self._slots.append(_BasisSlot())
+        return self._slots[c]
 
     def set_model(self, model: CraigBamptonModel | None) -> None:
-        self.plots.clear()
+        # Take the plots out of the layout, but keep them (and so their C++ objects) alive.
+        for slot in self._slots[: self.shown]:
+            self.plots.ci.removeItem(slot.plot)
+        self.shown = 0
         if model is None:
             self.header.setText("")
             return
@@ -426,10 +443,9 @@ class BasisPlots(QtWidgets.QWidget):
         freqs = {f"q_{sub.name}{k + 1}": sub.fixed_omegas[k] / (2 * math.pi)
                  for sub in model.substructures for k in range(sub.n_kept)}
         for c, label in enumerate(model.labels):
-            p = self.plots.addPlot(row=c // self.COLS, col=c % self.COLS)
-            p.setMouseEnabled(x=False, y=False)
-            p.hideButtons()
-            p.showGrid(x=True, y=True, alpha=0.25)
+            slot = self._slot(c)
+            p = slot.plot
+            self.plots.addItem(p, row=c // self.COLS, col=c % self.COLS)
             p.setXRange(0, n, padding=0.05)
             p.getAxis("bottom").setTicks(ticks)
             col = model.T[:, c]
@@ -446,12 +462,34 @@ class BasisPlots(QtWidgets.QWidget):
                 ys = col
                 p.setYRange(-0.1, 1.15, padding=0)
             p.setTitle(title, size="9pt")
-            p.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#bbb", width=1)))
-            for b in model.boundary:
-                p.addItem(pg.InfiniteLine(pos=b + 1, angle=90,
-                                          pen=pg.mkPen("#bbb", width=1, style=CB_PEN_STYLE)))
-            p.plot(xs, np.concatenate([[0.0], ys]), pen=pg.mkPen(color, width=2),
-                   symbol="o", symbolSize=7, symbolBrush=color, symbolPen=None)
+            slot.set_boundaries(model.boundary)
+            slot.curve.setData(xs, np.concatenate([[0.0], ys]))
+            slot.curve.setPen(pg.mkPen(color, width=2))
+            slot.curve.setSymbolBrush(color)
+        self.shown = len(model.labels)
+
+
+class _BasisSlot:
+    """One reusable basis plot: its curve and its boundary-mass lines."""
+
+    def __init__(self) -> None:
+        self.plot = p = pg.PlotItem()
+        p.setMouseEnabled(x=False, y=False)
+        p.hideButtons()
+        p.showGrid(x=True, y=True, alpha=0.25)
+        p.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#bbb", width=1)))
+        self.lines: list[pg.InfiniteLine] = []
+        self.curve = p.plot(symbol="o", symbolSize=7, symbolPen=None)
+
+    def set_boundaries(self, boundary) -> None:
+        while len(self.lines) < len(boundary):
+            line = pg.InfiniteLine(angle=90, pen=pg.mkPen("#bbb", width=1, style=CB_PEN_STYLE))
+            self.plot.addItem(line)
+            self.lines.append(line)
+        for i, line in enumerate(self.lines):
+            line.setVisible(i < len(boundary))
+            if i < len(boundary):
+                line.setPos(boundary[i] + 1)
 
 
 class SubstructuringPage(QtWidgets.QWidget):
