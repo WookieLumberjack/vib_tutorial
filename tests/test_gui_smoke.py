@@ -339,3 +339,39 @@ def test_modal_coordinates_view(app):
     w.coords_combo.setCurrentIndex(0)
     assert w.time_plot.x_curves[0].name() == "x1"
     w.close()
+
+
+def test_energy_bars(app):
+    import pytest
+
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    w.force_panel.button.click()  # harmonic force on
+    for _ in range(5):
+        w._sim_target = w.sim.t + 0.2
+        w._tick()
+    s = w.energy.bars.state
+    assert s.work > 0 and s.dissipated > 0 and s.stored > 0
+    assert s.added + s.work == pytest.approx(s.stored + s.dissipated, rel=1e-9)
+    assert s.modal.sum() == pytest.approx(s.stored, rel=1e-9)
+    w.energy.bars.grab()  # paints without error
+
+    # Release mode 3 with coupled damping: energy moves to other modes.
+    w.params.rows[0][3].setValue(15.0)
+    w.energy.view.setCurrentIndex(1)
+    assert w.energy.bars.by_mode
+    w._reset()
+    w.table.selectRow(2)
+    w._release_mode()
+    w._sim_target = w.sim.t + 0.02
+    w._tick()
+    early = w.energy.bars.state.modal / w.energy.bars.state.stored
+    for _ in range(4):
+        w._sim_target = w.sim.t + 0.2
+        w._tick()
+    late = w.energy.bars.state.modal / w.energy.bars.state.stored
+    assert early[2] > 0.85 and late[0] > 0.5  # mode 3 loses ~10% to the others within 0.02 s
+    w.energy.bars.grab()
+    w.close()

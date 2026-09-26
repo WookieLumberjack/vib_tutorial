@@ -141,6 +141,29 @@ drives it.</li>
 <p>Under a harmonic force tuned to a natural frequency, the modal view shows which mode
 takes up the energy. The physical view shows the same motion as a mix of all of them.</p>
 
+<h3>Energy</h3>
+<p>The panel beside the animation tracks the energy. The stored energy is kinetic plus
+potential, T + V = ½ẋ<sup>T</sup>Mẋ + ½x<sup>T</sup>Kx. Multiplying the equations of
+motion by ẋ<sup>T</sup> gives the power balance</p>
+<p>&nbsp;&nbsp;d(T + V)/dt = f<sup>T</sup>ẋ − ẋ<sup>T</sup>Cẋ</p>
+<p>The force adds power f<sup>T</sup>ẋ, which can be negative when it pushes against the
+motion, and the dampers always remove ẋ<sup>T</sup>Cẋ ≥ 0. Integrated since the last
+reset: <b>energy given + work by the force = stored + dissipated</b>. The simulator
+integrates both terms exactly over every step, so the <i>In</i> and <i>Out</i> columns
+match to rounding error. "Energy given" counts the jumps when a mode is released or a
+parameter is edited.</p>
+<p><b>By mode.</b> Because Φ<sup>T</sup>MΦ = I and Φ<sup>T</sup>KΦ = diag(ω<sub>r</sub>²),
+the stored energy splits exactly into one term per undamped mode,
+T + V = Σ ½(q̇<sub>r</sub>² + ω<sub>r</sub>²q<sub>r</sub>²), whatever the damping. Each mode's
+energy changes at the rate</p>
+<p>&nbsp;&nbsp;d/dt ½(q̇<sub>r</sub>² + ω<sub>r</sub>²q<sub>r</sub>²) = q̇<sub>r</sub>φ<sub>r</sub><sup>T</sup>f
+− q̇<sub>r</sub> Σ<sub>s</sub> C<sub>m,rs</sub> q̇<sub>s</sub></p>
+<p>With proportional damping only the s = r term is left, so each mode loses its own energy
+and nothing else. The off-diagonal terms of C<sub>m</sub> pass energy from one mode to
+another. The complex modes do not split the energy this way: they are not orthogonal
+with respect to M and K, so their energies have cross terms. The panel always uses the
+classical modes.</p>
+
 <h3>Try it</h3>
 <ol>
 <li>Set c<sub>1</sub> = 15 and leave the other dampers at 2. The note switches to
@@ -154,6 +177,9 @@ stays in one clean shape.</li>
 <li>Switch <i>Plot coordinates</i> to <i>Modal</i> and repeat steps 1 to 3. With
 c<sub>1</sub> = 15 the released mode 3 feeds modes 1 and 2, and mode 1 keeps ringing
 after mode 3 has died away. With c<sub>1</sub> = 2 only the mode 3 curve moves.</li>
+<li>Set the energy panel to <i>By mode</i> and repeat. With c<sub>1</sub> = 15 mode 3
+starts with all the energy, and within a second most of what is left is in mode 1.
+With c<sub>1</sub> = 2 mode 3 keeps 100% while the total decays.</li>
 <li>Set c<sub>1</sub> = 15 again and switch <i>Method</i> to <i>State-space</i>. The
 table now has 2N rows in conjugate pairs. Select a row and tick <i>Animate mode
 shapes</i>: the arrows fan out (phases other than 0°/180°), and the shape never passes

@@ -10,6 +10,16 @@ augmented matrix. Because the homogeneous part is exact, the scheme is
 unconditionally stable and has no numerical damping regardless of how stiff
 the user makes the springs; h only needs to be small enough to resolve the
 forcing and to give smooth plots.
+
+The simulator also keeps an exact energy ledger. Over each step the work done
+by the force (integral of f v) and the energy taken out by the dampers
+(integral of v^T C v) are quadratic forms in the step's starting state and
+force, found with Van Loan's matrix exponential. So, to rounding error,
+
+    energy_added + work - dissipated = T + V
+
+where energy_added counts the jumps in stored energy when the state is set
+(a mode release) or the parameters are edited.
 """
 
 from __future__ import annotations
@@ -19,6 +29,7 @@ import math
 import numpy as np
 import scipy.linalg
 
+from .energy import stored_energy
 from .forcing import ForceController, ForceKind
 from .model import ChainSystem, state_space
 
@@ -41,6 +52,36 @@ def foh_discretize(A: np.ndarray, B: np.ndarray, h: float) -> tuple[np.ndarray, 
     return Phi, G1 - G2, G2
 
 
+def foh_quadratic_integrals(A: np.ndarray, b: np.ndarray, h: float, Qs: list[np.ndarray]) -> list[np.ndarray]:
+    """Exact integrals of quadratic forms over one first-order-hold step.
+
+    Over the step, w(s) = [z(s), u(s), du] with u(s) = u0 + du s and
+    du = (u1 - u0) / h obeys the linear system w' = Aw w. For each symmetric
+    Q (size len(z) + 2) this returns W with
+
+        integral_0^h w(s)^T Q w(s) ds = w0^T W w0,   w0 = [z0, u0, du],
+
+    using Van Loan's result: expm([[-Aw^T, Q], [0, Aw]] h) = [[., F12], [0, F22]]
+    and W = F22^T F12.
+    """
+    ns = A.shape[0]
+    m = ns + 2
+    Aw = np.zeros((m, m))
+    Aw[:ns, :ns] = A
+    Aw[:ns, ns] = b
+    Aw[ns, ns + 1] = 1.0
+    out = []
+    for Q in Qs:
+        big = np.zeros((2 * m, 2 * m))
+        big[:m, :m] = -Aw.T
+        big[:m, m:] = Q
+        big[m:, m:] = Aw
+        E = scipy.linalg.expm(big * h)
+        W = E[m:, m:].T @ E[:m, m:]
+        out.append(0.5 * (W + W.T))
+    return out
+
+
 class Simulator:
     def __init__(self, system: ChainSystem, force: ForceController | None = None) -> None:
         self.force = force or ForceController()
@@ -50,10 +91,24 @@ class Simulator:
         self._A, self._B = state_space(system)
         self._fmax_natural = self._highest_natural_freq()
         self._cache: dict[float, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        self._energy_cache: dict[tuple[float, int], tuple[np.ndarray, np.ndarray]] = {}
+        self.work = 0.0  # J, done by the applied force since reset
+        self.dissipated = 0.0  # J, taken out by the dampers since reset
+        self.energy_added = 0.0  # J, jumps in stored energy from set_state and parameter edits
+
+    @property
+    def stored_energy(self) -> float:
+        """Kinetic plus potential energy now (J)."""
+        return stored_energy(self.system, self.displacement, self.velocity)
 
     # ----------------------------------------------------------------- setup
     def set_system(self, system: ChainSystem) -> None:
-        """Swap in new parameters, keeping the current state (live editing)."""
+        """Swap in new parameters, keeping the current state (live editing).
+
+        The stored energy jumps (a stiffer spring holds more energy at the same
+        stretch); the jump is counted in ``energy_added``.
+        """
+        before = self.stored_energy
         if system.n != self.system.n:
             old = self.state
             n_old, n = self.system.n, system.n
@@ -66,23 +121,26 @@ class Simulator:
         self._A, self._B = state_space(system)
         self._fmax_natural = self._highest_natural_freq()
         self._cache.clear()
+        self._energy_cache.clear()
+        self.energy_added += self.stored_energy - before
 
     def reset(self) -> None:
         self.t = 0.0
         self.state = np.zeros(2 * self.system.n)
         self.force.reset()
+        self.work = self.dissipated = self.energy_added = 0.0
 
     def set_displacement(self, x: np.ndarray) -> None:
         """Set the displacements (m) and zero the velocities, e.g. to release a mode shape."""
-        n = self.system.n
-        self.state[:n] = x
-        self.state[n:] = 0.0
+        self.set_state(x, np.zeros(self.system.n))
 
     def set_state(self, x: np.ndarray, v: np.ndarray) -> None:
         """Set displacements (m) and velocities (m/s), e.g. to release a complex mode."""
         n = self.system.n
+        before = self.stored_energy
         self.state[:n] = x
         self.state[n:] = v
+        self.energy_added += self.stored_energy - before
 
     @property
     def displacement(self) -> np.ndarray:
@@ -118,6 +176,21 @@ class Simulator:
             self._cache[h] = foh_discretize(self._A, self._B, h)
         return self._cache[h]
 
+    def _energy_forms(self, h: float, j: int) -> tuple[np.ndarray, np.ndarray]:
+        """(W_dissipated, W_work) for steps of length h with the force on mass j."""
+        key = (h, j)
+        if key not in self._energy_cache:
+            n = self.system.n
+            m = 2 * n + 2
+            u = 2 * n  # index of the force in w = [x, v, u, du]
+            Qd = np.zeros((m, m))
+            Qd[n : 2 * n, n : 2 * n] = self.system.matrices()[1]  # v^T C v
+            Qw = np.zeros((m, m))
+            Qw[u, n + j] = Qw[n + j, u] = 0.5  # u v_j
+            Wd, Ww = foh_quadratic_integrals(self._A, self._B[:, j], h, [Qd, Qw])
+            self._energy_cache[key] = (Wd, Ww)
+        return self._energy_cache[key]
+
     def advance(self, duration: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Advance by approximately `duration` seconds of simulated time.
 
@@ -138,7 +211,8 @@ class Simulator:
         g0 = G0[:, j].copy()
         g1 = G1[:, j].copy()
         z = self.state
-        f0 = self.force.value()
+        z_start, f_start = z.copy(), self.force.value()
+        f0 = f_start
         for k in range(steps):
             self.force.advance(h)
             f1 = self.force.value()
@@ -149,4 +223,12 @@ class Simulator:
             fs[k] = f1
             f0 = f1
         self.state = z
+
+        # Energy ledger: each step's integrals are quadratic in w0 = [z0, f0, (f1 - f0) / h].
+        z0s = np.vstack([z_start, zs[:-1]])
+        f0s = np.concatenate([[f_start], fs[:-1]])
+        w = np.column_stack([z0s, f0s, (fs - f0s) / h])
+        Wd, Ww = self._energy_forms(h, j)
+        self.dissipated += float(np.einsum("ki,ij,kj->", w, Wd, w))
+        self.work += float(np.einsum("ki,ij,kj->", w, Ww, w))
         return ts, zs[:, :n], zs[:, n:], fs

@@ -26,7 +26,7 @@ uv run pytest         # run the tests
 | Area | What it holds |
 |---|---|
 | **Left** | System parameters (m, k, c for each element, 1 to 8 masses), the applied force, and simulation controls (run/pause, speed, plot window, auto-scale) |
-| **Centre** | Animation of the chain (with a scale bar for the real displacement) above time histories of the applied force and of the motion, in physical or modal coordinates |
+| **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion, in physical or modal coordinates |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
 Two more pages work on the same chain: **FRF matrix** shows every term of the receptance
@@ -49,6 +49,9 @@ chain by component mode synthesis (both below).
   system.
 - **Plot the motion in modal coordinates** (*Plot coordinates → Modal*, above the time
   histories): one curve per mode instead of one per mass (below).
+- **Watch the energy** in the bars beside the animation: kinetic and potential, an exact
+  balance of energy in (release, force) against energy out (stored, dissipated), and each
+  mode's share (below).
 - **Slow motion** (0.05× to 2×) for the higher modes, and auto-scaled animation and plots
   so small motions stay visible.
 
@@ -90,6 +93,22 @@ directly with the physical plot. The curves follow the *Method* selector:
   own curve.
 
 ![Modal coordinates, classical method, c1 = 15: releasing mode 3 also drives modes 1 and 2](docs/images/modal_coordinates.png)
+
+### Energy
+
+The panel beside the animation has two views:
+
+- **Stored and balance**: kinetic energy T, potential energy V and their sum, then a ledger
+  since the last reset. *In* is the energy given by a release or a parameter edit plus the
+  work done by the force. *Out* is the energy stored now plus the energy dissipated by the
+  dampers. The simulator integrates the work and the dissipation exactly, so the columns
+  always match.
+- **By mode**: each undamped mode's share of the stored energy,
+  ½(q̇<sub>r</sub>² + ω<sub>r</sub>²q<sub>r</sub>²). The shares always add up to T + V. With
+  non-proportional damping the dampers move energy between modes. Release mode 3 with
+  `c1` = 15 and within a second most of the energy left is in mode 1.
+
+![Energy by mode after releasing mode 3 with c1 = 15: 75% of what is left is in mode 1](docs/images/energy_by_mode.png)
 
 ### Frequency response
 
@@ -215,6 +234,15 @@ $$H(\omega) = \sum_{r=1}^{2N} \frac{R_r}{i\omega - \lambda_r}, \qquad R_r = (V)_
 which is exact for any damping. For proportional damping it reduces to the classical
 $H = \sum_r \phi_r\phi_r^T / (\omega_r^2 - \omega^2 + 2i\zeta_r\omega_r\omega)$.
 
+**Energy.** Multiplying the equations of motion by $\dot{x}^T$ gives the power balance
+
+$$\frac{d}{dt}\Big(\tfrac12\dot{x}^TM\dot{x} + \tfrac12 x^TKx\Big) = f^T\dot{x} - \dot{x}^TC\dot{x}$$
+
+so the energy given plus the work done by the force equals the energy stored plus the
+energy dissipated. With $q = \Phi^T Mx$ the stored energy is
+$\sum_r \tfrac12(\dot{q}_r^2 + \omega_r^2 q_r^2)$ for any damping. The off-diagonal terms of
+$\Phi^T C\Phi$ move energy between these terms.
+
 **Time simulation.** The simulator advances $\dot{z} = Az + Bf$ with the exact
 discrete-time solution. Over a step $h$, with the force varying linearly across the step
 (first-order hold),
@@ -226,13 +254,19 @@ matrix. The free response is exact, so the scheme is unconditionally stable and 
 numerical damping, however stiff the springs are made: any decay you see is physical. The
 step size adapts to the fastest mode, the drive frequency and the pulse length.
 
+The work and dissipation over a step are integrals of quadratic forms in the state and
+force. Adding the force and its slope to the state makes the step a linear system
+$\dot{w} = A_w w$. Van Loan's matrix exponential then gives each integral exactly as
+$w_k^T W w_k$, so the energy balance closes to rounding error.
+
 ## Code layout
 
 - `core/model.py`: assembles $M$, $C$, $K$ and the state-space matrices.
 - `core/modal.py`: classical modes (`scipy.linalg.eigh`), all 2N state-space eigenpairs
   (`scipy.linalg.eig`), the MAC pairing, the modal-coordinate map, and the frequency response.
 - `core/frf_matrix.py`: the full receptance matrix and its modal (pole–residue) terms.
-- `core/simulator.py`: the exact first-order-hold time stepper.
+- `core/simulator.py`: the exact first-order-hold time stepper and its exact energy ledger.
+- `core/energy.py`: kinetic, potential and stored energy, and the energy in each mode.
 - `core/substructure.py`: Craig–Bampton substructuring, mode comparison (frequency error,
   MAC) and the reduced-model FRF.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
@@ -258,6 +292,11 @@ z = np.hstack([x, v])
 q = z @ modal_coordinate_map(chain, res)                       # classical, (steps, N), m
 eta = z @ modal_coordinate_map(chain, res, complex_modes=True) # one per pair, m
 
+from vib_tutorial.core import modal_energies
+
+E = modal_energies(chain, res, x, v)                           # (steps, N), J; rows sum to T + V
+sim.energy_added + sim.work - sim.dissipated - sim.stored_energy  # ~1e-15 J: exact balance
+
 from vib_tutorial.core import compare_modes, craig_bampton
 
 s = ChainSystem.uniform(8)
@@ -269,9 +308,8 @@ cb = craig_bampton(s, interfaces=[3], n_kept=[1, 1])          # cut at m4, 1 mod
 
 - Drag a mass with the mouse and let go (an initial-condition "pluck")
 - Frequency sweep (chirp) forcing, and base excitation instead of an applied force
-- Energy bars (kinetic, potential, dissipated), including each mode's energy
-  ½(q̇<sub>r</sub>² + ω<sub>r</sub>²q<sub>r</sub>²), to show energy moving between modes under
-  non-proportional damping
+- Energy time histories (T, V, work and dissipation against time) as a third *Plot
+  coordinates* option
 - Tuned mass damper and vibration absorber presets
 - Save and load parameter presets for classroom exercises
 - Substructuring: time-simulate the Craig–Bampton reduced model alongside the full one

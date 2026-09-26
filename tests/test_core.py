@@ -410,3 +410,98 @@ def test_complex_modal_coordinates_with_real_roots():
     res = modal_analysis(s)
     P = modal_coordinate_map(s, res, complex_modes=True)
     assert P.shape == (4, 3)
+
+
+def _run(sim, seconds):
+    end = sim.t + seconds
+    while sim.t < end - 1e-9:
+        sim.advance(end - sim.t)
+
+
+def _balance(sim):
+    return sim.energy_added + sim.work - sim.dissipated - sim.stored_energy
+
+
+def test_energy_balance_is_exact():
+    s = ChainSystem([1.0, 2.0, 0.5, 1.0], [400.0, 300.0, 500.0, 200.0], [15.0, 2.0, 2.0, 2.0])
+    force = ForceController(ForceSettings(target=3, kind=ForceKind.HARMONIC, amplitude=5.0, freq_hz=2.3))
+    sim = Simulator(s, force)
+    sim.set_displacement(np.array([0.01, -0.02, 0.0, 0.03]))
+    e0 = sim.energy_added
+    assert e0 == pytest.approx(sim.stored_energy) and e0 > 0
+    force.switch_on()
+    _run(sim, 3.0)
+    assert sim.work > 0 and sim.dissipated > 0
+    scale = sim.energy_added + sim.work
+    assert abs(_balance(sim)) < 1e-10 * scale
+
+    # A live edit changes the stored energy; the jump is booked as energy added.
+    sim.set_system(ChainSystem.uniform(4, stiffness=800.0, damping=3.0))
+    assert abs(_balance(sim)) < 1e-10 * scale
+    force.settings.target = 1
+    force.settings.freq_hz = 7.0
+    _run(sim, 2.0)
+    sim.set_system(sim.system.resized(3))
+    force.switch_off()
+    force.settings.kind = ForceKind.PULSE
+    force.switch_on()
+    _run(sim, 2.0)
+    assert abs(_balance(sim)) < 1e-10 * (sim.energy_added + sim.work)
+
+    sim.reset()
+    assert sim.work == sim.dissipated == sim.energy_added == 0.0
+
+
+def test_free_decay_dissipates_what_was_stored():
+    s = ChainSystem([1.0], [400.0], [2.0])
+    sim = Simulator(s)
+    sim.set_displacement(np.array([0.1]))
+    _run(sim, 30.0)  # zeta = 0.05: decays to ~1e-26 of the start
+    assert sim.dissipated == pytest.approx(0.5 * 400.0 * 0.1**2, rel=1e-12)
+    assert sim.work == 0.0
+
+
+def test_dissipation_matches_quadrature():
+    s = ChainSystem.uniform(3, damping=5.0)
+    force = ForceController(ForceSettings(target=2, kind=ForceKind.HARMONIC, amplitude=5.0, freq_hz=1.5))
+    sim = Simulator(s, force)
+    force.switch_on()
+    ts, _, vs, fs = sim.advance(1.0)
+    C = s.matrices()[1]
+    dt = ts[1] - ts[0]
+    v = np.vstack([np.zeros(3), vs])
+    f = np.concatenate([[0.0], fs])
+    # Trapezoid on the step samples is second order: agree to ~ (h * f)^2.
+    assert sim.dissipated == pytest.approx(np.trapezoid(np.einsum("ki,ij,kj->k", v, C, v), dx=dt), rel=1e-4)
+    assert sim.work == pytest.approx(np.trapezoid(f * v[:, 2], dx=dt), rel=1e-4)
+
+
+def test_energy_splits_by_element_and_by_mode():
+    from vib_tutorial.core import kinetic_energy, modal_energies, potential_energy, stored_energy
+
+    s = ChainSystem([1.0, 2.0, 0.5], [400.0, 300.0, 500.0], [15.0, 2.0, 2.0])
+    x, v = np.array([0.01, -0.02, 0.03]), np.array([0.1, 0.0, -0.2])
+    M, _, K = s.matrices()
+    np.testing.assert_allclose(kinetic_energy(s, v).sum(), 0.5 * v @ M @ v)
+    np.testing.assert_allclose(potential_energy(s, x).sum(), 0.5 * x @ K @ x)
+    res = modal_analysis(s)
+    E = modal_energies(s, res, x, v)
+    assert E.shape == (3,) and np.all(E >= 0)
+    assert E.sum() == pytest.approx(stored_energy(s, x, v), rel=1e-12)
+    # A mode on its own holds all the energy in its own term.
+    E3 = modal_energies(s, res, 0.01 * res.modes[2].shape, np.zeros(3))
+    assert E3[2] == pytest.approx(E3.sum()) and E3[:2].max() < 1e-12 * E3.sum()
+
+
+def test_non_proportional_damping_moves_energy_between_modes():
+    from vib_tutorial.core import modal_energies
+
+    for c1, moves in ((2.0, False), (15.0, True)):
+        s = ChainSystem([1.0] * 4, [400.0] * 4, [c1, 2.0, 2.0, 2.0])
+        res = modal_analysis(s)
+        sim = Simulator(s)
+        sim.set_displacement(0.01 * res.modes[2].shape)
+        _, xs, vs, _ = sim.advance(1.0)
+        E = modal_energies(s, res, xs, vs)
+        share = np.delete(E, 2, axis=1).max() / sim.energy_added
+        assert (share > 1e-3) if moves else (share < 1e-20)
