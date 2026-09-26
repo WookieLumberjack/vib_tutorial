@@ -31,7 +31,22 @@ from ..core import (
     modal_analysis,
     transfer,
 )
+from ..core.identification import (
+    Identification,
+    Method,
+    Stabilization,
+    auto_select,
+    band_mask,
+    circle_fit,
+    lscf,
+    lsfd,
+    mac_matrix,
+    match_modes,
+    mode_indicator,
+    peak_picking,
+)
 from ..core.measurement import AA_CUTOFF
+from .modal_extraction import EXTRACTION_THEORY_HTML, FIT_COLOR, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
 from .style import FORCE_COLOR, MASS_COLORS, MAX_DOF, MODE_COLORS
 
@@ -157,7 +172,12 @@ class SignalView(pg.GraphicsLayoutWidget):
 
 
 class FrfView(pg.GraphicsLayoutWidget):
-    """Estimated receptance of one response against the exact one: magnitude, phase, coherence."""
+    """Estimated receptance of one response against the exact one: magnitude, phase, coherence.
+
+    A draggable band on the magnitude plot sets the frequencies the modal fit uses.
+    """
+
+    fit_band_changed = QtCore.Signal(float, float)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -183,6 +203,39 @@ class FrfView(pg.GraphicsLayoutWidget):
         self.ci.layout.setRowStretchFactor(2, 1)
         self._key: tuple | None = None
         self.measured: list[pg.PlotDataItem] = []  # magnitude, phase, coherence
+        self.fit_curves: list[pg.PlotDataItem] = []  # magnitude, phase
+        self.fit_region = pg.LinearRegionItem(brush=pg.mkBrush(42, 157, 143, 28),
+                                              pen=pg.mkPen(FIT_COLOR, width=1))
+        self.fit_region.setZValue(-5)
+        self.fit_region.sigRegionChangeFinished.connect(self._on_region)
+
+    def _on_region(self) -> None:
+        lo, hi = self.fit_region.getRegion()
+        self.fit_band_changed.emit(max(0.0, float(lo)), float(hi))
+
+    def set_fit_band(self, lo: float, hi: float) -> None:
+        self.fit_region.blockSignals(True)
+        self.fit_region.setRegion((lo, hi))
+        self.fit_region.blockSignals(False)
+
+    def set_fit(self, freqs: np.ndarray | None, h: np.ndarray | None) -> None:
+        """The FRF rebuilt from the identified modes (None: hide it)."""
+        if not self.fit_curves:
+            return
+        mag_curve, phase_curve = self.fit_curves
+        legend = self.mag.legend
+        shown = legend.getLabel(mag_curve) is not None
+        if h is None:
+            mag_curve.setData([], [])
+            phase_curve.setData([], [])
+            if shown:
+                legend.removeItem(mag_curve)
+            return
+        with np.errstate(invalid="ignore"):
+            mag_curve.setData(freqs, np.where(np.abs(h) > 0, np.abs(h), np.nan), connect="finite")
+        phase_curve.setData(freqs, phase_deg(h), connect="finite")
+        if not shown:
+            legend.addItem(mag_curve, "Fitted modal model")
 
     def set_data(
         self,
@@ -246,6 +299,9 @@ class FrfView(pg.GraphicsLayoutWidget):
             self.phase.plot(pen=pg.mkPen(color, width=1), **symbol),
             self.coh.plot(pen=pg.mkPen(color, width=1)),
         ]
+        fit_pen = pg.mkPen(FIT_COLOR, width=2, style=QtCore.Qt.PenStyle.DashLine)
+        self.fit_curves = [self.mag.plot(pen=fit_pen), self.phase.plot(pen=fit_pen)]
+        self.mag.addItem(self.fit_region)
         if stepped:
             label = pg.TextItem("A stepped sine has no coherence (one reading per frequency)", color="#666")
             label.setPos(0.02 * nyq, 0.6)
@@ -269,8 +325,8 @@ class FrfView(pg.GraphicsLayoutWidget):
         self.mag.setXRange(0.0, nyq, padding=0)
         drive = "driving point" if j == settings.input_dof else "transfer"
         self.mag.setTitle(f"H<sub>{j + 1}{settings.input_dof + 1}</sub> = x{j + 1} / F at m{settings.input_dof + 1} "
-                          f"({drive}) · dotted: damped natural frequencies · shaded: above the "
-                          "anti-alias passband", size="9pt")
+                          f"({drive}) · dotted: damped natural frequencies · grey: above the "
+                          "anti-alias passband · green: fit band (drag it)", size="9pt")
 
 
 class ModalTestPage(QtWidgets.QWidget):
@@ -285,6 +341,11 @@ class ModalTestPage(QtWidgets.QWidget):
         self.result: ModalResult | None = None
         self.acq: Acquisition | None = None
         self.estimator: FrfEstimator | None = None
+        self.estimate: Estimate | None = None
+        self.stab: Stabilization | None = None
+        self.poles: list[tuple[int, int]] = []  # (order, index) of the LSCF poles used
+        self.picked: list[tuple[int, float]] | None = None  # (order, Hz) picked by hand; None: automatic
+        self.ident: Identification | None = None
         self._dirty = False
         self._timer = QtCore.QTimer(self)
         self._timer.setInterval(FRAME_MS)
@@ -439,9 +500,11 @@ class ModalTestPage(QtWidgets.QWidget):
 
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
+        self.extract = ExtractionControls()
         for w in (setup, daq, noise, proc):
             lv.addWidget(w)
         lv.addLayout(run_row)
+        lv.addWidget(self.extract)
         lv.addStretch(1)
         left_scroll = QtWidgets.QScrollArea()
         left_scroll.setWidget(left)
@@ -472,9 +535,13 @@ class ModalTestPage(QtWidgets.QWidget):
         # --- right
         self.check = QtWidgets.QTextBrowser()
         self.theory = QtWidgets.QTextBrowser()
-        self.theory.setHtml(THEORY_HTML)
+        self.theory.setHtml(THEORY_HTML + EXTRACTION_THEORY_HTML)
+        self.results = ResultsView()
+        self.stab_plot = StabilizationPlot()
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(self.check, "Setup check")
+        self.tabs.addTab(self.results, "Modal parameters")
+        self.tabs.addTab(self.stab_plot, "Stabilization")
         self.tabs.addTab(self.theory, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -500,6 +567,10 @@ class ModalTestPage(QtWidgets.QWidget):
             w.currentIndexChanged.connect(self._reprocess)
         for w in (self.exp_end, self.force_noise, self.response_noise):
             w.valueChanged.connect(self._reprocess)
+        self.extract.changed.connect(self._on_extraction_changed)
+        self.extract.auto_requested.connect(self._on_auto_poles)
+        self.frf_view.fit_band_changed.connect(self._on_fit_band)
+        self.stab_plot.pole_clicked.connect(self._on_pole_clicked)
         self._select_window(Excitation.IMPACT)
         self._show_rows()
 
@@ -619,6 +690,10 @@ class ModalTestPage(QtWidgets.QWidget):
             self.fs.blockSignals(False)
         self.acq = Acquisition(system, self.settings(), self.result)
         self.estimator = FrfEstimator(self.acq, self.processing())
+        s = self.acq.settings
+        self.extract.set_band(0.0, s.band, top=s.fs / 2)
+        self.frf_view.set_fit_band(0.0, s.band)
+        self.picked = None
         self._update_info()
         self.check.setHtml(self._setup_check())
         self._measure_some()
@@ -648,6 +723,105 @@ class ModalTestPage(QtWidgets.QWidget):
         s = self.acq.settings
         self.signals.set_data(est, j, s, self.acq.stepped)
         self.frf_view.set_data(est, j, self.acq.system, self.acq.result, s, self.processing(), self.acq.stepped)
+        self.estimate = est
+        self.identify()
+
+    # ------------------------------------------------------------ extract
+    def _on_extraction_changed(self) -> None:
+        lo, hi = self.extract.band
+        self.frf_view.set_fit_band(lo, hi)
+        self.picked = None
+        self.identify()
+
+    def _on_fit_band(self, lo: float, hi: float) -> None:
+        self.extract.set_band(lo, hi)
+        self.picked = None
+        self.identify()
+
+    def _on_auto_poles(self) -> None:
+        self.picked = None
+        self.identify()
+
+    def _on_pole_clicked(self, order: int, i: int) -> None:
+        if self.stab is None:
+            return
+        chosen = list(self.poles)
+        if (order, i) in chosen:
+            chosen.remove((order, i))
+        else:
+            chosen.append((order, i))
+        self.picked = [(o, abs(self.stab.pole(o, k)) / (2 * math.pi)) for o, k in chosen]
+        self.identify()
+
+    def _pick(self, stab: Stabilization) -> list[tuple[int, int]]:
+        """The poles to use: automatic, or the ones picked by hand found again in a new diagram."""
+        if self.picked is None:
+            return auto_select(stab)
+        out = []
+        for order, f in self.picked:
+            # The same order if the pole is still there, else the nearest order that has it.
+            for o in sorted(stab.orders, key=lambda o: abs(o - order)):
+                fs = np.abs(stab.poles[stab.orders.index(o)]) / (2 * math.pi)
+                if fs.size and abs(fs - f).min() <= 0.02 * f:
+                    out.append((o, int(np.argmin(abs(fs - f)))))
+                    break
+        return out
+
+    def identify(self) -> None:
+        """Extract modal parameters from the finished measurement and compare them with the exact modes."""
+        est, acq = self.estimate, self.acq
+        p = self.processing()
+        exp_window = p.window is Window.FORCE_EXPONENTIAL and p.exp_end < 1.0 and not (acq and acq.stepped)
+        self.extract.set_window_correction(exp_window)
+        if est is None or acq is None or not acq.done:
+            self.stab, self.poles, self.ident = None, [], None
+            self.frf_view.set_fit(None, None)
+            self.results.set_results([], np.zeros((0, 0)), "Modal parameters are extracted when the "
+                                     "measurement is complete.")
+            self.stab_plot.set_data(None, [], np.zeros(0), np.zeros(0), [])
+            return
+        method = self.extract.current
+        band = self.extract.band
+        n = acq.n
+        self.stab, self.poles = None, []
+        if method is Method.PEAK:
+            ident = peak_picking(est.freqs, est.H, band, n)
+        elif method is Method.CIRCLE:
+            ident = circle_fit(est.freqs, est.H, band, n)
+        else:
+            self.stab = lscf(est.freqs, est.H, band, self.extract.order.value())
+            self.poles = self._pick(self.stab)
+            ident = lsfd(est.freqs, est.H, band, [self.stab.pole(o, i) for o, i in self.poles])
+        self.ident = ident
+        notes = list(ident.notes)
+        reported = ident
+        if exp_window and self.extract.correct.isChecked():
+            sigma = 1.0 / p.exp_tau(acq.settings)
+            reported = ident.shifted(sigma)
+            notes.append(f"Poles moved {sigma:.3g} 1/s to the right to remove the exponential window's damping.")
+        elif exp_window:
+            notes.append("<b>Not corrected</b> for the exponential window: every ζ includes its extra damping.")
+
+        exact = [m for m in acq.result.modes if m.damped is not None]
+        modes = sorted(reported.modes, key=lambda m: m.fn_hz)
+        rows = match_modes(modes, acq.result, band[1])
+        found = sum(1 for r in rows if r.mode and r.identified)
+        head = f"<b>{method.value}</b>: {len(modes)} mode{'s' if len(modes) != 1 else ''} identified, " \
+               f"{found} matched to exact modes."
+        self.results.set_results(rows, mac_matrix(modes, acq.result), head + "<br>" + "<br>".join(notes))
+        self.results.mac.set_matrix(mac_matrix(modes, acq.result), [f"{m.fn_hz:.3g} Hz" for m in modes],
+                                    [str(m.index) for m in exact])
+
+        j = max(0, self.output.currentIndex())
+        lo, hi = band
+        if self.extract.show_fit.isChecked() and ident.modes:
+            f = np.linspace(max(lo, hi / 1000), hi, 800)
+            self.frf_view.set_fit(f, ident.synthesize(f)[:, j])
+        else:
+            self.frf_view.set_fit(None, None)
+        mask = band_mask(est.freqs, band)
+        self.stab_plot.set_data(self.stab, self.poles, est.freqs[mask], mode_indicator(est.H[mask]),
+                                [m.damped.fn_hz for m in exact])
 
     # -------------------------------------------------------------- text
     def _update_info(self) -> None:

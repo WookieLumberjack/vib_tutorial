@@ -235,6 +235,24 @@ Each step of the measurement, and each error it can bring in, can be switched on
 
 ![Virtual modal test: a short block with an exponential window; the measured FRF follows the exact one with the window's extra damping](docs/images/virtual_modal_test.png)
 
+**Modal parameters** are then extracted from the measured FRF column and compared with the
+exact modes:
+
+- **Peak picking**: a mode at each peak, damping from the half-power bandwidth, the shape from
+  the FRF at the peak. It shows the limits of the line spacing.
+- **Circle fit**: ω<sub>n</sub> and ζ from the angles on each mode's mobility circle, between
+  the frequency lines.
+- **LSCF + LSFD**: a common-denominator fit of every response at every model order, shown as a
+  **stabilization diagram**. The stable columns are picked automatically, and you can click
+  poles to add or remove them. Residues and residual terms then come from a least-squares fit.
+- A **fit band**, dragged on the FRF plot, sets which lines are fitted. The fitted modal model
+  is drawn over the measurement.
+- The **Modal parameters** tab lists f<sub>n</sub>, ζ and MAC against the exact modes (missed
+  and extra modes included), with a MAC matrix. The exponential window's damping can be
+  removed from the identified poles.
+
+![Stabilization diagram of a noisy impact test: stable columns at modes 1 to 3, picked automatically; the fitted model over the measured FRF](docs/images/modal_extraction.png)
+
 ## The math, briefly
 
 The *Background* tab in the app explains this in more depth; this is the outline.
@@ -328,6 +346,9 @@ $w_k^T W w_k$, so the energy balance closes to rounding error.
 - `core/measurement.py`: the virtual modal test: excitation signals, a fast exact response
   (the FOH update diagonalized into one first-order filter per eigenvalue), anti-alias
   filtering and sampling, noise, windows, and the H1/H2 and coherence estimates.
+- `core/identification.py`: modal parameter extraction from a measured FRF column: peak
+  picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
+  modes (MAC).
 - `core/substructure.py`: component mode synthesis (Craig–Bampton, Rubin, MacNeal), mode
   comparison (frequency error, MAC) and the reduced-model FRF.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
@@ -378,6 +399,13 @@ while not acq.done:
     acq.step()                                                 # one block per step
 est = FrfEstimator(acq, Processing(window=Window.HANN, response_noise=0.02)).estimate()
 est.freqs, est.H, est.coherence                                # (F,), (F, N), (F, N)
+
+from vib_tutorial.core.identification import auto_select, lscf, lsfd, match_modes
+
+band = (0.0, acq.settings.band)
+stab = lscf(est.freqs, est.H, band, max_order=30)              # poles at every order
+ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(stab)])
+[(r.mode, r.identified and r.identified.fn_hz, r.mac) for r in match_modes(ident.modes, res, 8.0)]
 ```
 
 ## Ideas for extension
