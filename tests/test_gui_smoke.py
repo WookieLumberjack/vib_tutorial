@@ -611,6 +611,13 @@ def test_modal_test_playback_draws_each_record_as_it_is_recorded(app):
     while not p.acq.done:
         p._measure_some()
     assert p.progress.text().startswith("10 / 10") and not p.running
+
+    # The choice is remembered for the next launch.
+    p.speed.setCurrentIndex(p.speed.findText("3× real time"))
+    w.close()
+    w = MainWindow()
+    assert w.test_page.speed.currentText() == "3× real time"
+    w.test_page.speed.setCurrentIndex(0)  # back to Instant for the other tests
     w.close()
 
 
