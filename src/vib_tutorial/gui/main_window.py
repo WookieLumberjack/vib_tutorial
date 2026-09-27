@@ -618,6 +618,9 @@ class MainWindow(QtWidgets.QMainWindow):
         now = self._clock.elapsed() / 1000.0
         dt = min(now - self._last_wall, 0.1)  # don't jump after a stall
         self._last_wall = now
+        # Like the Substructuring tabs, the simulation runs only while its page shows.
+        if self.pages.currentWidget() is not self.sim_page:
+            return
 
         held = self.chain.held
         if self.running and held is None:
@@ -642,9 +645,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._force_active = self.force.active
             self.force_panel.refresh()
 
-        # The simulation keeps running behind the other pages; skip drawing it.
-        if self.pages.currentWidget() is not self.sim_page:
-            return
         window = self.controls.window.value()
         t, x, v, f, e, s_el, g = self.history.window(window)
         peak = float(np.abs(x[-min(len(x), 20_000) :]).max()) if x.size else 0.0
