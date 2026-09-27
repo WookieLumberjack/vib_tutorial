@@ -3,6 +3,7 @@
 import os
 import tempfile
 
+import numpy as np
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -220,6 +221,63 @@ def test_substructuring_page(app):
     w._sim_target = 0.5
     w._tick()
     assert w.sim.t > 0.1
+    w.close()
+
+
+def test_substructuring_time_response(app):
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    page = w.cms_page
+    w.show()
+    w.pages.setCurrentWidget(page)
+    page.dof.setValue(6)
+    page.tabs.setCurrentWidget(page.time)
+    app.processEvents()
+    tv = page.time
+    assert tv._timer.isActive()  # runs while the tab shows
+
+    # A step at the tip: both models move, and 1 mode each leaves a reduction error.
+    tv.button.click()
+    assert tv.force.on and tv.button.text() == "Stop force"
+    for _ in range(5):
+        tv.step(0.2)
+    assert tv.sim.t >= 0.99  # (the tab's own timer may add a frame or two)
+    t, y = tv.history.window(tv.window.value())
+    assert t.size and np.abs(y[:, 0]).max() > 0.01  # the tip moves (m)
+    assert 0 < np.abs(y[:, 2] - y[:, 0]).max() < 0.2 * np.abs(y[:, 0]).max()
+    assert "tip error" in tv.error_note.text()
+    assert "4 DOFs" in tv.red_view.plotItem.titleLabel.text
+
+    # A theme change keeps the motion; a new model restarts from rest with the force still on.
+    before = tv.sim.t
+    w.set_theme("Dark")
+    assert tv.sim.t == before
+    page.exact_button.click()
+    assert tv.sim.t == 0.0 and tv.force.on and tv.history.size == 0
+    for _ in range(3):
+        tv.step(0.2)
+    t, y = tv.history.window(10.0)
+    np.testing.assert_allclose(y[:, 2:], y[:, :2], atol=1e-9)  # nothing reduced: exact
+
+    # Harmonic, tuned to a mode; then a pulse.
+    tv.kind.setCurrentIndex(1)
+    assert tv.freq.isVisibleTo(tv) and not tv.force.on
+    tv.tune.activated.emit(2)
+    assert tv.freq.value() == pytest.approx(w.modal.modes[1].fn_hz, abs=1e-3)
+    tv.kind.setCurrentIndex(2)
+    tv.button.click()
+    assert tv.force.active
+    tv.step(0.2)
+    tv.reset_button.click()
+    assert tv.sim.t == 0.0 and not tv.force.active
+
+    # No model with one mass; the tab says why and stops.
+    page.dof.setValue(1)
+    assert tv.sim is None and "at least 2 masses" in tv.header.text()
+    w.pages.setCurrentWidget(w.sim_page)
+    assert not tv._timer.isActive()
+    w.set_theme("Light")
     w.close()
 
 

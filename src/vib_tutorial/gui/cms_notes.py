@@ -353,6 +353,13 @@ component (C = βK) keeps Ĉ block diagonal. In practice the modal block is ofte
 measured or assumed modal damping, Ĉ<sub>qq</sub> = diag(2ζ<sub>r</sub>ω<sub>r</sub>),
 with joint damping on the boundary. Step 9 of the Matrices tab compares the reduced
 model's exact damping ratios with the true ones.</li>
+<li><b>In time.</b> The <i>Time response</i> tab steps the reduced model beside the full one
+under the same tip force. All three methods here are exact <i>statically</i> for a load on a
+boundary DOF: the boundary columns of T (constraint modes, or residual attachment modes) are
+static solutions. So a slowly varying load is reproduced, and the error lives in the
+vibration: in the ringing after a step, and above all near a resonance. A resonant peak is
+only about 2ζf<sub>n</sub> wide, so a frequency error of a few per cent there is a response
+error of tens of per cent, in amplitude and in phase.</li>
 <li><b>Interface size.</b> Every boundary DOF stays in the model. On this chain an
 interface is one DOF; on a 3D finite-element model it can be thousands, which is why
 interface reduction methods exist.</li>
@@ -384,9 +391,16 @@ one. The kept fixed-interface modes reach 4.5 Hz (Matrices tab, step 3), and mod
 the reduction happens in A. With 1 mode kept in A the model has 3 DOFs and mode 3 is 50%
 too high (MAC 0.27). Keep 3 modes in A (up to 3.97 Hz) and modes 1 to 4 fall within
 0.2%: the rule of thumb in action.</li>
+<li>Back to the interface at m4 and 1 mode each. Open <i>Time response</i> and apply the step
+force. The two chains end in the same static shape, and the difference is only the ringing,
+about 1% of the tip motion. Choose <i>Harmonic</i> and <i>Tune to → Mode 1 true</i>: the
+two stay together (under 1%). Tune to <i>Mode 4 true</i> (3.84 Hz): the Craig–Bampton model
+resonates at 4.11 Hz instead, so its tip moves 30% less and lags behind; the error is about
+half the motion. Keep 2 modes in each substructure and it drops to 9%; keep 3 and the two
+chains move as one.</li>
 </ol>
 <p><b>Free interface</b> (back to 8 masses, the interface at m4, 1 mode each):</p>
-<ol start="8">
+<ol start="9">
 <li>Choose <i>Rubin</i>. The model is the same size (4 DOFs), but B's one kept mode is now its
 rigid-body mode. Mode 1 is within 0.003% (Craig–Bampton: 0.02%) and mode 2 within 0.9%, but mode
 4 is 10% high against Craig–Bampton's 7%. Open <i>Substructures on their own</i>: B1 is at 0 Hz and
@@ -401,6 +415,9 @@ exact (mode 6 is 66% high), because the mass of B's discarded modes is gone.</li
 modes are added. Craig–Bampton and Rubin reach the exact answer with all modes (drawn at the
 floor); MacNeal is still 0.8% high. For mode 3 Craig–Bampton and Rubin take turns in the lead; select
 mode 1 and Rubin is ahead at every size.</li>
+<li>On <i>Time response</i>, drive at <i>Mode 1 true</i> with MacNeal. Its mode 1 is only 0.6%
+high, but mode 1 is so lightly damped (ζ = 0.009) that the tip error is a quarter of the
+motion. Rubin, with the residual mass, is within 0.2%.</li>
 <li>Set k<sub>1</sub> = k<sub>2</sub> = 0 on the Simulation page, with the interface at m4.
 Craig–Bampton fails (m1 and m2 float when the boundary is held), but the free-interface methods
 simply find more rigid-body modes in A.</li>

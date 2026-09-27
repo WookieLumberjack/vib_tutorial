@@ -35,6 +35,7 @@ from ..core import (
 from ..core.substructure import METHOD_SHORT
 from .animation import MASS_WIDTH, spring_path
 from .cms_notes import THEORY_HTML, matrices_html
+from .cms_time import CMSTimeView
 from .style import MAX_DOF, colors, current, text_on
 from .theming import mute, restyle_plot_item
 
@@ -838,7 +839,9 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.tabs = QtWidgets.QTabWidget()
         self.basis = BasisPlots()
         self.compare = MethodComparison()
+        self.time = CMSTimeView()
         self.tabs.addTab(self.plots, "Modes && FRF")
+        self.tabs.addTab(self.time, "Time response")
         self.tabs.addTab(self.compare, "Compare methods")
         self.tabs.addTab(self.basis, "Basis (T)")
         self.tabs.addTab(self.matrices, "Matrices (step by step)")
@@ -860,6 +863,7 @@ class SubstructuringPage(QtWidgets.QWidget):
             label.setText(f"<b style='color:{color}'>Modes kept in {name}:</b>")
         self.plots.apply_theme()
         self.basis.apply_theme()
+        self.time.apply_theme()
         scroll = self.theory.verticalScrollBar().value()
         self.theory.setHtml(THEORY_HTML)  # its links, in the new link colour
         self.theory.verticalScrollBar().setValue(scroll)
@@ -1003,6 +1007,7 @@ class SubstructuringPage(QtWidgets.QWidget):
             self.plots.set_comparisons([], None)
             self.plots.set_frf(system, full, None)
             self.basis.set_model(None)
+            self.time.set_model(None, full, reason)
             self.compare.set_mode(0)  # the other methods may still work
             return
 
@@ -1017,6 +1022,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         self._on_row()
         self.plots.set_frf(system, full, model)
         self.basis.set_model(model)
+        self.time.set_model(model, full)
         scroll = self.matrices.verticalScrollBar().value()
         self.matrices.setHtml(matrices_html(model, full))
         self.matrices.verticalScrollBar().setValue(scroll)

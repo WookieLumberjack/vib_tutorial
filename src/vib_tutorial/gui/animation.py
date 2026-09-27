@@ -79,10 +79,12 @@ class ChainView(pg.PlotWidget):
     mass_dragged = QtCore.Signal(int, float)  # mass index, displacement (m)
     mass_released = QtCore.Signal(int)
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, parent: QtWidgets.QWidget | None = None, draggable: bool = True) -> None:
         super().__init__(parent)
-        self.setToolTip(DRAG_TIP)
-        self.setMouseTracking(True)
+        self.draggable = draggable
+        if draggable:
+            self.setToolTip(DRAG_TIP)
+        self.setMouseTracking(draggable)
         self.setMenuEnabled(False)
         self.setMouseEnabled(x=False, y=False)
         self.hideButtons()
@@ -248,7 +250,8 @@ class ChainView(pg.PlotWidget):
         self.mass_dragged.emit(i, offset / self.gain)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        i = self.mass_at(self._view_pos(event)) if event.button() == QtCore.Qt.MouseButton.LeftButton else None
+        left = event.button() == QtCore.Qt.MouseButton.LeftButton
+        i = self.mass_at(self._view_pos(event)) if left and self.draggable else None
         if i is None:
             super().mousePressEvent(event)
             return
@@ -266,7 +269,7 @@ class ChainView(pg.PlotWidget):
             self._drag_to(pos)
             event.accept()
             return
-        if self.mass_at(pos) is None:
+        if not self.draggable or self.mass_at(pos) is None:
             self.unsetCursor()
         else:
             self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
