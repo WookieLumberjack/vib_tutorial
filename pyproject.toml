@@ -3,6 +3,8 @@ name = "vib-tutorial"
 version = "0.1.0"
 description = "Interactive real-time vibration tutorial: lumped mass-spring-damper chain with live modal analysis"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { email = "30199313+WookieLumberjack@users.noreply.github.com" }
 ]

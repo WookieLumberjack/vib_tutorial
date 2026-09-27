@@ -5,6 +5,10 @@ It simulates a chain of lumped masses connected by springs and dampers, animates
 motion, and shows the modal-analysis solution for reference, all updating live while
 you change parameters.
 
+> **Disclaimer:** This entire project was created with [Claude Code](https://claude.com/claude-code).
+> It is for educational use only, with no warranty, and its results are not guaranteed to be
+> technically correct (see [Disclaimer and license](#disclaimer-and-license)).
+
 ```
 ground ──[k1,c1]── m1 ──[k2,c2]── m2 ──[k3,c3]── m3 ──[k4,c4]── m4
 ```
@@ -650,3 +654,20 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 ## Ideas for extension
 
 - Save and load parameter presets for classroom exercises
+
+## Disclaimer and license
+
+This software is provided for **educational purposes only**. It was written with an AI coding
+assistant, [Claude Code](https://claude.com/claude-code), and although it has an automated test
+suite, its results are **not guaranteed to be technically correct**: the simulations, modal
+analysis, substructuring, identification and theory notes may contain errors. Validate any
+calculation independently (by hand, with established references or with qualified software)
+before relying on it, and do not use it for design, certification, safety-related or other
+engineering decisions.
+
+The software is provided **"as is", without warranty of any kind**, express or implied,
+including the warranties of merchantability, fitness for a particular purpose and
+non-infringement. In no event shall the authors or copyright holders be liable for any claim,
+damages or other liability arising from the software or its use.
+
+Released under the [MIT License](LICENSE). Copyright (c) 2026 WookieLumberjack.
