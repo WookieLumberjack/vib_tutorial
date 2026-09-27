@@ -420,6 +420,41 @@ def test_energy_time_history(app):
     w.close()
 
 
+def test_element_forces_view(app):
+    import numpy as np
+
+    from vib_tutorial.core import ForceKind
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    assert not w.element_combo.isVisibleTo(w)
+    w.coords_combo.setCurrentIndex(3)
+    assert w.forces_view and w.element_combo.isVisibleTo(w)
+    n = w.sim.system.n
+    assert [c.name() for c in w.time_plot.x_curves] == [f"k{i + 1}" for i in range(n)]
+    # A step force at the tip: once the motion settles, every spring carries it.
+    w.force.settings.kind = ForceKind.STEP
+    w.force.switch_on()
+    while w.sim.t < 150.0:  # mode 1 decays at zeta * omega_n = 0.12 1/s
+        w._sim_target = w.sim.t + 2.0
+        w._tick()
+    springs = np.array([c.getData()[1][-1] for c in w.time_plot.x_curves])
+    np.testing.assert_allclose(springs, w.force.value(), rtol=1e-6)
+    w.element_combo.setCurrentIndex(1)
+    w._tick()  # new curves fill on the next frame
+    assert w.time_plot.x_curves[0].name() == "c1"
+    assert max(abs(c.getData()[1][-1]) for c in w.time_plot.x_curves) < 1e-6
+    w.element_combo.setCurrentIndex(2)
+    assert w.time_plot.x_curves[0].name() == "k1 + c1"
+    # Changing the number of masses gives one curve per element.
+    w.params.dof.setValue(6)
+    w._tick()
+    assert len(w.time_plot.x_curves) == 6
+    w.coords_combo.setCurrentIndex(0)
+    assert not w.element_combo.isVisibleTo(w)
+    w.close()
+
+
 def test_energy_bars(app):
     import pytest
 

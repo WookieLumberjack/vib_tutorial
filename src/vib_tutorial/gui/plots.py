@@ -57,6 +57,11 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
         self.x_plot.setLabel("left", label, units=units)
         self.min_span = min_span
         self.x_curves = [self.x_plot.plot(pen=pg.mkPen(color, width=1), name=name) for name, color in curves]
+        # pyqtgraph sizes the legend from its items' current widths, which lag behind
+        # new, longer names and squeeze the entries together; use the preferred size.
+        legend = self.x_plot.legend
+        size = legend.layout.effectiveSizeHint(QtCore.Qt.SizeHint.PreferredSize)
+        legend.setGeometry(0, 0, size.width(), size.height())
 
     def set_auto_range(self, on: bool) -> None:
         """Auto-fit the y axes each frame, or freeze them at their current range."""

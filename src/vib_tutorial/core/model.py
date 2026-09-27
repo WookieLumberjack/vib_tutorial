@@ -99,6 +99,17 @@ def assemble_chain(values: np.ndarray) -> np.ndarray:
     return mat
 
 
+def element_forces(system: ChainSystem, x: np.ndarray, v: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Tension in each spring k_i (x_i - x_{i-1}) and damper c_i (v_i - v_{i-1}) (N); x_0 = ground.
+
+    x and v have the masses along the last axis; so do the results. Positive
+    means the element is stretched (or stretching) and pulls its two masses together.
+    """
+    spring = system.stiffness * np.diff(x, prepend=0.0, axis=-1)
+    damper = system.damping * np.diff(v, prepend=0.0, axis=-1)
+    return spring, damper
+
+
 def state_space(system: ChainSystem) -> tuple[np.ndarray, np.ndarray]:
     """First-order form z' = A z + B f with z = [x, v].
 
