@@ -23,10 +23,25 @@ def make_app(theme: str | None = None):
     return app
 
 
+def close_graphics(widget) -> None:
+    """Tear down every pyqtgraph view inside `widget`, as pyqtgraph expects before exit.
+
+    GraphicsView.close() clears its scene; closing the window does not call it. Items
+    left in a scene until PySide's own teardown at interpreter exit can segfault there.
+    """
+    import pyqtgraph as pg
+
+    for view in widget.findChildren(pg.GraphicsView):
+        if not view.closed:
+            view.close()
+
+
 def run() -> int:
     from .main_window import MainWindow
 
     app = make_app()
     window = MainWindow()
     window.show()
-    return app.exec()
+    code = app.exec()
+    close_graphics(window)
+    return code
