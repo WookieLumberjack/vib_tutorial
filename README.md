@@ -275,6 +275,12 @@ Everything on the page follows the selector:
   reduced-model motion is built from.
 - **Modes & FRF**: the selected mode shape, true vs reduced, and the tip and interface
   receptance of both models for the force at the tip.
+- **Time response**: the reduced model simulated beside the full one, with the same exact
+  stepper and the same force at the tip (a step, a harmonic, or a pulse). The two chains are
+  animated one above the other at the same scale, over time histories of the tip and interface
+  and of their difference. All three methods are exact statically, so the error is in the
+  vibration: small after a step, large when driven at a mode the reduced model has shifted
+  (below). *Tune to…* offers the true and the reduced natural frequencies.
 - **Compare methods**: the same cut reduced by all three methods, with the frequency error of
   every mode, and how the selected mode's error falls as modes are added, one at a time.
 - **Matrices (step by step)**: every stage with the current numbers: the full K and M,
@@ -308,6 +314,8 @@ $$T = \begin{bmatrix}\Phi_{ik} - R\,\Phi_{bk} & R\\ 0 & I\end{bmatrix},\qquad R 
 
 Rubin's method projects with it, $\hat M = T^TMT$; MacNeal's drops the residual mass,
 $\hat M = \mathrm{diag}(I, 0)$. Both have $\hat K = T^TKT$, which now couples $q$ to $x_b$.
+
+![Time response: driven at the true mode 4 (3.84 Hz), the Craig–Bampton model with 1 mode per substructure resonates at 4.11 Hz instead; its tip moves less and lags](docs/images/substructuring_time.png)
 
 ![Compare methods: the same cut reduced three ways; Craig–Bampton and Rubin converge to the exact mode 3, MacNeal does not](docs/images/substructuring_compare.png)
 
@@ -465,6 +473,8 @@ $w_k^T W w_k$, so the energy balance closes to rounding error.
   modes (MAC).
 - `core/substructure.py`: component mode synthesis (Craig–Bampton, Rubin, MacNeal), mode
   comparison (frequency error, MAC) and the reduced-model FRF.
+- `core/cms_response.py`: the full chain and a reduced model stepped side by side under the
+  same force (MacNeal's massless boundary condensed statically).
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and
@@ -520,9 +530,15 @@ cb = craig_bampton(s, interfaces=[3], n_kept=[1, 1])          # cut at m4, 1 mod
 [(c.fn_true, c.fn_red, c.mac) for c in compare_modes(cb, modal_analysis(s))]
 
 from vib_tutorial.core import free_interface
+from vib_tutorial.core.cms_response import CMSResponse
 
 rubin = free_interface(s, interfaces=[3], n_kept=[1, 1])       # B keeps its rigid-body mode
 macneal = free_interface(s, [3], [1, 1], residual_mass=False)  # massless residual: 2 modes
+
+step = ForceController(ForceSettings(kind=ForceKind.STEP, amplitude=10.0))
+both = CMSResponse(cb, step)                                   # full and reduced, same force at the tip
+step.switch_on()
+t, x_full, x_cb, f = both.advance(2.0)                         # (steps, N) each; x_cb = T r
 
 from vib_tutorial.core import (Acquisition, Excitation, FrfEstimator, MeasurementSettings,
                                Processing, Window)
@@ -545,9 +561,6 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 ## Ideas for extension
 
 - Save and load parameter presets for classroom exercises
-- Substructuring: time-simulate the Craig–Bampton reduced model alongside the full one
-  under the same tip force, so the reduction error shows up in the animation and time
-  histories
 - Substructuring: more than one interface (three or more substructures); the core
   (`craig_bampton`) already accepts several cuts, so only the controls and schematic need
   extending

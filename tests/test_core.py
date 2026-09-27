@@ -742,3 +742,53 @@ def test_energy_balance_with_base_excitation():
         assert abs(_balance(sim)) < 1e-10 * (sim.energy_added + abs(sim.work))
     sim.reset()
     assert sim.ground == 0.0
+
+
+def test_cms_response_matches_the_full_model_when_nothing_is_reduced():
+    from vib_tutorial.core import component_mode_synthesis
+    from vib_tutorial.core.cms_response import CMSResponse
+
+    s = ChainSystem([1.0, 2.0, 1.5, 1.0, 0.5], [400.0, 300.0, 500.0, 200.0, 350.0], [2.0, 8.0, 1.0, 0.5, 3.0])
+    for method in ("craig-bampton", "rubin"):
+        model = component_mode_synthesis(s, [1], [1, 2], method)
+        force = ForceController(ForceSettings(kind=ForceKind.HARMONIC, freq_hz=2.0))
+        resp = CMSResponse(model, force)
+        force.switch_on()
+        t, x_full, x_red, f = resp.advance(2.0)
+        # The full half is the ordinary simulator, sample for sample.
+        ref_force = ForceController(ForceSettings(kind=ForceKind.HARMONIC, freq_hz=2.0, target=4))
+        sim = Simulator(s, ref_force)
+        ref_force.switch_on()
+        _, x_sim, _, _ = sim.advance(2.0)
+        np.testing.assert_allclose(x_full, x_sim, atol=1e-12)
+        np.testing.assert_allclose(x_red, x_full, atol=1e-9 * np.abs(x_full).max())
+        np.testing.assert_allclose(resp.x_reduced, x_red[-1])
+
+
+def test_cms_response_of_a_reduced_model():
+    from vib_tutorial.core import component_mode_synthesis
+    from vib_tutorial.core.cms_response import CMSResponse
+
+    s = ChainSystem.uniform(6, damping=20.0)  # heavily damped: settles within the run
+    for method in ("craig-bampton", "rubin", "macneal"):
+        model = component_mode_synthesis(s, [2], [1, 1], method)
+        force = ForceController(ForceSettings(kind=ForceKind.STEP, amplitude=10.0))
+        resp = CMSResponse(model, force)
+        force.switch_on()
+        _, x_full, x_red, _ = resp.advance(2.0)
+        err = np.abs(x_red - x_full).max() / np.abs(x_full).max()
+        assert 1e-4 < err < 0.2  # a reduction error while it rings, but a small one
+        for _ in range(3):
+            _, x_full, x_red, _ = resp.advance(10.0)
+        static = np.linalg.solve(s.matrices()[2], 10.0 * np.eye(6)[5])
+        np.testing.assert_allclose(x_full[-1], static, rtol=1e-6)
+        if method == "craig-bampton":
+            # The constraint modes are the exact static shapes: no static error.
+            np.testing.assert_allclose(x_red[-1], static, rtol=1e-6)
+    # MacNeal's massless boundary follows the tip force at once.
+    model = component_mode_synthesis(s, [2], [1, 1], "macneal")
+    force = ForceController(ForceSettings(kind=ForceKind.STEP, amplitude=10.0))
+    resp = CMSResponse(model, force)
+    force.switch_on()
+    _, _, x_red, _ = resp.advance(1e-3)
+    assert x_red[0, 5] > 0.0
