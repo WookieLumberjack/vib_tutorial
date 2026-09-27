@@ -95,7 +95,10 @@ class CMSRunView(QtWidgets.QWidget):
         self._clock = QtCore.QElapsedTimer()
         self._last = 0.0
         self._target = 0.0  # simulated time to catch up to
+        # Single-shot timer re-armed after each frame: if a frame runs long, the
+        # event loop still gets to handle input before the next one starts.
         self._timer = QtCore.QTimer(self)
+        self._timer.setSingleShot(True)
         self._timer.setInterval(FRAME_MS)
         self._timer.timeout.connect(self._frame)
         self._build()
@@ -229,6 +232,8 @@ class CMSRunView(QtWidgets.QWidget):
         dt = min(now - self._last, 0.1)
         self._last = now
         self.step(dt * float(self.speed.currentData()))
+        if self.sim is not None and self.isVisible():
+            self._timer.start()
 
     def step(self, duration: float) -> None:
         """Advance both models by `duration` s of simulated time and redraw."""
@@ -263,8 +268,10 @@ class CMSTimeView(CMSRunView):
         self.e_plot.setXLink(self.x_plot)
         self.plots.ci.layout.setRowStretchFactor(0, 3)
         self.plots.ci.layout.setRowStretchFactor(1, 2)
+        # Performance: these plots scroll and redraw every frame. No grid and 1 px pens
+        # (Qt's fast path): wide pens made each frame ~90 ms once the window filled,
+        # several times that on a Retina display. See TimeHistoryPlot.
         for p in (self.x_plot, self.e_plot):
-            p.showGrid(x=True, y=True, alpha=0.3)
             p.setClipToView(True)
             p.setDownsampling(auto=True, mode="peak")
             p.setMouseEnabled(x=False, y=False)
@@ -309,12 +316,11 @@ class CMSTimeView(CMSRunView):
                 (colors.strong if k == 0 else colors.mass[d], DASH, f"x{d + 1} {short}"),
             ]
             for curve, (color, style, name) in zip(self.x_curves[2 * k : 2 * k + 2], styles):
-                # Full model wider, so it still shows where the reduced one lies on top of it.
-                width = 2 if style else 3.5
-                curve.setPen(pg.mkPen(color, width=width, style=style or QtCore.Qt.PenStyle.SolidLine))
+                # Full model solid, reduced dashed: the full one shows through the gaps.
+                curve.setPen(pg.mkPen(color, width=1, style=style or QtCore.Qt.PenStyle.SolidLine))
                 self.x_plot.legend.addItem(curve, name)
         for curve, d in zip(self.e_curves, self._dofs):
-            curve.setPen(pg.mkPen(colors.mass[d], width=2))
+            curve.setPen(pg.mkPen(colors.mass[d], width=1))
 
     def _on_model(self, model: CMSModel) -> None:
         n = model.system.n

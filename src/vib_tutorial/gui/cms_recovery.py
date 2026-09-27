@@ -86,9 +86,9 @@ class BackExpansionView(CMSRunView):
         self.f_plot = self.plots.addPlot(row=2, col=0)
         self.f_plot.setLabel("left", "Force", units="N")
         self.f_plot.setLabel("bottom", "Time", units="s")
+        # No grid and 1 px pens: these redraw every frame (see CMSTimeView._build).
         for p in (self.x_plot, self.e_plot, self.f_plot):
             p.addLegend(offset=(5, 2), colCount=4)  # one row along the top, over the headroom
-            p.showGrid(x=True, y=True, alpha=0.3)
             p.setClipToView(True)
             p.setDownsampling(auto=True, mode="peak")
             p.setMouseEnabled(x=False, y=False)
@@ -129,17 +129,17 @@ class BackExpansionView(CMSRunView):
             p.legend.setBrush(colors.legend_brush())
         self._set_pens()
 
-    def _styles(self) -> dict[str, tuple[str, float, QtCore.Qt.PenStyle]]:
+    def _styles(self) -> dict[str, tuple[str, QtCore.Qt.PenStyle]]:
         d = self.mass_dof
         e = self.spring
         return {
-            "true": (colors.mass[d] if d is not None else colors.strong, 3.5, SOLID),
-            "true_force": (colors.mass[e] if e is not None else colors.strong, 3.5, SOLID),
-            "coupled": (colors.strong, 2.0, DASH),
-            "from_boundary": (colors.muted, 2.0, DOT),
-            "from_modes": (colors.mode[4], 2.0, DASH_DOT),
-            "boundary": (colors.fair, 2.0, SOLID),
-            "enhanced": (colors.fit, 2.0, SOLID),
+            "true": (colors.mass[d] if d is not None else colors.strong, SOLID),
+            "true_force": (colors.mass[e] if e is not None else colors.strong, SOLID),
+            "coupled": (colors.strong, DASH),
+            "from_boundary": (colors.muted, DOT),
+            "from_modes": (colors.mode[4], DASH_DOT),
+            "boundary": (colors.fair, SOLID),
+            "enhanced": (colors.fit, SOLID),
         }
 
     def _set_pens(self) -> None:
@@ -163,8 +163,8 @@ class BackExpansionView(CMSRunView):
         for prefix, plot, curves in (("", self.x_plot, self.x_curves), ("e_", self.e_plot, self.e_curves),
                                      ("f_", self.f_plot, self.f_curves)):
             for key, curve in curves.items():
-                color, width, style = styles.get(prefix + key, styles.get(key))
-                curve.setPen(pg.mkPen(color, width=width, style=style))
+                color, style = styles.get(prefix + key, styles.get(key))
+                curve.setPen(pg.mkPen(color, width=1, style=style))
                 plot.legend.getLabel(curve).setText(names[prefix + key], color=colors.foreground)
         self.x_plot.setTitle(f"Interior mass m{d + 1}" if d is not None else None, size="10pt")
         self.f_plot.setTitle(self.spring_box.currentText() or None, size="10pt")
