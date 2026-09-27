@@ -134,6 +134,22 @@ def test_noise_free_coherence_is_one_and_noise_lowers_it():
     assert noisy.coherence[keep].min() < 0.9
 
 
+def test_stepped_sine_noise_shows_in_the_samples_and_averages_out_of_the_fit():
+    acq = measure(SYSTEM, excitation=Excitation.STEPPED_SINE, input_dof=3, sine_points=20)
+    clean = FrfEstimator(acq, Processing()).estimate()
+    noisy = FrfEstimator(acq, Processing(force_noise=0.2, response_noise=0.2)).estimate()
+    # The samples carry the full 20% of the channel's peak...
+    residual = np.std(noisy.f - clean.f) / np.abs(clean.f).max()
+    assert residual == pytest.approx(0.2, rel=0.3)
+    # ...but fitting a sine to N samples leaves about 20% x sqrt(2 / N) in its amplitude.
+    ratio = noisy.H[:, 3] / clean.H[:, 3]
+    assert 0.0 < np.median(np.abs(ratio - 1)) < 0.1
+    # The fitted sine passes through the clean samples.
+    t, f_fit, x_fit = clean.fit
+    np.testing.assert_allclose(np.interp(clean.t, t, f_fit), clean.f, atol=0.02 * np.abs(clean.f).max())
+    assert x_fit.shape == (t.size, SYSTEM.n)
+
+
 def test_fewer_averages_restart_the_sums():
     acq = measure(SYSTEM, excitation=Excitation.RANDOM, input_dof=3, averages=6, block=256)
     est = FrfEstimator(acq, Processing(response_noise=0.05))

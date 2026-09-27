@@ -62,6 +62,7 @@ SETTLE_TOL = 1e-3  # transient left when a periodic or stepped-sine measurement 
 MAX_SETTLE = 300.0  # s
 SINE_CYCLES = 8  # measured per stepped-sine frequency
 MIN_SINE_SAMPLES = 64
+FIT_POINTS_PER_CYCLE = 32  # drawing the fitted stepped sine
 CHUNK = 1 << 16  # analog samples simulated at a time
 
 
@@ -511,6 +512,8 @@ class Estimate:
     x: np.ndarray  # (len(t), n)
     force_window: np.ndarray | None
     response_window: np.ndarray | None
+    # Stepped sine: the sines fitted to the latest frequency, finely sampled (t, f, x).
+    fit: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
 
 
 class FrfEstimator:
@@ -585,6 +588,11 @@ class FrfEstimator:
         X = np.array([q.response + p.response_noise * np.abs(q.response) * q.response_noise for q in pts])
         t, f, x, nf, nx = self.acq.last_sine
         f, x = add_noise(f, x, nf, nx, p)
+        # The fitted sines, drawn smoothly (the samples can be as few as 2.5 per cycle).
+        w = TWO_PI * pts[-1].freq_hz
+        tf = np.linspace(0.0, t[-1], max(t.size, math.ceil(FIT_POINTS_PER_CYCLE * pts[-1].freq_hz * t[-1]) + 1))
+        e = np.exp(1j * w * tf)
+        fit = (tf, (F[-1] * e).real, (X[-1][None, :] * e[:, None]).real)
         return Estimate(
             freqs=np.array([q.freq_hz for q in pts]),
             H=X / F[:, None],
@@ -596,4 +604,5 @@ class FrfEstimator:
             x=x,
             force_window=None,
             response_window=None,
+            fit=fit,
         )

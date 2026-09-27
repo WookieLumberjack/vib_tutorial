@@ -566,6 +566,10 @@ def test_modal_test_page(app):
         p._measure_some()
     assert p.progress.text().startswith("12 / 12") and not p.window.isEnabled()
     assert "Points in it" in p.check.toHtml()
+    # Samples as dots, the fitted sine drawn smoothly through them.
+    sig = p.signals
+    assert sig.f_curve.opts["symbol"] == "o" and sig.f_curve.opts["pen"] is None
+    assert sig.f_fit.getData()[0].size > sig.f_curve.getData()[0].size
 
     # The chain changes on the Simulation page: the test follows, with fs re-chosen.
     fs = p.fs.value()
