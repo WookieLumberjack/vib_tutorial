@@ -557,6 +557,10 @@ $w_k^T W w_k$, so the energy balance closes to rounding error.
   redraws in a new one through its `apply_theme()`. Log axes use `gui/axes.py`, which labels
   only as many ticks as fit.
 
+`scripts/readme_screenshots.py` regenerates the images in `docs/images` (offscreen, each in
+the state its caption describes): `uv run python scripts/readme_screenshots.py`, or name the
+shots to retake, e.g. `... chirp pluck`.
+
 The `core` package has no Qt dependency, so you can use it from scripts or notebooks:
 
 ```python
