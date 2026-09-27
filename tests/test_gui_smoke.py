@@ -665,3 +665,15 @@ def test_drag_a_mass_and_let_go(app):
     QTest.mousePress(view.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=pixel(0.5 * SPACING, 0.4))
     assert view.held is None
     w.close()
+
+
+def test_make_app_sets_up_light_colours(app):
+    import pyqtgraph as pg
+
+    from vib_tutorial.gui import make_app
+
+    # The offscreen platform has no colour scheme to override, so this checks the
+    # result (a light palette and white plots), not the switch from a dark desktop.
+    assert make_app() is app
+    assert app.palette().window().color().lightness() > 200
+    assert pg.getConfigOption("background") == "w"
