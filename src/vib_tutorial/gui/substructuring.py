@@ -954,7 +954,7 @@ class SubstructuringPage(QtWidgets.QWidget):
             self._style_kept_rows()
 
     def _build_cut_buttons(self, n: int) -> None:
-        """One toggle per mass that can be an interface (all but the tip); the middle one on."""
+        """One toggle per mass that can be an interface (all but the tip), all off: one substructure."""
         for b in self.cut_buttons:
             self.cut_row.removeWidget(b)
             b.deleteLater()
@@ -962,7 +962,6 @@ class SubstructuringPage(QtWidgets.QWidget):
         for i in range(n - 1):
             b = QtWidgets.QPushButton(f"m{i + 1}")
             b.setCheckable(True)
-            b.setChecked(i == max(0, n // 2 - 1))
             b.setMinimumWidth(10)
             b.setToolTip(INTERFACE_TIP)
             b.toggled.connect(lambda on, i=i: self._on_cut(i, on))
@@ -1112,7 +1111,7 @@ class SubstructuringPage(QtWidgets.QWidget):
 
     def _sync_controls(self, n: int) -> None:
         """Fit the interface choices and kept-mode ranges to the current N."""
-        if len(self.cut_buttons) != n - 1:  # N changed: start again from one cut in the middle
+        if len(self.cut_buttons) != n - 1:  # N changed: start again from one substructure
             self._build_cut_buttons(n)
         ranges = kept_ranges(self.system, self.interfaces, self.method_key)
         self._build_kept_rows(len(ranges))

@@ -37,15 +37,16 @@ reduces it to a handful of coordinates, and then joins the reduced components at
 interfaces. The assembled model is much smaller than the full one, and a component can
 be changed or re-analysed without touching the others. <b>Component mode synthesis
 (CMS)</b> does the reduction with each component's own mode shapes.</p>
-<p>On this page the chain is cut at one <i>interface</i> mass into two substructures,
+<p>The page starts with the whole chain as <i>one</i> substructure, <b>A</b>, whose only
+boundary DOF is the loaded tip. That is the classic single-component reduction: learn the
+basis, the kept modes and the constraint mode on it first.</p>
+<p>Then click a mass under <i>Interfaces at</i> to cut the chain there into two substructures,
 <b>A</b> (grounded) and <b>B</b> (free end). The interface mass belongs to both: A owns its
 mass and the springs to its left, B owns the springs to its right. (The free-interface methods
 split the interface mass half and half instead, so that each substructure has mass wherever it
-can move.) Click more masses under <i>Interfaces at</i> to cut the chain into three or more
-substructures, A, B, C, ... from the ground: each interface is shared by the two on either side
-of it, and each substructure keeps its own number of modes. Click every cut off and the whole
-chain is <i>one</i> substructure, whose only boundary DOF is the loaded tip: the classic
-single-component reduction, and the smallest model the page can make.</p>
+can move.) Click more masses to cut the chain into three or more substructures, A, B, C, ...
+from the ground: each interface is shared by the two on either side of it, and each
+substructure keeps its own number of modes.</p>
 <p>The <i>Method</i> selector chooses how each substructure is reduced: <b>Craig–Bampton</b>
 (fixed interface, the next few sections) or <b>Rubin</b> and <b>MacNeal</b> (free interface,
 from <a href="#free">Free-interface methods</a> on). The <i>Compare methods</i> tab runs all
@@ -381,8 +382,25 @@ interface reduction methods exist.</li>
 </ul>
 
 <h3>Try it</h3>
+<p><b>One substructure</b> (no cut, as the page starts):</p>
 <ol>
-<li>Set <i>Number of masses</i> to 8, the interface at m4, and keep 1 mode in each
+<li>Set <i>Number of masses</i> to 8 and click <i>Guyan (0 modes)</i>. Only x<sub>8</sub> is
+left: one DOF, one frequency, 0.630 Hz against the true 0.587 Hz (+7.3%). The <i>Basis</i> tab
+shows why: the one constraint mode is a straight line from the ground to the tip, so this is
+Rayleigh's method with a linear shape, ω² = (k/8) / Σ(i/8)²m.</li>
+<li>Keep 1 mode: A's first mode with the tip held (1.24 Hz) joins the basis. Mode 1 falls to
+0.33% and mode 2 is 7.4% high. Keep 2 and mode 3 is 4.4% high; keep all 7 and every error is
+zero.</li>
+<li>Back to Guyan, open <i>Time response</i> and apply the step force. The reduced chain can
+only move in its one straight-line shape, so it rings at the wrong frequency and the error is
+about a third of the tip motion. Add modes and watch the two chains lock together.</li>
+<li>Choose <i>Rubin</i> and keep 1 mode. The free-interface modes of the only substructure are
+the chain's own modes, so mode 1 is exact, but mode 2 is 16% high: the residual flexibility
+gets the statics right, not the next mode. Back to <i>Craig–Bampton</i>.</li>
+</ol>
+<p><b>Two substructures:</b></p>
+<ol>
+<li>Click m4 to cut the chain there, and keep 1 mode in each
 substructure. The reduced model has 4 DOF (q<sub>A1</sub>, q<sub>B1</sub>, x<sub>4</sub>,
 x<sub>8</sub>) instead of 8. Mode 1 is within 0.2%, mode 4 is 7% high with MAC 0.84, and
 modes 5 to 8 are not in the reduced model at all.</li>
@@ -402,7 +420,7 @@ nothing like the original M and K: same system, different coordinates.</li>
 <li>Keep 2 modes in each substructure (6 DOFs). Every CB frequency stays above the true
 one. The kept fixed-interface modes reach 4.5 Hz (Matrices tab, step 3), and modes 1 to 3
 (up to 2.8 Hz) are now within 0.03%; mode 6 is still 2.7% high.</li>
-<li>Move the interface to m7. B shrinks to the last spring and has no interior, so all
+<li>Move the interface to m7 (click m7 on, then m4 off). B shrinks to the last spring and has no interior, so all
 the reduction happens in A. With 1 mode kept in A the model has 3 DOFs and mode 3 is 50%
 too high (MAC 0.27). Keep 3 modes in A (up to 3.97 Hz) and modes 1 to 4 fall within
 0.2%: the rule of thumb in action.</li>
@@ -413,17 +431,13 @@ two stay together (under 1%). Tune to <i>Mode 4 true</i> (3.84 Hz): the Craig–
 resonates at 4.11 Hz instead, so its tip moves 30% less and lags behind; the error is about
 half the motion. Keep 2 modes in each substructure and it drops to 9%; keep 3 and the two
 chains move as one.</li>
-<li>Still with 8 masses: one cut at m4 and 2 modes each gives 6 DOFs, and modes 1 to 4 are within
+<li><b>Three substructures.</b> Still with 8 masses: one cut at m4 and 2 modes each gives 6 DOFs, and modes 1 to 4 are within
 0.71%. Now cut at m3 and m6 instead (click m4 off, m3 and m6 on) and keep 1 mode in each of A, B
 and C: also 6 DOFs, but 3 of them are interfaces and the tip, and mode 4 is 2.3% high. Click
 <i>Guyan</i>: 3 physical DOFs, and mode 3 is 16% high.</li>
-<li>Click every cut off: one substructure. Guyan leaves only x<sub>8</sub>, and mode 1 is 7.3%
-high (with one cut at m4 it was within 2%). Keep 1 mode: mode 1 falls to 0.33%, mode 2 is 7.4%
-high. Choose <i>Rubin</i> with 1 mode: mode 1 is now exact, but mode 2 is 16% high. On
-<i>Time response</i>, a step with Guyan shows the whole chain moving as one static shape.</li>
 </ol>
 <p><b>Free interface</b> (back to 8 masses, the interface at m4, 1 mode each):</p>
-<ol start="9">
+<ol>
 <li>Choose <i>Rubin</i>. The model is the same size (4 DOFs), but B's one kept mode is now its
 rigid-body mode. Mode 1 is within 0.003% (Craig–Bampton: 0.02%) and mode 2 within 0.9%, but mode
 4 is 10% high against Craig–Bampton's 7%. Open <i>Substructures on their own</i>: B1 is at 0 Hz and

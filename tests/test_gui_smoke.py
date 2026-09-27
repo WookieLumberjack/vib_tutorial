@@ -185,7 +185,10 @@ def test_substructuring_page(app):
     # N set on this page drives the shared chain; the interface starts in the middle.
     page.dof.setValue(8)
     assert w.sim.system.n == 8 and w.params.dof.value() == 8
-    assert page.interfaces == [3] and page.cut_buttons[3].isChecked() and len(page.cut_buttons) == 7
+    assert page.interfaces == [] and len(page.cut_buttons) == 7  # starts as one substructure
+    assert page.model.labels == ["q_A1", "x8"]
+    page.cut_buttons[3].click()  # cut at m4
+    assert page.interfaces == [3] and page.cut_buttons[3].isChecked()
     assert page.model.labels == ["q_A1", "q_B1", "x4", "x8"]
     assert page.table.rowCount() == 8 and page.table.item(4, 3).text() == "not in model"
     assert page.table.horizontalHeaderItem(5).text() == "ζ CB" and page.table.item(0, 5).text() != "—"
@@ -232,6 +235,7 @@ def test_substructuring_time_response(app):
     w.show()
     w.pages.setCurrentWidget(page)
     page.dof.setValue(6)
+    page.set_interfaces([2])
     page.tabs.setCurrentWidget(page.time)
     app.processEvents()
     tv = page.time
@@ -296,6 +300,7 @@ def test_substructuring_several_interfaces(app):
     w.show()
     w.pages.setCurrentWidget(page)
     page.dof.setValue(8)
+    page.set_interfaces([3])
     app.processEvents()
 
     # Click m2 and m6 on as well: four substructures, one "modes kept" row each.
@@ -355,7 +360,7 @@ def test_substructuring_several_interfaces(app):
 
     # A new N starts again from one cut in the middle.
     page.dof.setValue(6)
-    assert page.interfaces == [2] and len(page.cut_buttons) == 5
+    assert page.interfaces == [] and len(page.cut_buttons) == 5
     w.close()
 
 
@@ -367,6 +372,7 @@ def test_substructuring_free_interface(app):
     w.show()
     w.pages.setCurrentWidget(page)
     page.dof.setValue(8)
+    page.set_interfaces([3])
     app.processEvents()
     assert page.compare.table.rowCount() == 8
     cb_error = page.comparisons[0].error
