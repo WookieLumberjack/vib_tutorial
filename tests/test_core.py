@@ -598,6 +598,24 @@ def test_ledger_balances_at_every_sample():
     assert sim.advance(0.0)[0].size == 0 and sim.ledger.shape == (0, 3)
 
 
+def test_element_forces_carry_a_static_load_and_balance_each_mass():
+    from vib_tutorial.core import element_forces
+
+    s = ChainSystem([1.0, 2.0, 0.5], [400.0, 300.0, 500.0], [15.0, 2.0, 2.0])
+    M, C, K = s.matrices()
+    # Static equilibrium under a tip load F: every spring carries F.
+    F = 3.0
+    x = np.linalg.solve(K, np.array([0.0, 0.0, F]))
+    spring, damper = element_forces(s, x, np.zeros(3))
+    np.testing.assert_allclose(spring, F)
+    assert not damper.any()
+    # In motion: each mass feels element i pulling back and element i+1 pulling on.
+    xs, vs = np.array([[0.01, -0.02, 0.03], [0.0, 0.01, 0.0]]), np.array([[0.1, 0.0, -0.2], [0.3, 0.0, 0.1]])
+    spring, damper = element_forces(s, xs, vs)
+    total = spring + damper
+    np.testing.assert_allclose(total - np.column_stack([total[:, 1:], np.zeros(2)]), xs @ K + vs @ C)
+
+
 def test_energy_splits_by_element_and_by_mode():
     from vib_tutorial.core import kinetic_energy, modal_energies, potential_energy, stored_energy
 

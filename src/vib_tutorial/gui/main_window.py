@@ -13,6 +13,7 @@ from ..core import (
     ForceKind,
     ForceSettings,
     Simulator,
+    element_forces,
     kinetic_energy,
     modal_analysis,
     modal_coordinate_map,
@@ -28,7 +29,7 @@ from .modal_test import ModalTestPage
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, PhasorPanel, TimeHistoryPlot
-from .style import ENERGY_COLORS
+from .style import ENERGY_COLORS, MASS_COLORS
 from .substructuring import SubstructuringPage
 
 FRAME_MS = 16  # ~60 fps
@@ -102,6 +103,27 @@ ENERGY_CURVES = [
     ("D", ENERGY_COLORS["dissipated"]),
 ]
 MIN_ENERGY_SPAN = 1e-9  # J; smaller energies are the float noise of decayed motion
+FORCES_COORDS_TIP = (
+    "<p><b>Element forces:</b> the tension in each spring and damper, in the colors of "
+    "their rows under <i>System parameters</i>. Element i joins mass i−1 to mass i "
+    "(element 1 joins mass 1 to the ground).</p>"
+    "<p>&nbsp;&nbsp;spring: k<sub>i</sub>(x<sub>i</sub> − x<sub>i−1</sub>), "
+    "damper: c<sub>i</sub>(ẋ<sub>i</sub> − ẋ<sub>i−1</sub>)</p>"
+    "<p>Positive is tension: the element is stretched (or stretching) and pulls its two "
+    "masses together. <i>Spring + damper</i> is the total force the element carries; "
+    "for element 1 that is the force on the ground.</p>"
+    "<p>Apply a step force at the last mass: once the motion settles, every spring carries "
+    "the full force and the dampers carry none. While it vibrates, each element also carries "
+    "the inertia force of the masses beyond it. The damper force leads the spring force "
+    "by a quarter cycle.</p>"
+)
+# Which element forces to plot: (combo text, key, legend format).
+ELEMENT_FORCES = [
+    ("Springs", "spring", "k{}"),
+    ("Dampers", "damper", "c{}"),
+    ("Spring + damper", "total", "k{0} + c{0}"),
+]
+MIN_FORCE_SPAN = 1e-4  # N
 RELEASE_FIT_TIP = (
     "<p>While <i>Auto-scale animation and plots</i> is on, the plot window is also "
     "fitted to this mode (Simulation \u2192 Fit window cycles).</p>"
@@ -145,6 +167,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.coords_combo.addItem("Physical: mass displacements x", "physical")
         self.coords_combo.addItem("Modal: one curve per mode", "modal")
         self.coords_combo.addItem("Energy: T, V, work and dissipation", "energy")
+        self.coords_combo.addItem("Element forces: springs and dampers", "forces")
+        self.element_combo = QtWidgets.QComboBox()
+        for text, key, _ in ELEMENT_FORCES:
+            self.element_combo.addItem(text, key)
+        self.element_combo.setToolTip(FORCES_COORDS_TIP)
+        self.element_combo.setVisible(False)
         coords_label = QtWidgets.QLabel("Plot coordinates:")
         self._modal_map = np.zeros((0, 0))  # states -> modal coordinates, set with the modes
         plot_box = QtWidgets.QWidget()
@@ -154,6 +182,7 @@ class MainWindow(QtWidgets.QMainWindow):
         coords_row.setContentsMargins(6, 0, 0, 0)
         coords_row.addWidget(coords_label)
         coords_row.addWidget(self.coords_combo)
+        coords_row.addWidget(self.element_combo)
         coords_row.addStretch(1)
         pv.addLayout(coords_row)
         pv.addWidget(self.time_plot, 1)
@@ -263,6 +292,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.table.itemSelectionChanged.connect(self._on_mode_selected)
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
         self.coords_combo.currentIndexChanged.connect(self._set_plot_curves)
+        self.element_combo.currentIndexChanged.connect(self._set_plot_curves)
         self.cms_page.dof_requested.connect(self.params.dof.setValue)
         self.cms_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
         self.frf_page.dof_requested.connect(self.params.dof.setValue)
@@ -324,7 +354,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.controls.set_modes(self.entries)
         self.release_button.setToolTip(RELEASE_TIP[self.method] + RELEASE_FIT_TIP)
         for w in self._coords_widgets:
-            w.setToolTip(COORDS_TIP[self.method] + ENERGY_COORDS_TIP)
+            w.setToolTip(COORDS_TIP[self.method] + ENERGY_COORDS_TIP + FORCES_COORDS_TIP)
         self._modal_map = modal_coordinate_map(self.sim.system, self.modal, complex_modes=state_space)
         self._set_plot_curves()
         self.modal_note.setText(self._modal_note())
@@ -381,8 +411,18 @@ class MainWindow(QtWidgets.QMainWindow):
     def energy_view(self) -> bool:
         return self.coords_combo.currentData() == "energy"
 
+    @property
+    def forces_view(self) -> bool:
+        return self.coords_combo.currentData() == "forces"
+
     def _set_plot_curves(self) -> None:
-        """Mass displacements, one modal coordinate per mode of the selected method, or energies."""
+        """Mass displacements, modal coordinates of the selected method, energies, or element forces."""
+        self.element_combo.setVisible(self.forces_view)
+        if self.forces_view:
+            label, _, fmt = ELEMENT_FORCES[self.element_combo.currentIndex()]
+            curves = [(fmt.format(i + 1), MASS_COLORS[i]) for i in range(self.sim.system.n)]
+            self.time_plot.set_curves(f"Tension: {label.lower()}", curves, units="N", min_span=MIN_FORCE_SPAN)
+            return
         if self.energy_view:
             self.time_plot.set_curves("Energy", ENERGY_CURVES, units="J", min_span=MIN_ENERGY_SPAN)
             return
@@ -394,6 +434,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # Legend text is e.g. "Mode 2: 3.1 Hz" or "λ3,4: 3.0 Hz"; keep the name.
         curves = [(e.legend.split(":")[0], e.color) for e in self.entries if e.legend is not None]
         self.time_plot.set_curves("Modal coordinate", curves)
+
+    def _element_curves(self, s_el: np.ndarray) -> np.ndarray:
+        """History element forces (n springs, n dampers) -> the selected element forces."""
+        n = s_el.shape[1] // 2
+        key = self.element_combo.currentData()
+        if key == "spring":
+            return s_el[:, :n]
+        if key == "damper":
+            return s_el[:, n:]
+        return s_el[:, :n] + s_el[:, n:]
 
     def _on_force_changed(self) -> None:
         s = self.force.settings
@@ -468,17 +518,20 @@ class MainWindow(QtWidgets.QMainWindow):
             system = self.sim.system
             kinetic = kinetic_energy(system, vs).sum(axis=1)
             potential = potential_energy(system, xs).sum(axis=1)
-            self.history.extend(ts, xs, vs, fs, np.column_stack([kinetic, potential, self.sim.ledger]))
+            energy = np.column_stack([kinetic, potential, self.sim.ledger])
+            self.history.extend(ts, xs, vs, fs, energy, np.hstack(element_forces(system, xs, vs)))
 
         # The simulation keeps running behind the other pages; skip drawing it.
         if self.pages.currentWidget() is not self.sim_page:
             return
         window = self.controls.window.value()
-        t, x, v, f, e = self.history.window(window)
+        t, x, v, f, e, s_el = self.history.window(window)
         peak = float(np.abs(x[-min(len(x), 20_000) :]).max()) if x.size else 0.0
         s = self.force.settings
         self.chain.update_state(self.sim.displacement, peak, self.force.value(), s.target, abs(s.amplitude))
-        if self.energy_view:
+        if self.forces_view:
+            y = self._element_curves(s_el)
+        elif self.energy_view:
             y = energy_curves(e)
         elif self.modal_view:
             n = self.sim.system.n

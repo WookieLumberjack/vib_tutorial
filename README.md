@@ -26,7 +26,7 @@ uv run pytest         # run the tests
 | Area | What it holds |
 |---|---|
 | **Left** | System parameters (m, k, c for each element, 1 to 8 masses), the applied force, and simulation controls (run/pause, speed, plot window, auto-scale) |
-| **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates) or of the energy |
+| **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
 Three more pages work on the same chain: **FRF matrix** shows every term of the receptance
@@ -53,6 +53,8 @@ measures the FRF from simulated force and response signals, as in a lab (all bel
 - **Watch the energy** in the bars beside the animation: kinetic and potential, an exact
   balance of energy in (release, force) against energy out (stored, dissipated), and each
   mode's share. *Plot coordinates → Energy* draws the same quantities against time (below).
+- **Plot the force in every spring and damper** (*Plot coordinates → Element forces*):
+  the springs, the dampers, or both together (below).
 - **Slow motion** (0.05× to 2×) for the higher modes, and auto-scaled animation and plots
   so small motions stay visible.
 
@@ -119,6 +121,25 @@ chain just below a natural frequency and the stored energy beats. W falls whenev
 force pushes against the motion, and D keeps rising.
 
 ![Energy time histories: a 1 Hz force near mode 1 (1.1 Hz); the stored energy beats and the work done falls while the force opposes the motion](docs/images/energy_history.png)
+
+### Element forces
+
+*Plot coordinates → Element forces* plots the tension in each element, in the colour of
+its row under *System parameters*. Element i joins mass i−1 to mass i, and element 1 joins
+mass 1 to the ground. A second menu picks what to plot:
+
+- **Springs**: k<sub>i</sub>(x<sub>i</sub> − x<sub>i−1</sub>)
+- **Dampers**: c<sub>i</sub>(ẋ<sub>i</sub> − ẋ<sub>i−1</sub>)
+- **Spring + damper**: the total force the element carries. For element 1 this is the
+  force on the ground.
+
+Positive is tension. Apply a step force at the last mass and every spring rings about the
+same static force, overshooting to about twice it. Once the motion dies away every spring
+carries exactly the applied force and the dampers carry none. At resonance the elements
+carry several times the applied force, and the damper force leads the spring force by a
+quarter cycle.
+
+![Element forces after a 10 N step at m4: every spring oscillates about 10 N, with first peaks near 20 N](docs/images/element_forces.png)
 
 ### Frequency response
 
@@ -346,7 +367,7 @@ $w_k^T W w_k$, so the energy balance closes to rounding error.
 
 ## Code layout
 
-- `core/model.py`: assembles $M$, $C$, $K$ and the state-space matrices.
+- `core/model.py`: assembles $M$, $C$, $K$ and the state-space matrices, and the force in each element.
 - `core/modal.py`: classical modes (`scipy.linalg.eigh`), all 2N state-space eigenpairs
   (`scipy.linalg.eig`), the MAC pairing, the modal-coordinate map, and the frequency response.
 - `core/frf_matrix.py`: the full receptance matrix and its modal (pole–residue) terms.
@@ -388,6 +409,10 @@ from vib_tutorial.core import modal_energies
 E = modal_energies(chain, res, x, v)                           # (steps, N), J; rows sum to T + V
 sim.energy_added + sim.work - sim.dissipated - sim.stored_energy  # ~1e-15 J: exact balance
 added, work, dissipated = sim.ledger.T                          # the same ledger at each step of the last advance
+
+from vib_tutorial.core import element_forces
+
+spring, damper = element_forces(chain, x, v)                   # (steps, N) tension, N
 
 from vib_tutorial.core import compare_modes, craig_bampton
 

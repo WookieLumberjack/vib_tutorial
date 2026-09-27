@@ -21,7 +21,7 @@ from .measurement import (
     transfer,
 )
 from .modal import ComplexMode, ModalResult, Mode, frf, modal_analysis, modal_coordinate_map, receptance
-from .model import ChainSystem, assemble_chain, state_space
+from .model import ChainSystem, assemble_chain, element_forces, state_space
 from .simulator import Simulator, foh_discretize, foh_quadratic_integrals
 from .substructure import (
     METHOD_NAMES,
@@ -72,6 +72,7 @@ __all__ = [
     "Simulator",
     "Substructure",
     "assemble_chain",
+    "element_forces",
     "compare_modes",
     "component_mode_synthesis",
     "component_modes",
