@@ -13,6 +13,7 @@ from vib_tutorial.core import (
     frf_matrix,
     modal_analysis,
     modal_frf_terms,
+    pluck_shape,
     state_space,
 )
 
@@ -645,3 +646,17 @@ def test_non_proportional_damping_moves_energy_between_modes():
         E = modal_energies(s, res, xs, vs)
         share = np.delete(E, 2, axis=1).max() / sim.energy_added
         assert (share > 1e-3) if moves else (share < 1e-20)
+
+
+def test_pluck_shape_is_the_static_shape_under_a_point_load():
+    s = ChainSystem([1.0, 2.0, 1.0, 3.0], [400.0, 100.0, 250.0, 50.0], [2.0] * 4)
+    x = pluck_shape(s, 1, 0.01)
+    assert x[1] == 0.01
+    load = s.matrices()[2] @ x
+    np.testing.assert_allclose(np.delete(load, 1), 0.0, atol=1e-12)  # only the held mass is pushed
+    assert x[0] == pytest.approx(0.01 * 100.0 / 500.0)  # springs 1 and 2 share the stretch
+    np.testing.assert_allclose(x[2:], 0.01)  # nothing loads the masses beyond: they follow
+
+    # Without k1 the chain floats on the held mass; a part joined to nothing stays put.
+    np.testing.assert_allclose(pluck_shape(ChainSystem([1.0] * 3, [0.0, 400.0, 400.0], [0.0] * 3), 2, 0.02), 0.02)
+    np.testing.assert_allclose(pluck_shape(ChainSystem([1.0] * 3, [400.0, 0.0, 0.0], [0.0] * 3), 0, 0.02), [0.02, 0, 0])

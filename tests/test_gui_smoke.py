@@ -621,3 +621,59 @@ def test_modal_extraction_on_the_test_page(app):
     assert p.window.currentData() is Window.FORCE_EXPONENTIAL and p.extract.correct.isVisibleTo(p)
     assert "moved" in p.results.notes.text()
     w.close()
+
+
+def test_drag_a_mass_and_let_go(app):
+    import numpy as np
+    from PySide6 import QtCore
+    from PySide6.QtTest import QTest
+
+    from vib_tutorial.gui.animation import MAX_DRAG, SPACING
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    w.force_panel.button.click()  # a running force is switched off by the grab
+    w._sim_target = 0.5
+    w._tick()
+    app.processEvents()
+    view = w.chain
+
+    def pixel(x: float, y: float = 0.0) -> QtCore.QPoint:
+        return view.mapFromScene(view.plotItem.vb.mapViewToScene(QtCore.QPointF(x, y)))
+
+    # Grab m2 and pull it right, past the limit: it stops at MAX_DRAG.
+    QTest.mousePress(view.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=pixel(view._centers[1]))
+    assert view.held == 1 and not w.force.active
+    QTest.mouseMove(view.viewport(), pixel(2 * SPACING + 2 * MAX_DRAG))
+    x = w.sim.displacement.copy()
+    assert x[1] == pytest.approx(MAX_DRAG / view.gain) and np.all(w.sim.velocity == 0)
+    np.testing.assert_allclose(x[0], x[1] / 2)  # uniform chain: m1 halfway
+    t_held = w.sim.t
+    w._tick()
+    assert w.sim.t == t_held  # time stands still while the mass is held
+    assert view._force_text.isVisible() and view._force_text.toPlainText().startswith("F = +")
+
+    QTest.mouseRelease(view.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=pixel(2 * SPACING + MAX_DRAG))
+    assert view.held is None
+    w._sim_target = w.sim.t + 0.2
+    w._tick()
+    assert w.sim.t > t_held and np.any(w.sim.velocity != 0)
+    assert w.sim.energy_added + w.sim.work == pytest.approx(w.sim.stored_energy + w.sim.dissipated)
+
+    # A press away from the masses is not a grab.
+    QTest.mousePress(view.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=pixel(0.5 * SPACING, 0.4))
+    assert view.held is None
+    w.close()
+
+
+def test_make_app_sets_up_light_colours(app):
+    import pyqtgraph as pg
+
+    from vib_tutorial.gui import make_app
+
+    # The offscreen platform has no colour scheme to override, so this checks the
+    # result (a light palette and white plots), not the switch from a dark desktop.
+    assert make_app() is app
+    assert app.palette().window().color().lightness() > 200
+    assert pg.getConfigOption("background") == "w"

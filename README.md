@@ -41,6 +41,7 @@ measures the FRF from simulated force and response signals, as in a lab (all bel
 - **Apply a force to any mass**: a step, a harmonic `F sin(2πft)`, or a rectangular pulse.
   Press **Space** (or the button) to switch it on and off, and watch the transients as it
   starts and stops.
+- **Pluck a mass**: drag any mass sideways with the mouse and let go (below).
 - **Tune the drive frequency to a natural frequency** from the "Tune to…" menu to see
   resonance build up.
 - **Release a mode**: select a mode in the table and click *Release selected mode*. The
@@ -57,6 +58,17 @@ measures the FRF from simulated force and response signals, as in a lab (all bel
   the springs, the dampers, or both together (below).
 - **Slow motion** (0.05× to 2×) for the higher modes, and auto-scaled animation and plots
   so small motions stay visible.
+
+### Plucking a mass
+
+Drag any mass in the animation sideways and let go. While you hold it, the force is
+switched off and time stands still. The other masses take the static shape a slow pull
+gives, with every spring balanced, and a red arrow shows the force your hand needs. Let go
+and the chain vibrates freely from that shape. The static shape is close to the first
+mode, so most of the energy starts in mode 1 (see *Energy: by mode*). Pull on m1 instead and
+more of it goes into the higher modes.
+
+![Holding m2 after an earlier pluck: the static shape, the holding force, and the shares of its energy in each mode](docs/images/pluck.png)
 
 ### Two modal-analysis methods
 
@@ -410,9 +422,10 @@ E = modal_energies(chain, res, x, v)                           # (steps, N), J; 
 sim.energy_added + sim.work - sim.dissipated - sim.stored_energy  # ~1e-15 J: exact balance
 added, work, dissipated = sim.ledger.T                          # the same ledger at each step of the last advance
 
-from vib_tutorial.core import element_forces
+from vib_tutorial.core import element_forces, pluck_shape
 
 spring, damper = element_forces(chain, x, v)                   # (steps, N) tension, N
+sim.set_displacement(pluck_shape(chain, 1, 0.02))              # hold m2 at 20 mm, then let go
 
 from vib_tutorial.core import compare_modes, craig_bampton
 
@@ -445,7 +458,6 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 
 ## Ideas for extension
 
-- Drag a mass with the mouse and let go (an initial-condition "pluck")
 - Frequency sweep (chirp) forcing, and base excitation instead of an applied force
 - Tuned mass damper and vibration absorber presets
 - Save and load parameter presets for classroom exercises
@@ -455,3 +467,7 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 - Substructuring: more than one interface (three or more substructures); the core
   (`craig_bampton`) already accepts several cuts, so only the controls and schematic need
   extending
+- Dark theme: the plots, the animation and the energy bars are drawn in fixed light colours
+  (white backgrounds, dark text and structure), so `gui.make_app()` forces Qt's light colour
+  scheme even on a dark desktop. Give them light and dark palettes that follow the desktop's
+  scheme, and drop the override
