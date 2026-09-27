@@ -235,10 +235,14 @@ def test_substructuring_page(app):
     w.params.rows[1][2].setValue(400.0)
     assert page.model is not None
 
-    # The simulation keeps running behind this page without drawing.
-    w._sim_target = 0.5
+    # The simulation pauses behind this page and resumes on its own.
+    t0 = w.sim.t
+    w._sim_target = t0 + 0.5
     w._tick()
-    assert w.sim.t > 0.1
+    assert w.sim.t == t0
+    w.pages.setCurrentWidget(w.sim_page)
+    w._tick()
+    assert w.sim.t > t0 + 0.1
     w.close()
 
 
