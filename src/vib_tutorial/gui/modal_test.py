@@ -131,8 +131,10 @@ class SignalView(pg.GraphicsLayoutWidget):
         self.ci.layout.setColumnStretchFactor(1, 2)
         self.f_curve = self.force.plot()
         self.f_window = self.force.plot()
+        self.f_fit = self.force.plot()
         self.x_curve = self.response.plot()
         self.x_window = self.response.plot()
+        self.x_fit = self.response.plot()
         self.s_curve = self.spectrum.plot()
         self.s_tip = self.spectrum.plot()
         self.band = pg.LinearRegionItem(movable=False, pen=pg.mkPen(None))
@@ -140,11 +142,11 @@ class SignalView(pg.GraphicsLayoutWidget):
         self.apply_theme()
 
     def apply_theme(self) -> None:
-        """Every curve but the response, whose colour follows the mass shown (set_data)."""
+        """Every curve but the response and the measured force, which set_data styles."""
         dash = QtCore.Qt.PenStyle.DashLine
         for line in self.zero_lines:
             line.setPen(pg.mkPen(colors.faint, width=1))
-        self.f_curve.setPen(pg.mkPen(colors.force, width=1))
+        self.f_fit.setPen(pg.mkPen(colors.force, width=1))
         self.s_curve.setPen(pg.mkPen(colors.force, width=1))
         for curve in (self.f_window, self.x_window):
             curve.setPen(pg.mkPen(colors.grey, width=1, style=dash))
@@ -152,16 +154,26 @@ class SignalView(pg.GraphicsLayoutWidget):
         self.band.setBrush(pg.mkBrush(*colors.band_shade))
 
     def set_data(self, est: Estimate, j: int, settings: MeasurementSettings, stepped: bool) -> None:
-        self.f_curve.setData(est.t, est.f)
-        self.x_curve.setPen(pg.mkPen(colors.mass[j], width=1))
-        self.x_curve.setData(est.t, est.x[:, j])
+        # Block excitations: the samples joined by lines. Stepped sine: the samples as dots
+        # (as few as 2.5 per cycle at the band edge) and the fitted sine through them.
+        for curve, fit, y, y_fit, color in (
+            (self.f_curve, self.f_fit, est.f, None if est.fit is None else est.fit[1], colors.force),
+            (self.x_curve, self.x_fit, est.x[:, j], None if est.fit is None else est.fit[2][:, j], colors.mass[j]),
+        ):
+            if y_fit is None:
+                curve.setData(est.t, y, pen=pg.mkPen(color, width=1), symbol=None)
+                fit.setData([], [])
+            else:
+                curve.setData(est.t, y, pen=None, symbol="o", symbolSize=4, symbolPen=None, symbolBrush=color)
+                fit.setData(est.fit[0], y_fit)
+        self.x_fit.setPen(pg.mkPen(colors.mass[j], width=1))
         self.response.setLabel("left", f"x{j + 1}", units="m")
         for curve, window, signal in ((self.f_window, est.force_window, est.f), (self.x_window, est.response_window, est.x[:, j])):
             if window is None:
                 curve.setData([], [])
             else:
                 curve.setData(est.t, window * float(np.abs(signal).max() or 1.0))
-        self.force.setTitle("Last stepped-sine frequency (fitted)" if stepped else
+        self.force.setTitle(f"{est.freqs[-1]:.3g} Hz: dots as measured · line: fitted sine" if stepped else
                             f"Block {est.count}: signals as measured · dashed: window (scaled)", size="9pt")
         spec = est.force_spectrum
         with np.errstate(divide="ignore"):
@@ -994,7 +1006,10 @@ there is no leakage.</li>
 <li><b>Periodic random / chirp:</b> the same signal every block, after waiting for steady state,
 so both signals are exactly periodic. No leakage.</li>
 <li><b>Stepped sine:</b> one frequency at a time, a sine fitted to each signal. Slowest,
-most accurate, and with the best signal-to-noise ratio.</li>
+most accurate, and with the best signal-to-noise ratio: the fit only keeps what is at the
+drive frequency, so noise falls as 1/√(samples fitted), hundreds or thousands of them at low
+frequencies. Near the band edge there are only 2.5 samples per cycle, which is enough for a
+fit at a known frequency.</li>
 </ul>
 
 <h3>Where to look</h3>
