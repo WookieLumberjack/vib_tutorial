@@ -28,6 +28,7 @@ from .modal_test import ModalTestPage
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, PhasorPanel, TimeHistoryPlot
+from .style import ENERGY_COLORS
 from .substructuring import SubstructuringPage
 
 FRAME_MS = 16  # ~60 fps
@@ -82,6 +83,25 @@ COORDS_TIP = {
     "2 Re(ψη) to x, so its curve is 2 Re(η); a real root's curve is η. These decouple "
     "for <i>any</i> damping: release a complex mode and only its curve moves.</p>",
 }
+ENERGY_COORDS_TIP = (
+    "<p><b>Energy:</b> the energy bars beside the animation as time histories. "
+    "Kinetic energy T, potential energy V and the stored energy T + V; the energy given "
+    "by a release or a parameter edit E<sub>0</sub>, the work done by the force W and "
+    "the energy dissipated by the dampers D, all since the last reset. At every instant</p>"
+    "<p>&nbsp;&nbsp;E<sub>0</sub> + W = T + V + D.</p>"
+    "<p>Release a mode: T and V swap twice per cycle while T + V decays and D rises to "
+    "E<sub>0</sub>. Drive at resonance: W and D climb together once T + V has built up.</p>"
+)
+# Energy curves: (legend, color), in the order of energy_curves().
+ENERGY_CURVES = [
+    ("T", ENERGY_COLORS["kinetic"]),
+    ("V", ENERGY_COLORS["potential"]),
+    ("T + V", ENERGY_COLORS["stored"]),
+    ("E₀", ENERGY_COLORS["added"]),
+    ("W", ENERGY_COLORS["work"]),
+    ("D", ENERGY_COLORS["dissipated"]),
+]
+MIN_ENERGY_SPAN = 1e-9  # J; smaller energies are the float noise of decayed motion
 RELEASE_FIT_TIP = (
     "<p>While <i>Auto-scale animation and plots</i> is on, the plot window is also "
     "fitted to this mode (Simulation \u2192 Fit window cycles).</p>"
@@ -122,8 +142,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.energy = EnergyPanel()
         self.time_plot = TimeHistoryPlot()
         self.coords_combo = QtWidgets.QComboBox()
-        self.coords_combo.addItem("Physical: mass displacements x", False)
-        self.coords_combo.addItem("Modal: one curve per mode", True)
+        self.coords_combo.addItem("Physical: mass displacements x", "physical")
+        self.coords_combo.addItem("Modal: one curve per mode", "modal")
+        self.coords_combo.addItem("Energy: T, V, work and dissipation", "energy")
         coords_label = QtWidgets.QLabel("Plot coordinates:")
         self._modal_map = np.zeros((0, 0))  # states -> modal coordinates, set with the modes
         plot_box = QtWidgets.QWidget()
@@ -303,7 +324,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.controls.set_modes(self.entries)
         self.release_button.setToolTip(RELEASE_TIP[self.method] + RELEASE_FIT_TIP)
         for w in self._coords_widgets:
-            w.setToolTip(COORDS_TIP[self.method])
+            w.setToolTip(COORDS_TIP[self.method] + ENERGY_COORDS_TIP)
         self._modal_map = modal_coordinate_map(self.sim.system, self.modal, complex_modes=state_space)
         self._set_plot_curves()
         self.modal_note.setText(self._modal_note())
@@ -354,10 +375,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @property
     def modal_view(self) -> bool:
-        return bool(self.coords_combo.currentData())
+        return self.coords_combo.currentData() == "modal"
+
+    @property
+    def energy_view(self) -> bool:
+        return self.coords_combo.currentData() == "energy"
 
     def _set_plot_curves(self) -> None:
-        """Mass displacements, or one modal coordinate per mode of the selected method."""
+        """Mass displacements, one modal coordinate per mode of the selected method, or energies."""
+        if self.energy_view:
+            self.time_plot.set_curves("Energy", ENERGY_CURVES, units="J", min_span=MIN_ENERGY_SPAN)
+            return
         if not self.modal_view:
             self.time_plot.set_dof(self.sim.system.n)
             return
@@ -400,12 +428,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.controls.auto_scale.isChecked() and entry.freq_hz > 0:
             self.controls.fit_to_mode(entry.key)
 
-    def _update_energy(self, xs: np.ndarray, vs: np.ndarray) -> None:
-        """Show the energy now; recent samples xs, vs set the bar scale, like the animation's."""
+    def _update_energy(self, es: np.ndarray) -> None:
+        """Show the energy now; the stored energy in recent samples es sets the bar scale."""
         system, x, v = self.sim.system, self.sim.displacement, self.sim.velocity
-        if self.controls.auto_scale.isChecked() and xs.size:
-            stored = kinetic_energy(system, vs).sum(axis=1) + potential_energy(system, xs).sum(axis=1)
-            self._energy_scale = float(stored.max())
+        if self.controls.auto_scale.isChecked() and es.size:
+            self._energy_scale = float((es[:, 0] + es[:, 1]).max())
         self.energy.bars.set_state(
             EnergyState(
                 kinetic=float(kinetic_energy(system, v).sum()),
@@ -438,24 +465,34 @@ class MainWindow(QtWidgets.QMainWindow):
             # If the simulator can't keep up (very stiff system), drop the backlog.
             self._sim_target = min(self._sim_target, self.sim.t + 0.25 * speed + 0.05)
             ts, xs, vs, fs = self.sim.advance(self._sim_target - self.sim.t)
-            self.history.extend(ts, xs, vs, fs)
+            system = self.sim.system
+            kinetic = kinetic_energy(system, vs).sum(axis=1)
+            potential = potential_energy(system, xs).sum(axis=1)
+            self.history.extend(ts, xs, vs, fs, np.column_stack([kinetic, potential, self.sim.ledger]))
 
         # The simulation keeps running behind the other pages; skip drawing it.
         if self.pages.currentWidget() is not self.sim_page:
             return
         window = self.controls.window.value()
-        t, x, v, f = self.history.window(window)
+        t, x, v, f, e = self.history.window(window)
         peak = float(np.abs(x[-min(len(x), 20_000) :]).max()) if x.size else 0.0
         s = self.force.settings
         self.chain.update_state(self.sim.displacement, peak, self.force.value(), s.target, abs(s.amplitude))
-        if self.modal_view:
+        if self.energy_view:
+            y = energy_curves(e)
+        elif self.modal_view:
             n = self.sim.system.n
             y = x @ self._modal_map[:n] + v @ self._modal_map[n:]
         else:
             y = x
         self.time_plot.update_data(t, y, f, window)
         if self.energy.isVisible():
-            self._update_energy(x[-min(len(x), 20_000) :], v[-min(len(v), 20_000) :])
+            self._update_energy(e[-min(len(e), 20_000) :])
         if self.animate_modes.isChecked():
             self._animate_modes(2 * math.pi * MODE_ANIMATION_HZ * now)
         self.controls.time_label.setText(f"{self.sim.t:8.3f} s   (step {self.sim.step_size() * 1e3:.3g} ms)")
+
+
+def energy_curves(e: np.ndarray) -> np.ndarray:
+    """History energy columns (T, V, E0, W, D) -> the ENERGY_CURVES (T, V, T + V, E0, W, D)."""
+    return np.column_stack([e[:, :2], e[:, 0] + e[:, 1], e[:, 2:]])

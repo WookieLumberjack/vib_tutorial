@@ -95,6 +95,7 @@ class Simulator:
         self.work = 0.0  # J, done by the applied force since reset
         self.dissipated = 0.0  # J, taken out by the dampers since reset
         self.energy_added = 0.0  # J, jumps in stored energy from set_state and parameter edits
+        self.ledger = np.empty((0, 3))  # (added, work, dissipated) at each sample of the last advance
 
     @property
     def stored_energy(self) -> float:
@@ -195,7 +196,9 @@ class Simulator:
         """Advance by approximately `duration` seconds of simulated time.
 
         Returns per-step samples (t, x, v, force) with shapes (k,), (k, n),
-        (k, n), (k,), which the GUI appends to its history buffers.
+        (k, n), (k,), which the GUI appends to its history buffers. The
+        energy ledger at each of those samples is left in ``self.ledger``,
+        shape (k, 3): columns energy_added, work, dissipated.
         """
         h = self.step_size()
         steps = min(MAX_STEPS_PER_ADVANCE, max(0, int(round(duration / h))))
@@ -203,6 +206,7 @@ class Simulator:
         ts = np.empty(steps)
         zs = np.empty((steps, 2 * n))
         fs = np.empty(steps)
+        self.ledger = np.empty((steps, 3))
         if steps == 0:
             return ts, zs[:, :n], zs[:, n:], fs
 
@@ -229,6 +233,8 @@ class Simulator:
         f0s = np.concatenate([[f_start], fs[:-1]])
         w = np.column_stack([z0s, f0s, (fs - f0s) / h])
         Wd, Ww = self._energy_forms(h, j)
-        self.dissipated += float(np.einsum("ki,ij,kj->", w, Wd, w))
-        self.work += float(np.einsum("ki,ij,kj->", w, Ww, w))
+        dissipated = self.dissipated + np.cumsum(np.einsum("ki,ij,kj->k", w, Wd, w))
+        work = self.work + np.cumsum(np.einsum("ki,ij,kj->k", w, Ww, w))
+        self.dissipated, self.work = float(dissipated[-1]), float(work[-1])
+        self.ledger = np.column_stack([np.full(steps, self.energy_added), work, dissipated])
         return ts, zs[:, :n], zs[:, n:], fs

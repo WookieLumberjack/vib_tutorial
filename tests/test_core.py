@@ -581,6 +581,23 @@ def test_dissipation_matches_quadrature():
     assert sim.work == pytest.approx(np.trapezoid(f * v[:, 2], dx=dt), rel=1e-4)
 
 
+def test_ledger_balances_at_every_sample():
+    from vib_tutorial.core import kinetic_energy, potential_energy
+
+    s = ChainSystem.uniform(3, damping=5.0)
+    force = ForceController(ForceSettings(target=2, kind=ForceKind.HARMONIC, amplitude=5.0, freq_hz=1.5))
+    sim = Simulator(s, force)
+    sim.set_displacement(np.array([0.01, 0.0, -0.01]))
+    force.switch_on()
+    for _ in range(2):  # the second call continues the running totals
+        _, xs, vs, _ = sim.advance(1.0)
+        added, work, dissipated = sim.ledger.T
+        stored = kinetic_energy(s, vs).sum(axis=1) + potential_energy(s, xs).sum(axis=1)
+        np.testing.assert_allclose(added + work - dissipated, stored, rtol=0, atol=1e-12)
+    assert (work[-1], dissipated[-1]) == (sim.work, sim.dissipated)
+    assert sim.advance(0.0)[0].size == 0 and sim.ledger.shape == (0, 3)
+
+
 def test_energy_splits_by_element_and_by_mode():
     from vib_tutorial.core import kinetic_energy, modal_energies, potential_energy, stored_energy
 
