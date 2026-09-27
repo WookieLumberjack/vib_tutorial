@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..core import ModalResult
-from .style import MODE_COLORS
+from .style import colors
 
 
 class Method(enum.Enum):
@@ -45,7 +45,7 @@ def mode_entries(result: ModalResult, method: Method) -> list[ModeEntry]:
                 shape=m.shape.astype(complex),
                 spin=1,
                 freq_hz=m.fn_hz,
-                color=MODE_COLORS[r % len(MODE_COLORS)],
+                color=colors.mode[r % len(colors.mode)],
                 legend=f"Mode {m.index}: {m.fn_hz:.3g} Hz",
                 state0=np.concatenate([m.shape, np.zeros_like(m.shape)]),
             )
@@ -68,7 +68,7 @@ def mode_entries(result: ModalResult, method: Method) -> list[ModeEntry]:
                 shape=m.shape,
                 spin=int(np.sign(m.eigenvalue.imag)) if m.is_oscillatory else 0,
                 freq_hz=m.fd_hz if m.is_oscillatory else 0.0,
-                color=MODE_COLORS[group % len(MODE_COLORS)],
+                color=colors.mode[group % len(colors.mode)],
                 legend=legend,
                 # x(t) = Re(psi e^{lambda t}) needs x0 = Re(psi) and v0 = Re(lambda psi).
                 # Re is the same for psi and its conjugate, so both release the same motion.

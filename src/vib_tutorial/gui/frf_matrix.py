@@ -18,15 +18,12 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..core import ChainSystem, ModalResult, ModalTerm, frf_matrix, modal_analysis, modal_frf_terms
 from .plots import frequency_grid
-from .style import FORCE_COLOR, MASS_COLORS, MAX_DOF, MODE_COLORS
+from .style import MAX_DOF, colors
+from .theming import mute
 
+# Colours: the full solution in colors.strong; the sum of the modal terms, the
+# selected cells and the worst band in colors.force.
 FREQ_POINTS = 600  # per curve; the grid draws up to N^2 (2 + modes) curves
-FULL_COLOR = "#000000"
-SUM_COLOR = FORCE_COLOR
-ROOT_COLORS = ["#888888", "#b0b0b0", "#606060"]  # non-oscillatory (overdamped) roots
-SELECT_COLOR = "#c1121f"
-CELL_BORDER = "#cccccc"
-DIAGONAL_TINT = "#f1f3f8"
 WORST_FRACTION = 0.5  # the shaded band is where the difference is at least this share of its largest
 
 
@@ -129,8 +126,8 @@ def log_ticks(lo: float, hi: float, mantissas: tuple[int, ...]) -> list[list[tup
 
 def term_color(term: ModalTerm, roots_seen: int) -> str:
     if term.mode is not None:
-        return MODE_COLORS[(term.mode - 1) % len(MODE_COLORS)]
-    return ROOT_COLORS[roots_seen % len(ROOT_COLORS)]
+        return colors.mode[(term.mode - 1) % len(colors.mode)]
+    return colors.roots[roots_seen % len(colors.roots)]
 
 
 def swatch(color: str) -> QtGui.QIcon:
@@ -156,9 +153,9 @@ class FrfGrid(pg.GraphicsLayoutWidget):
         self.corner: pg.LabelItem | None = None
         self.scene().sigMouseClicked.connect(self._on_click)
 
-    def build(self, n: int, n_terms: int) -> None:
-        """Lay out the grid for n masses and n_terms modal terms per cell."""
-        if n == self.n and self.terms and len(self.terms[0][0]) == n_terms:
+    def build(self, n: int, n_terms: int, force: bool = False) -> None:
+        """Lay out the grid for n masses and n_terms modal terms per cell (again if `force`)."""
+        if not force and n == self.n and self.terms and len(self.terms[0][0]) == n_terms:
             return
         self.clear()
         self.n = n
@@ -167,11 +164,11 @@ class FrfGrid(pg.GraphicsLayoutWidget):
         self.corner = pg.LabelItem("", size="8pt")
         self.addItem(self.corner, row=0, col=0, colspan=2)
         for k in range(n):
-            self.addItem(pg.LabelItem(f"<b>F at m{k + 1}</b>", size="9pt", color=MASS_COLORS[k]), row=0, col=k + 2)
+            self.addItem(pg.LabelItem(f"<b>F at m{k + 1}</b>", size="9pt", color=colors.mass[k]), row=0, col=k + 2)
         self.cells, self.full, self.total, self.terms, self.left_axes = [], [], [], [], []
-        thin = pg.mkPen(CELL_BORDER, width=1)
+        thin = pg.mkPen(colors.cell_border, width=1)
         for j in range(n):
-            self.addItem(pg.LabelItem(f"<b>x{j + 1}</b>", size="9pt", color=MASS_COLORS[j]), row=j + 1, col=0)
+            self.addItem(pg.LabelItem(f"<b>x{j + 1}</b>", size="9pt", color=colors.mass[j]), row=j + 1, col=0)
             cells, full, total, terms = [], [], [], []
             for k in range(n):
                 p = pg.PlotItem()
@@ -184,15 +181,15 @@ class FrfGrid(pg.GraphicsLayoutWidget):
                 vb = p.getViewBox()
                 vb.setBorder(thin)
                 if j == k:
-                    vb.setBackgroundColor(DIAGONAL_TINT)
+                    vb.setBackgroundColor(colors.diagonal_tint)
                 if cells or self.cells:
                     p.setXLink(self.cells[0][0] if self.cells else cells[0])
                     p.setYLink(self.cells[0][0] if self.cells else cells[0])
                 self.addItem(p, row=j + 1, col=k + 2)
                 # 1 px pens: up to a few hundred curves are drawn at once.
-                terms.append([p.plot(pen=pg.mkPen("#999", width=1)) for _ in range(n_terms)])
-                full.append(p.plot(pen=pg.mkPen(FULL_COLOR, width=1)))
-                total.append(p.plot(pen=pg.mkPen(SUM_COLOR, width=1, style=QtCore.Qt.PenStyle.DashLine)))
+                terms.append([p.plot(pen=pg.mkPen(colors.grey, width=1)) for _ in range(n_terms)])
+                full.append(p.plot(pen=pg.mkPen(colors.strong, width=1)))
+                total.append(p.plot(pen=pg.mkPen(colors.force, width=1, style=QtCore.Qt.PenStyle.DashLine)))
                 cells.append(p)
             self.cells.append(cells)
             self.full.append(full)
@@ -248,8 +245,8 @@ class FrfGrid(pg.GraphicsLayoutWidget):
         self.corner.setText(f"<i>{q.axis_label}</i>", size="8pt")
 
     def set_selection(self, output: int, inputs: set[int]) -> None:
-        thin = pg.mkPen(CELL_BORDER, width=1)
-        bold = pg.mkPen(SELECT_COLOR, width=3)
+        thin = pg.mkPen(colors.cell_border, width=1)
+        bold = pg.mkPen(colors.force, width=3)
         for j, row in enumerate(self.cells):
             for k, p in enumerate(row):
                 p.getViewBox().setBorder(bold if j == output and k in inputs else thin)
@@ -319,7 +316,7 @@ class FrfDetail(QtWidgets.QWidget):
                 ))
             if worst is not None:
                 lo_f, hi_f, peak_f = worst
-                brush = pg.mkColor(SELECT_COLOR)
+                brush = pg.mkColor(colors.force)
                 brush.setAlpha(40)
                 band = pg.LinearRegionItem(
                     (math.log10(lo_f), math.log10(hi_f)), movable=False, brush=brush,
@@ -329,12 +326,12 @@ class FrfDetail(QtWidgets.QWidget):
                 p.addItem(band)
                 p.addItem(pg.InfiniteLine(
                     pos=math.log10(peak_f), angle=90,
-                    pen=pg.mkPen(SELECT_COLOR, width=1.5, style=QtCore.Qt.PenStyle.DashLine),
+                    pen=pg.mkPen(colors.force, width=1.5, style=QtCore.Qt.PenStyle.DashLine),
                 ))
             for name, color, values in terms:
                 p.plot(f, part(values, pq), pen=pg.mkPen(color, width=1.5), name=name, connect="finite")
-            p.plot(f, part(full, pq), pen=pg.mkPen(FULL_COLOR, width=2.5), name="Full solution", connect="finite")
-            p.plot(f, part(total, pq), pen=pg.mkPen(SUM_COLOR, width=2, style=QtCore.Qt.PenStyle.DashLine),
+            p.plot(f, part(full, pq), pen=pg.mkPen(colors.strong, width=2.5), name="Full solution", connect="finite")
+            p.plot(f, part(total, pq), pen=pg.mkPen(colors.force, width=2, style=QtCore.Qt.PenStyle.DashLine),
                    name="Sum of the terms shown", connect="finite")
             lo, hi = y_range(pq, [part(full, pq), part(total, pq)])
             p.setYRange(lo, hi, padding=0)
@@ -366,6 +363,7 @@ class FrfMatrixPage(QtWidgets.QWidget):
         self.inputs: set[int] = {0}
         self._dirty = False
         self._unchecked: set[str] = set()  # remembered by label across recomputes
+        self._rebuild_grid = False  # the theme changed: build the grid again
 
         # --- controls
         box = QtWidgets.QGroupBox("FRF matrix H(ω) = (K − ω²M + iωC)⁻¹")
@@ -402,7 +400,7 @@ class FrfMatrixPage(QtWidgets.QWidget):
         link = QtWidgets.QLabel(
             "Masses, springs and dampers are edited on the <a href='#sim'>Simulation page</a>."
         )
-        link.setStyleSheet("color: #666;")
+        mute(link)
         link.setWordWrap(True)
         link.linkActivated.connect(lambda _: self.edit_parameters.emit())
         form.addRow(link)
@@ -425,7 +423,7 @@ class FrfMatrixPage(QtWidgets.QWidget):
         mv.addWidget(self.show_terms)
         self.mode_note = QtWidgets.QLabel()
         self.mode_note.setWordWrap(True)
-        self.mode_note.setStyleSheet("color: #666;")
+        mute(self.mode_note)
         mv.addWidget(self.mode_note)
         self.mode_checks: list[QtWidgets.QCheckBox] = []
 
@@ -447,7 +445,7 @@ class FrfMatrixPage(QtWidgets.QWidget):
             "the sum along the row."
         )
         io_note.setWordWrap(True)
-        io_note.setStyleSheet("color: #666;")
+        mute(io_note)
         iv.addWidget(io_note)
 
         for combo in (self.quantity, self.expansion, self.output_combo):
@@ -492,6 +490,16 @@ class FrfMatrixPage(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
+
+    def apply_theme(self) -> None:
+        """Swatches now; the grid, its curves and the large plot are redrawn when the page shows."""
+        for k, c in enumerate(self.input_checks):
+            c.setIcon(swatch(colors.mass[k]))
+        self._rebuild_grid = True
+        if self.system is not None:
+            self._dirty = True
+            if self.isVisible():
+                self.refresh()
 
     # ------------------------------------------------------------ inputs
     def set_system(self, system: ChainSystem, result: ModalResult | None = None) -> None:
@@ -574,7 +582,7 @@ class FrfMatrixPage(QtWidgets.QWidget):
         self.input_checks = []
         for k in range(n):
             c = QtWidgets.QCheckBox(f"m{k + 1}")
-            c.setIcon(swatch(MASS_COLORS[k]))
+            c.setIcon(swatch(colors.mass[k]))
             c.toggled.connect(self._on_input_toggled)
             self.input_grid.addWidget(c, k // 4, k % 4)
             self.input_checks.append(c)
@@ -614,7 +622,8 @@ class FrfMatrixPage(QtWidgets.QWidget):
             self.term_colors.append(term_color(t, roots))
             roots += t.mode is None
         self._build_mode_checks()
-        self.grid.build(self.system.n, len(terms))
+        self.grid.build(self.system.n, len(terms), force=self._rebuild_grid)
+        self._rebuild_grid = False
         self.redraw()
 
     def _build_mode_checks(self) -> None:
@@ -663,7 +672,7 @@ class FrfMatrixPage(QtWidgets.QWidget):
                 if on
             ]
         else:
-            parts = [(f"H{j + 1}{k + 1}: force at m{k + 1}", MASS_COLORS[k], total[:, j, k]) for k in inputs]
+            parts = [(f"H{j + 1}{k + 1}: force at m{k + 1}", colors.mass[k], total[:, j, k]) for k in inputs]
         lines = [(t.fn_hz, color) for t, color in zip(self.terms, self.term_colors) if t.fn_hz >= self.freqs[0]]
         worst = worst_band(self.freqs, full, partial) if sel.any() else None
         header = self._detail_header(j, inputs, sel, full, partial, worst)
@@ -674,11 +683,15 @@ class FrfMatrixPage(QtWidgets.QWidget):
         used = int(sel.sum())
         return (
             f"<b>All {n}×{n} = {n * n} receptances H<sub>jk</sub> = x<sub>j</sub>/F<sub>k</sub></b> "
-            "(row: response, column: force). Black: full solution; "
-            f"<span style='color:{SUM_COLOR}'>dashed red: sum of the {used} of {len(sel)} modal "
+            f"(row: response, column: force). <span style='color:{colors.strong}'>{self._strong_name()}: "
+            f"full solution</span>; <span style='color:{colors.force}'>dashed red: sum of the {used} of {len(sel)} modal "
             "terms ticked</span>. Shaded: driving point (j = k). The matrix is symmetric, "
             "H<sub>jk</sub> = H<sub>kj</sub>."
         )
+
+    @staticmethod
+    def _strong_name() -> str:
+        return "White" if colors.dark else "Black"
 
     def _detail_header(
         self,
@@ -694,7 +707,7 @@ class FrfMatrixPage(QtWidgets.QWidget):
             kind = "driving point" if j == k else "transfer"
             title = (f"<b>H<sub>{j + 1}{k + 1}</sub> = x<sub>{j + 1}</sub> / F<sub>{k + 1}</sub></b> "
                      f"({kind}): response of m{j + 1} to a force at m{k + 1}.")
-            parts = (f"Coloured: each ticked mode's term. <span style='color:{SUM_COLOR}'>Dashed red</span> = "
+            parts = (f"Coloured: each ticked mode's term. <span style='color:{colors.force}'>Dashed red</span> = "
                      f"Σ over the ticked modes r of mode r's ({j + 1},{k + 1}) entry only; the other cells "
                      "are responses to other forces.")
             zeros = (j if j <= k else k) + (self.system.n - 1 - max(j, k))
@@ -707,22 +720,22 @@ class FrfMatrixPage(QtWidgets.QWidget):
             title = (f"<b>x<sub>{j + 1}</sub> for unit in-phase forces at {names}</b> = {terms}.")
             cols = ", ".join(f"({j + 1},{k + 1})" for k in inputs)
             parts = ("Coloured: each force's term (from the ticked modes). "
-                     f"<span style='color:{SUM_COLOR}'>Dashed red</span> = Σ over these forces and the "
+                     f"<span style='color:{colors.force}'>Dashed red</span> = Σ over these forces and the "
                      f"ticked modes r of mode r's entries {cols}: the sum along row {j + 1}.")
         err = float(np.abs(partial - full).max() / max(np.abs(full).max(), 1e-300))
-        color = "#2a7d2a" if err < 1e-6 else "#b36b00" if err < 0.05 else SELECT_COLOR
+        color = colors.good if err < 1e-6 else colors.fair if err < 0.05 else colors.poor
         amount = "none (equal to rounding error)" if err < 1e-9 else f"{100 * err:.3g}%"
         verdict = (f"Largest difference from the full solution: <b style='color:{color}'>"
                    f"{amount}</b> of the peak")
         if worst is not None:
-            verdict += (f", at <b>{worst[2]:.3g} Hz</b> (dashed red line). <span style='color:{SELECT_COLOR}'>"
+            verdict += (f", at <b>{worst[2]:.3g} Hz</b> (dashed red line). <span style='color:{colors.force}'>"
                         f"Shaded: {worst[0]:.3g}–{worst[1]:.3g} Hz</span>, where the difference is at "
                         f"least {WORST_FRACTION:.0%} of that.")
         else:
             verdict += "."
         if int(sel.sum()) == 0:
             verdict = "No modes ticked: the sum is zero."
-        note = f"<br><span style='color:#666'>{self.expansion_note}</span>" if self.expansion_note else ""
+        note = f"<br><span style='color:{colors.muted}'>{self.expansion_note}</span>" if self.expansion_note else ""
         return f"{title} {parts}<br>{verdict}<br>{self._static_text(j, inputs, sel)}{note}"
 
     def _static_text(self, j: int, inputs: list[int], sel: np.ndarray) -> str:
@@ -734,17 +747,17 @@ class FrfMatrixPage(QtWidgets.QWidget):
         each = self.term_static[:, j, inputs].sum(axis=1)
         partial = float(each[sel].sum())
         err = (partial - full) / full if full else 0.0
-        color = "#2a7d2a" if abs(err) < 1e-6 else "#b36b00" if abs(err) < 0.05 else SELECT_COLOR
+        color = colors.good if abs(err) < 1e-6 else colors.fair if abs(err) < 0.05 else colors.poor
         amount = "0% (exact)" if abs(err) < 1e-9 else f"{100 * err:+.3g}%"
         shares = []
         for t, c, value, on in zip(self.terms, self.term_colors, each, sel):
             share = f"{100 * value / full:.3g}%" if full and np.isfinite(value) else "—"
-            style = "" if on else " style='color:#999'"
+            style = "" if on else f" style='color:{colors.grey}'"
             shares.append(f"<span style='color:{c}'>■</span><span{style}>{t.label} {share}</span>")
         return (
             f"<b>Static compliance</b> (ω = 0): K<sup>−1</sup> gives {full:.4g} m/N; the ticked "
             f"modes give {partial:.4g} m/N, error <b style='color:{color}'>{amount}</b>. "
-            f"<span style='color:#666'>Each mode's share (grey: not ticked):</span> {', '.join(shares)}."
+            f"<span style='color:{colors.muted}'>Each mode's share (grey: not ticked):</span> {', '.join(shares)}."
         )
 
 

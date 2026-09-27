@@ -5,18 +5,21 @@ from __future__ import annotations
 import sys
 
 
-def make_app():
-    """Create (or reuse) the QApplication, set up for the app's light colours."""
-    import pyqtgraph as pg
-    from PySide6 import QtCore, QtWidgets
+def make_app(theme: str | None = None):
+    """Create (or reuse) the QApplication in a colour theme (default: the one last picked).
 
-    pg.setConfigOptions(antialias=True, background="w", foreground="k")
+    `theme` is a name from theming.names(): "System" follows the desktop's light
+    or dark scheme.
+    """
+    import pyqtgraph as pg
+    from PySide6 import QtWidgets
+
+    from . import theming
+
+    pg.setConfigOptions(antialias=True)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Vibration Tutorial")
-    # The plots, animation and energy bars are drawn in fixed light colours, so
-    # keep the widgets light on a dark desktop too (dark theme: see the README's
-    # ideas for extension).
-    app.styleHints().setColorScheme(QtCore.Qt.ColorScheme.Light)
+    theming.apply(theme or theming.saved_name())
     return app
 
 

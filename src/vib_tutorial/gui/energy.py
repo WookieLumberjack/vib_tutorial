@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .style import ENERGY_COLORS, FORCE_COLOR, MODE_COLORS
+from .style import colors
 
 # Below this the motion has decayed to float noise, so shares are meaningless
 # (a 400 N/m spring stretched 1e-7 m holds 2e-12 J).
@@ -92,7 +92,7 @@ class EnergyBars(QtWidgets.QWidget):
     # ------------------------------------------------------------------ paint
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
         p = QtGui.QPainter(self)
-        p.fillRect(self.rect(), QtGui.QColor("white"))
+        p.fillRect(self.rect(), QtGui.QColor(colors.background))
         font = p.font()
         font.setPointSizeF(font.pointSizeF() * 0.85)
         p.setFont(font)
@@ -102,7 +102,7 @@ class EnergyBars(QtWidgets.QWidget):
         else:
             left, right = _split(area, 0.55)
             self._paint_stored(p, left)
-            p.setPen(QtGui.QPen(QtGui.QColor("#ccc"), 1))
+            p.setPen(QtGui.QPen(QtGui.QColor(colors.faint), 1))
             p.drawLine(QtCore.QLineF(right.left() - 4, area.top(), right.left() - 4, area.bottom()))
             self._paint_ledger(p, right.adjusted(4, 0, 0, 0))
         p.end()
@@ -111,12 +111,12 @@ class EnergyBars(QtWidgets.QWidget):
         return group.adjusted(0, self.CAPTION, 0, -self.LABEL)
 
     def _caption(self, p: QtGui.QPainter, group: QtCore.QRectF, text: str) -> None:
-        p.setPen(QtGui.QColor("#333"))
+        p.setPen(QtGui.QColor(colors.foreground))
         rect = QtCore.QRectF(group.left(), group.top(), group.width(), self.CAPTION)
         p.drawText(rect, QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop, text)
 
     def _label(self, p: QtGui.QPainter, x: float, w: float, bars: QtCore.QRectF, lines: str) -> None:
-        p.setPen(QtGui.QColor("#333"))
+        p.setPen(QtGui.QColor(colors.foreground))
         rect = QtCore.QRectF(x - 20, bars.bottom() + 2, w + 40, self.LABEL)
         p.drawText(rect, QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignTop, lines)
 
@@ -125,10 +125,11 @@ class EnergyBars(QtWidgets.QWidget):
         self._caption(p, group, f"Stored now: {fmt_energy(s.stored)}")
         bars = self._bars_rect(group)
         scale = self._scale
+        c = colors.energy_colors
         cols = [
-            ("T", [(s.kinetic, ENERGY_COLORS["kinetic"])], s.kinetic),
-            ("V", [(s.potential, ENERGY_COLORS["potential"])], s.potential),
-            ("T + V", [(s.kinetic, ENERGY_COLORS["kinetic"]), (s.potential, ENERGY_COLORS["potential"])], s.stored),
+            ("T", [(s.kinetic, c["kinetic"])], s.kinetic),
+            ("V", [(s.potential, c["potential"])], s.potential),
+            ("T + V", [(s.kinetic, c["kinetic"]), (s.potential, c["potential"])], s.stored),
         ]
         for (name, parts, total), (x, w) in zip(cols, _slots(bars, len(cols)), strict=True):
             _stack(p, bars, x, w, parts, scale)
@@ -141,11 +142,12 @@ class EnergyBars(QtWidgets.QWidget):
         bars = self._bars_rect(group)
         # Energy in = energy out. A negative term (a force taking energy out, or a
         # softer spring after an edit) goes to the other column as a positive one.
+        c = colors.energy_colors
         terms = [
-            (s.added, ENERGY_COLORS["added"], True),
-            (s.work, ENERGY_COLORS["work"], True),
-            (s.stored, ENERGY_COLORS["stored"], False),
-            (s.dissipated, ENERGY_COLORS["dissipated"], False),
+            (s.added, c["added"], True),
+            (s.work, c["work"], True),
+            (s.stored, c["stored"], False),
+            (s.dissipated, c["dissipated"], False),
         ]
         cols: dict[bool, list[tuple[float, str]]] = {True: [], False: []}
         for value, color, is_in in terms:
@@ -166,14 +168,14 @@ class EnergyBars(QtWidgets.QWidget):
             total = s.stored
             self._caption(p, group, f"Share of the stored energy ({fmt_energy(total)}) in each mode")
         bars = self._bars_rect(group)
-        p.setPen(QtGui.QPen(QtGui.QColor("#e3e3e3"), 1))
+        p.setPen(QtGui.QPen(QtGui.QColor(colors.faint), 1, QtCore.Qt.PenStyle.DotLine))
         for frac in (0.25, 0.5, 0.75, 1.0):
             y = bars.bottom() - frac * bars.height()
             p.drawLine(QtCore.QLineF(bars.left(), y, bars.right(), y))
         show = total > MIN_SHARE_ENERGY
         for r, (x, w) in enumerate(_slots(bars, s.modal.size)):
             share = float(s.modal[r]) / total if show else 0.0
-            _stack(p, bars, x, w, [(share, MODE_COLORS[r % len(MODE_COLORS)])], 1.0)
+            _stack(p, bars, x, w, [(share, colors.mode[r % len(colors.mode)])], 1.0)
             self._label(p, x, w, bars, f"Mode {r + 1}\n{100 * share:.0f}%" if show else f"Mode {r + 1}")
         _axis(p, bars)
 
@@ -205,7 +207,7 @@ def _stack(p: QtGui.QPainter, bars: QtCore.QRectF, x: float, w: float, parts, sc
 
 
 def _axis(p: QtGui.QPainter, bars: QtCore.QRectF) -> None:
-    p.setPen(QtGui.QPen(QtGui.QColor("#999"), 1))
+    p.setPen(QtGui.QPen(QtGui.QColor(colors.grey), 1))
     p.drawLine(QtCore.QLineF(bars.left(), bars.bottom(), bars.right(), bars.bottom()))
 
 
@@ -238,16 +240,21 @@ class EnergyPanel(QtWidgets.QWidget):
         for w in (self.view, self.bars, self.legend):
             w.setToolTip(tip)
         self.legend.setVisible(not self.by_mode)
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """The legend's swatches; the bars take the current colours when painted."""
+        e = colors.energy_colors
         self.legend.setText(
             " ".join(
                 f"<span style='color:{c}'>■</span>&nbsp;{name.replace(' ', '&nbsp;')}"
                 for name, c in (
-                    ("kinetic T", ENERGY_COLORS["kinetic"]),
-                    ("potential V", ENERGY_COLORS["potential"]),
-                    ("stored", ENERGY_COLORS["stored"]),
-                    ("release or edit", ENERGY_COLORS["added"]),
-                    ("work by force or ground", FORCE_COLOR),
-                    ("dissipated", ENERGY_COLORS["dissipated"]),
+                    ("kinetic T", e["kinetic"]),
+                    ("potential V", e["potential"]),
+                    ("stored", e["stored"]),
+                    ("release or edit", e["added"]),
+                    ("work by force or ground", e["work"]),
+                    ("dissipated", e["dissipated"]),
                 )
             )
         )

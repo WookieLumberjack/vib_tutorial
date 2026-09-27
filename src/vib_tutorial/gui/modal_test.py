@@ -46,17 +46,15 @@ from ..core.identification import (
     peak_picking,
 )
 from ..core.measurement import AA_CUTOFF
-from .modal_extraction import EXTRACTION_THEORY_HTML, FIT_COLOR, ExtractionControls, ResultsView, StabilizationPlot
+from .modal_extraction import EXTRACTION_THEORY_HTML, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
-from .style import FORCE_COLOR, MASS_COLORS, MAX_DOF, MODE_COLORS
+from .style import MAX_DOF, colors
+from .theming import mute
 
 FRAME_MS = 30
 STEP_BUDGET_MS = 25  # measuring per frame, so the page stays responsive
 BLOCK_SIZES = [256, 512, 1024, 2048, 4096, 8192]
 OVERLAPS = [0.0, 0.5, 0.75]
-EXACT_COLOR = "#000000"
-WINDOW_COLOR = "#888888"
-BAND_SHADE = (0, 0, 0, 18)
 
 # The window each excitation is normally measured with; picked when the excitation changes.
 RECOMMENDED_WINDOW = {
@@ -126,23 +124,36 @@ class SignalView(pg.GraphicsLayoutWidget):
         self.response = self.addPlot(row=1, col=0)
         self.response.setLabel("bottom", "Time in block", units="s")
         self.response.setXLink(self.force)
-        for p in (self.force, self.response):
-            p.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#bbb", width=1)))
+        self.zero_lines = [pg.InfiniteLine(pos=0, angle=0) for _ in range(2)]
+        for p, line in zip((self.force, self.response), self.zero_lines):
+            p.addItem(line)
         self.ci.layout.setColumnStretchFactor(0, 3)
         self.ci.layout.setColumnStretchFactor(1, 2)
-        dash = QtCore.Qt.PenStyle.DashLine
-        self.f_curve = self.force.plot(pen=pg.mkPen(FORCE_COLOR, width=1))
-        self.f_window = self.force.plot(pen=pg.mkPen(WINDOW_COLOR, width=1, style=dash))
-        self.x_curve = self.response.plot(pen=pg.mkPen(MASS_COLORS[0], width=1))
-        self.x_window = self.response.plot(pen=pg.mkPen(WINDOW_COLOR, width=1, style=dash))
-        self.s_curve = self.spectrum.plot(pen=pg.mkPen(FORCE_COLOR, width=1))
-        self.s_tip = self.spectrum.plot(pen=pg.mkPen(EXACT_COLOR, width=1, style=dash))
-        self.band = pg.LinearRegionItem(movable=False, brush=pg.mkBrush(*BAND_SHADE), pen=pg.mkPen(None))
+        self.f_curve = self.force.plot()
+        self.f_window = self.force.plot()
+        self.x_curve = self.response.plot()
+        self.x_window = self.response.plot()
+        self.s_curve = self.spectrum.plot()
+        self.s_tip = self.spectrum.plot()
+        self.band = pg.LinearRegionItem(movable=False, pen=pg.mkPen(None))
         self.spectrum.addItem(self.band)
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """Every curve but the response, whose colour follows the mass shown (set_data)."""
+        dash = QtCore.Qt.PenStyle.DashLine
+        for line in self.zero_lines:
+            line.setPen(pg.mkPen(colors.faint, width=1))
+        self.f_curve.setPen(pg.mkPen(colors.force, width=1))
+        self.s_curve.setPen(pg.mkPen(colors.force, width=1))
+        for curve in (self.f_window, self.x_window):
+            curve.setPen(pg.mkPen(colors.grey, width=1, style=dash))
+        self.s_tip.setPen(pg.mkPen(colors.strong, width=1, style=dash))
+        self.band.setBrush(pg.mkBrush(*colors.band_shade))
 
     def set_data(self, est: Estimate, j: int, settings: MeasurementSettings, stepped: bool) -> None:
         self.f_curve.setData(est.t, est.f)
-        self.x_curve.setPen(pg.mkPen(MASS_COLORS[j], width=1))
+        self.x_curve.setPen(pg.mkPen(colors.mass[j], width=1))
         self.x_curve.setData(est.t, est.x[:, j])
         self.response.setLabel("left", f"x{j + 1}", units="m")
         for curve, window, signal in ((self.f_window, est.force_window, est.f), (self.x_window, est.response_window, est.x[:, j])):
@@ -156,7 +167,7 @@ class SignalView(pg.GraphicsLayoutWidget):
         with np.errstate(divide="ignore"):
             db = 10.0 * np.log10(spec / spec.max()) if spec.size and spec.max() > 0 else spec
         self.s_curve.setData(est.freqs, db, connect="finite", symbol="o" if stepped else None,
-                             symbolSize=4, symbolPen=None, symbolBrush=FORCE_COLOR)
+                             symbolSize=4, symbolPen=None, symbolBrush=colors.force)
         nyq = settings.fs / 2
         if settings.excitation is Excitation.IMPACT:
             f = np.linspace(0.0, nyq, 400)
@@ -204,10 +215,19 @@ class FrfView(pg.GraphicsLayoutWidget):
         self._key: tuple | None = None
         self.measured: list[pg.PlotDataItem] = []  # magnitude, phase, coherence
         self.fit_curves: list[pg.PlotDataItem] = []  # magnitude, phase
-        self.fit_region = pg.LinearRegionItem(brush=pg.mkBrush(42, 157, 143, 28),
-                                              pen=pg.mkPen(FIT_COLOR, width=1))
+        self.fit_region = pg.LinearRegionItem()
         self.fit_region.setZValue(-5)
         self.fit_region.sigRegionChangeFinished.connect(self._on_region)
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """The fit band now; the curves are drawn again with the next data."""
+        shade = pg.mkColor(colors.fit)
+        shade.setAlpha(26 if colors.dark else 28)
+        self.fit_region.setBrush(pg.mkBrush(shade))
+        for line in self.fit_region.lines:
+            line.setPen(pg.mkPen(colors.fit, width=1))
+        self._key = None
 
     def _on_region(self) -> None:
         lo, hi = self.fit_region.getRegion()
@@ -284,37 +304,37 @@ class FrfView(pg.GraphicsLayoutWidget):
         f = np.unique(np.concatenate([f, peaks]))
         exact = frf(system, f, settings.input_dof)[:, j]
         dash = QtCore.Qt.PenStyle.DashLine
-        self.mag.plot(f, np.abs(exact), pen=pg.mkPen(EXACT_COLOR, width=1.5), name="Exact")
-        self.phase.plot(f, phase_deg(exact), pen=pg.mkPen(EXACT_COLOR, width=1.5))
+        self.mag.plot(f, np.abs(exact), pen=pg.mkPen(colors.strong, width=1.5), name="Exact")
+        self.phase.plot(f, phase_deg(exact), pen=pg.mkPen(colors.strong, width=1.5))
         if processing.window is Window.FORCE_EXPONENTIAL and processing.exp_end < 1.0 and not stepped:
             damped = transfer(system, 1j * 2 * np.pi * f + 1.0 / processing.exp_tau(settings), settings.input_dof)[:, j]
-            pen = pg.mkPen("#777", width=1, style=dash)
+            pen = pg.mkPen(colors.grey, width=1, style=dash)
             self.mag.plot(f, np.abs(damped), pen=pen, name="Exact + window damping")
             self.phase.plot(f, phase_deg(damped), pen=pen)
 
-        color = MASS_COLORS[j]
+        color = colors.mass[j]
         symbol = dict(symbol="o", symbolSize=5, symbolPen=None, symbolBrush=color) if stepped else {}
         self.measured = [
             self.mag.plot(pen=pg.mkPen(color, width=1.5), name="Measured", **symbol),
             self.phase.plot(pen=pg.mkPen(color, width=1), **symbol),
             self.coh.plot(pen=pg.mkPen(color, width=1)),
         ]
-        fit_pen = pg.mkPen(FIT_COLOR, width=2, style=QtCore.Qt.PenStyle.DashLine)
+        fit_pen = pg.mkPen(colors.fit, width=2, style=QtCore.Qt.PenStyle.DashLine)
         self.fit_curves = [self.mag.plot(pen=fit_pen), self.phase.plot(pen=fit_pen)]
         self.mag.addItem(self.fit_region)
         if stepped:
-            label = pg.TextItem("A stepped sine has no coherence (one reading per frequency)", color="#666")
+            label = pg.TextItem("A stepped sine has no coherence (one reading per frequency)", color=colors.muted)
             label.setPos(0.02 * nyq, 0.6)
             self.coh.addItem(label)
 
         for r, m in enumerate(result.modes):
             if m.damped is None or m.damped.fd_hz >= nyq:
                 continue
-            pen = pg.mkPen(MODE_COLORS[r % len(MODE_COLORS)], width=1, style=QtCore.Qt.PenStyle.DotLine)
+            pen = pg.mkPen(colors.mode[r % len(colors.mode)], width=1, style=QtCore.Qt.PenStyle.DotLine)
             for p in (self.mag, self.phase, self.coh):
                 p.addItem(pg.InfiniteLine(pos=m.damped.fd_hz, angle=90, pen=pen))
         for p in (self.mag, self.phase, self.coh):
-            band = pg.LinearRegionItem((settings.band, nyq), movable=False, brush=pg.mkBrush(*BAND_SHADE),
+            band = pg.LinearRegionItem((settings.band, nyq), movable=False, brush=pg.mkBrush(*colors.band_shade),
                                        pen=pg.mkPen(None))
             band.setZValue(-10)
             p.addItem(band)
@@ -399,7 +419,7 @@ class ModalTestPage(QtWidgets.QWidget):
         self.points_label = QtWidgets.QLabel("Frequencies:")
         form.addRow(self.points_label, self.points)
         link = QtWidgets.QLabel("Masses, springs and dampers are edited on the <a href='#sim'>Simulation page</a>.")
-        link.setStyleSheet("color: #666;")
+        mute(link)
         link.setWordWrap(True)
         link.linkActivated.connect(lambda _: self.edit_parameters.emit())
         form.addRow(link)
@@ -444,7 +464,7 @@ class ModalTestPage(QtWidgets.QWidget):
         form.addRow(self.anti_alias)
         self.daq_info = QtWidgets.QLabel()
         self.daq_info.setWordWrap(True)
-        self.daq_info.setStyleSheet("color: #666;")
+        mute(self.daq_info)
         form.addRow(self.daq_info)
 
         # --- noise
@@ -574,6 +594,14 @@ class ModalTestPage(QtWidgets.QWidget):
         self.stab_plot.pole_clicked.connect(self._on_pole_clicked)
         self._select_window(Excitation.IMPACT)
         self._show_rows()
+
+    def apply_theme(self) -> None:
+        """Redraw the current measurement and its results in the current theme (without measuring again)."""
+        for w in (self.signals, self.frf_view, self.stab_plot, self.results.mac):
+            w.apply_theme()
+        if self.acq is not None:
+            self.check.setHtml(self._setup_check())
+            self.redraw()
 
     # ------------------------------------------------------------ inputs
     def set_system(self, system: ChainSystem, result: ModalResult | None = None) -> None:
@@ -850,7 +878,7 @@ class ModalTestPage(QtWidgets.QWidget):
             d = m.damped
             if d is None:
                 continue
-            color = MODE_COLORS[(m.index - 1) % len(MODE_COLORS)]
+            color = colors.mode[(m.index - 1) % len(colors.mode)]
             bw = 2.0 * d.zeta * d.fn_hz
             lines = bw / df
             left = math.exp(d.eigenvalue.real * T)
@@ -894,11 +922,11 @@ class ModalTestPage(QtWidgets.QWidget):
             warnings.append("Continuous random is not periodic in the block: without a window it leaks.")
         if e in (Excitation.PERIODIC_RANDOM, Excitation.CHIRP) and w is not Window.RECTANGULAR:
             warnings.append("The signals are periodic in the block, so no window is needed; one only blurs the peaks.")
-        warn = "".join(f"<p style='color:#b36b00'>{t}</p>" for t in warnings)
+        warn = "".join(f"<p style='color:{colors.fair}'>{t}</p>" for t in warnings)
         return (
             f"<p><b>{e.value}</b>, force at m{s.input_dof + 1}. {EXCITATION_TIPS[e]}</p>{warn}"
             f"<table border='1' cellspacing='0' cellpadding='3' width='100%'>{head}{''.join(rows)}</table>"
-            "<p style='color:#666'>2ζf<sub>n</sub> is the half-power bandwidth of each peak; "
+            f"<p style='color:{colors.muted}'>2ζf<sub>n</sub> is the half-power bandwidth of each peak; "
             "with fewer than about 2 lines (Δf apart, or stepped-sine frequencies) across it, the peak is missed. "
             "<i>Left at T</i> is how much of a free decay is left at the end of a block "
             "(e<sup>σT</sup>): a hit or burst that has not died away is cut off, which leaks.</p>"

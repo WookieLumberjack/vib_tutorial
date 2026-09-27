@@ -7,7 +7,8 @@ from PySide6 import QtCore, QtWidgets
 from ..core import ChainSystem, ForceController, ForceKind
 from ..core.model import DEFAULT_DAMPING, DEFAULT_MASS, DEFAULT_STIFFNESS
 from .modes import ModeEntry
-from .style import MASS_COLORS, MAX_DOF
+from .style import MAX_DOF, colors, text_on
+from .theming import mute
 
 
 def spin(lo: float, hi: float, value: float, decimals: int, suffix: str = "") -> QtWidgets.QDoubleSpinBox:
@@ -69,7 +70,7 @@ class ParameterPanel(QtWidgets.QGroupBox):
         layout.addLayout(self.grid)
         note = QtWidgets.QLabel("kᵢ, cᵢ connect mᵢ₋₁ to mᵢ (k₁, c₁ connect m₁ to ground).")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #666;")
+        mute(note)
         layout.addWidget(note)
 
         self.rows: list[tuple[QtWidgets.QWidget, ...]] = []  # (label, m, k, c)
@@ -82,7 +83,7 @@ class ParameterPanel(QtWidgets.QGroupBox):
                 w.deleteLater()
         self.rows = []
         for i in range(system.n):
-            label = QtWidgets.QLabel(f"<b style='color:{MASS_COLORS[i]}'>■</b> {i + 1}")
+            label = QtWidgets.QLabel()
             m = spin(1e-3, 1e4, system.masses[i], 3)
             k = spin(0.0, 1e7, system.stiffness[i], 1)
             c = spin(0.0, 1e5, system.damping[i], 3)
@@ -91,6 +92,12 @@ class ParameterPanel(QtWidgets.QGroupBox):
             for box in (m, k, c):
                 box.valueChanged.connect(self._emit)
             self.rows.append((label, m, k, c))
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """Each row's swatch in its mass's colour."""
+        for i, row in enumerate(self.rows):
+            row[0].setText(f"<b style='color:{colors.mass[i]}'>■</b> {i + 1}")
 
     def system(self) -> ChainSystem:
         return ChainSystem(
@@ -302,7 +309,9 @@ class ForcePanel(QtWidgets.QGroupBox):
         elif self.force.on:
             action = "sweeping" if chirp else "ON"
             self.button.setText(f"{noun.capitalize()} {action} — click to stop  [Space]")
-            self.button.setStyleSheet("background-color: #c1121f; color: white; font-weight: bold;")
+            self.button.setStyleSheet(
+                f"background-color: {colors.force}; color: {text_on(colors.force)}; font-weight: bold;"
+            )
         else:
             verb = "Start sweep" if chirp else ("Move ground" if s.base else "Apply force")
             self.button.setText(f"{verb}  [Space]")

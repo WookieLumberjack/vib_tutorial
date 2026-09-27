@@ -30,7 +30,8 @@ from .modal_test import ModalTestPage
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, PhasorPanel, TimeHistoryPlot
-from .style import ENERGY_COLORS, MASS_COLORS
+from . import theming
+from .style import SYSTEM, colors
 from .substructuring import SubstructuringPage
 
 FRAME_MS = 16  # ~60 fps
@@ -96,14 +97,14 @@ ENERGY_COORDS_TIP = (
     "<p>Release a mode: T and V swap twice per cycle while T + V decays and D rises to "
     "E<sub>0</sub>. Drive at resonance: W and D climb together once T + V has built up.</p>"
 )
-# Energy curves: (legend, color), in the order of energy_curves().
+# Energy curves: (legend, key of Theme.energy_colors), in the order of energy_curves().
 ENERGY_CURVES = [
-    ("T", ENERGY_COLORS["kinetic"]),
-    ("V", ENERGY_COLORS["potential"]),
-    ("T + V", ENERGY_COLORS["stored"]),
-    ("E₀", ENERGY_COLORS["added"]),
-    ("W", ENERGY_COLORS["work"]),
-    ("D", ENERGY_COLORS["dissipated"]),
+    ("T", "kinetic"),
+    ("V", "potential"),
+    ("T + V", "stored"),
+    ("E₀", "added"),
+    ("W", "work"),
+    ("D", "dissipated"),
 ]
 MIN_ENERGY_SPAN = 1e-9  # J; smaller energies are the float noise of decayed motion
 FORCES_COORDS_TIP = (
@@ -128,6 +129,10 @@ ELEMENT_FORCES = [
     ("Spring + damper", "total", "k{0} + c{0}"),
 ]
 MIN_FORCE_SPAN = 1e-4  # N
+THEME_TIP = (
+    "<p>Colours of the whole app: plots, animation and controls.</p>"
+    "<p><b>System</b> follows the desktop's light or dark setting, and switches with it.</p>"
+)
 RELEASE_FIT_TIP = (
     "<p>While <i>Auto-scale animation and plots</i> is on, the plot window is also "
     "fitted to this mode (Simulation \u2192 Fit window cycles).</p>"
@@ -285,6 +290,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pages.addTab(self.cms_page, "Substructuring (CMS)")
         self.test_page = ModalTestPage()
         self.pages.addTab(self.test_page, "Virtual modal test")
+        self.theme_combo = QtWidgets.QComboBox()
+        self.theme_combo.addItems(theming.names())
+        self.theme_combo.setCurrentText(theming.current_name())
+        self.theme_combo.setToolTip(THEME_TIP)
+        theme_label = QtWidgets.QLabel("Theme:")
+        theme_label.setToolTip(THEME_TIP)
+        corner = QtWidgets.QWidget()
+        cl = QtWidgets.QHBoxLayout(corner)
+        cl.setContentsMargins(6, 2, 6, 2)
+        cl.addWidget(theme_label)
+        cl.addWidget(self.theme_combo)
+        self.pages.setCornerWidget(corner, QtCore.Qt.Corner.TopRightCorner)
         self.setCentralWidget(self.pages)
         self.resize(1700, 900)
 
@@ -308,6 +325,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.frf_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
         self.test_page.dof_requested.connect(self.params.dof.setValue)
         self.test_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
+        self.theme_combo.textActivated.connect(self._on_theme_picked)
+        app = QtWidgets.QApplication.instance()
+        app.styleHints().colorSchemeChanged.connect(self._on_desktop_scheme)
 
         self._apply_dof(system.n)
         self._refresh_modal()
@@ -322,6 +342,34 @@ class MainWindow(QtWidgets.QMainWindow):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._frame)
         self._timer.start(FRAME_MS)
+
+    # --------------------------------------------------------------- theme
+    def set_theme(self, name: str) -> None:
+        """Switch every page to a theme (a name from theming.names()) and redraw."""
+        theming.apply(name)
+        self.theme_combo.setCurrentText(name)
+        self._restyle()
+
+    def _on_theme_picked(self, name: str) -> None:
+        theming.save_name(name)
+        self.set_theme(name)
+
+    def _on_desktop_scheme(self) -> None:
+        # Checked once the change (which theming.apply also causes) has settled.
+        QtCore.QTimer.singleShot(0, self._follow_desktop)
+
+    def _follow_desktop(self) -> None:
+        # Only while following the desktop: an explicit theme sets the scheme itself.
+        if theming.current_name() == SYSTEM and colors.name != theming.system_theme().name:
+            self.set_theme(SYSTEM)
+
+    def _restyle(self) -> None:
+        theming.restyle(self)
+        for w in (self.chain, self.time_plot, self.mode_plot, self.phasor_plot.plot, self.frf_plot,
+                  self.params, self.energy, self.cms_page, self.frf_page, self.test_page):
+            w.apply_theme()
+        self.force_panel.refresh()
+        self._refresh_modal_views()  # mode colours: table, shapes, time and FRF curves
 
     # --------------------------------------------------------------- events
     def _on_system_changed(self, system: ChainSystem) -> None:
@@ -429,11 +477,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.element_combo.setVisible(self.forces_view)
         if self.forces_view:
             label, _, fmt = ELEMENT_FORCES[self.element_combo.currentIndex()]
-            curves = [(fmt.format(i + 1), MASS_COLORS[i]) for i in range(self.sim.system.n)]
+            curves = [(fmt.format(i + 1), colors.mass[i]) for i in range(self.sim.system.n)]
             self.time_plot.set_curves(f"Tension: {label.lower()}", curves, units="N", min_span=MIN_FORCE_SPAN)
             return
         if self.energy_view:
-            self.time_plot.set_curves("Energy", ENERGY_CURVES, units="J", min_span=MIN_ENERGY_SPAN)
+            curves = [(name, colors.energy_colors[key]) for name, key in ENERGY_CURVES]
+            self.time_plot.set_curves("Energy", curves, units="J", min_span=MIN_ENERGY_SPAN)
             return
         if not self.modal_view:
             self.time_plot.set_dof(self.sim.system.n)

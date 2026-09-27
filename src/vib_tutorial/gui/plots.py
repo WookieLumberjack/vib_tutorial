@@ -10,7 +10,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..core import ChainSystem, ModalResult, frf, transmissibility
 from .modes import Method, ModeEntry, time_constant_text
-from .style import FORCE_COLOR, MASS_COLORS, MODE_COLORS
+from .style import colors
 
 MAX_POINTS = 3000
 MIN_Y_SPAN = 1e-6  # m
@@ -33,17 +33,26 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
         # Performance: these plots scroll and redraw every frame. No grid (its
         # lines cost more than the data) and 1 px pens (Qt's fast path; wider
         # antialiased lines were ~2x slower, and much worse on Retina displays).
+        self.zero_lines = []
         for p in (self.x_plot, self.f_plot):
             p.setMouseEnabled(x=False, y=True)
-            p.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#bbb", width=1)))
-        self.f_curve = self.f_plot.plot(pen=pg.mkPen(FORCE_COLOR, width=1))
+            self.zero_lines.append(pg.InfiniteLine(pos=0, angle=0))
+            p.addItem(self.zero_lines[-1])
+        self.f_curve = self.f_plot.plot()
         self.auto_range = True
         self.min_span = MIN_Y_SPAN
         self.x_curves: list[pg.PlotDataItem] = []
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """Zero lines and the force curve; the upper curves are set with set_curves."""
+        for line in self.zero_lines:
+            line.setPen(pg.mkPen(colors.faint, width=1))
+        self.f_curve.setPen(pg.mkPen(colors.force, width=1))
 
     def set_dof(self, n: int) -> None:
         """One curve per mass displacement."""
-        self.set_curves("Displacement", [(f"x{i + 1}", MASS_COLORS[i]) for i in range(n)])
+        self.set_curves("Displacement", [(f"x{i + 1}", colors.mass[i]) for i in range(n)])
 
     def set_curves(
         self, label: str, curves: list[tuple[str, str]], units: str = "m", min_span: float = MIN_Y_SPAN
@@ -224,13 +233,19 @@ class ModeShapePlot(pg.PlotWidget):
         self.showGrid(x=True, y=True, alpha=0.3)
         self.setYRange(-1.1, 1.1)
         self.setMouseEnabled(x=False, y=False)
-        self.legend = self.addLegend(offset=(5, -5), brush=pg.mkBrush(255, 255, 255, 210), colCount=2)
+        self.legend = self.addLegend(offset=(5, -5), colCount=2)
         self.curves: list[pg.PlotDataItem] = []
         self.entries: list[ModeEntry] = []
         self.highlight: int | None = None
         self.show_envelope = False
-        envelope_pen = pg.mkPen("#888", width=1, style=QtCore.Qt.PenStyle.DashLine)
-        self.envelope = [self.plot(pen=envelope_pen) for _ in range(2)]
+        self.envelope = [self.plot() for _ in range(2)]
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """The envelope; the shapes take their colours from the entries (set_entries)."""
+        self.legend.setBrush(colors.legend_brush())
+        for c in self.envelope:
+            c.setPen(pg.mkPen(colors.grey, width=1, style=QtCore.Qt.PenStyle.DashLine))
 
     def set_entries(self, entries: list[ModeEntry], show_envelope: bool = False) -> None:
         self.legend.clear()
@@ -307,10 +322,10 @@ class PhasorPlot(pg.PlotWidget):
         self.setLabel("left", "Im")
         self.setTitle("Complex plane", size="9pt")
         circle = np.exp(1j * np.linspace(0, 2 * np.pi, 97))
-        faint = pg.mkPen("#bbb", width=1)
-        self.plot(circle.real, circle.imag, pen=pg.mkPen("#bbb", width=1, style=QtCore.Qt.PenStyle.DotLine))
-        self.addItem(pg.InfiniteLine(pos=0, angle=0, pen=faint))
-        self.addItem(pg.InfiniteLine(pos=0, angle=90, pen=faint))
+        self.circle = self.plot(circle.real, circle.imag)
+        self.axes = [pg.InfiniteLine(pos=0, angle=0), pg.InfiniteLine(pos=0, angle=90)]
+        for line in self.axes:
+            self.addItem(line)
         self.arrows: list[pg.PlotDataItem] = []
         self.tips = pg.ScatterPlotItem(size=8, pen=None)
         self.projections = pg.ScatterPlotItem(size=7, symbol="o", brush=None)
@@ -320,16 +335,24 @@ class PhasorPlot(pg.PlotWidget):
         self.highlight: int | None = None
         self._brushes: list[QtGui.QBrush] = []
         self._pens: list[QtGui.QPen] = []
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """The unit circle and axes; the arrows are coloured in set_entries."""
+        self.circle.setPen(pg.mkPen(colors.faint, width=1, style=QtCore.Qt.PenStyle.DotLine))
+        for line in self.axes:
+            line.setPen(pg.mkPen(colors.faint, width=1))
 
     def set_entries(self, entries: list[ModeEntry]) -> None:
         self.entries = entries
         n = len(entries[0].shape) if entries else 0
         while len(self.arrows) < n:
-            self.arrows.append(self.plot(pen=pg.mkPen(MASS_COLORS[len(self.arrows)], width=2)))
+            self.arrows.append(self.plot())
         for i, a in enumerate(self.arrows):
             a.setVisible(i < n)
-        self._brushes = [pg.mkBrush(MASS_COLORS[i]) for i in range(n)]
-        self._pens = [pg.mkPen(MASS_COLORS[i], width=2) for i in range(n)]
+            a.setPen(pg.mkPen(colors.mass[i], width=2))
+        self._brushes = [pg.mkBrush(colors.mass[i]) for i in range(n)]
+        self._pens = [pg.mkPen(colors.mass[i], width=2) for i in range(n)]
         self.set_highlight(self.highlight)
 
     def set_highlight(self, r: int | None) -> None:
@@ -405,7 +428,7 @@ class PhasorPanel(QtWidgets.QWidget):
                 item = QtWidgets.QTableWidgetItem(text)
                 item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
                 if c == 0:
-                    item.setForeground(pg.mkColor(MASS_COLORS[i]))
+                    item.setForeground(pg.mkColor(colors.mass[i]))
                 self.table.setItem(i, c, item)
 
 
@@ -443,12 +466,15 @@ class FrfPlot(pg.GraphicsLayoutWidget):
         self.mag_curves: list[pg.PlotDataItem] = []
         self.phase_curves: list[pg.PlotDataItem] = []
         self.mode_lines: list[pg.InfiniteLine] = []
-        self.drive_lines = [
-            pg.InfiniteLine(angle=90, pen=pg.mkPen(FORCE_COLOR, width=2, style=QtCore.Qt.PenStyle.DashLine))
-            for _ in range(2)
-        ]
+        self.drive_lines = [pg.InfiniteLine(angle=90) for _ in range(2)]
         self.mag.addItem(self.drive_lines[0])
         self.phase.addItem(self.drive_lines[1])
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """The drive lines; the curves are drawn by set_system."""
+        for line in self.drive_lines:
+            line.setPen(pg.mkPen(colors.force, width=2, style=QtCore.Qt.PenStyle.DashLine))
 
     def set_system(self, system: ChainSystem, result: ModalResult, input_dof: int, base: bool = False) -> None:
         """Receptance for a force at input_dof, or with base=True the transmissibility from the ground."""
@@ -465,7 +491,7 @@ class FrfPlot(pg.GraphicsLayoutWidget):
         self.mag.legend.clear()
         self.mag_curves, self.phase_curves = [], []
         for i in range(system.n):
-            pen = pg.mkPen(MASS_COLORS[i], width=2)
+            pen = pg.mkPen(colors.mass[i], width=2)
             self.mag_curves.append(self.mag.plot(f, np.abs(H[:, i]), pen=pen, name=f"x{i + 1}"))
             ph = np.degrees(np.unwrap(np.angle(H[:, i])))
             self.phase_curves.append(self.phase.plot(f, ph, pen=pen))
@@ -475,7 +501,7 @@ class FrfPlot(pg.GraphicsLayoutWidget):
             line = pg.InfiniteLine(
                 pos=math.log10(fn),
                 angle=90,
-                pen=pg.mkPen(MODE_COLORS[r % len(MODE_COLORS)], width=1, style=QtCore.Qt.PenStyle.DotLine),
+                pen=pg.mkPen(colors.mode[r % len(colors.mode)], width=1, style=QtCore.Qt.PenStyle.DotLine),
             )
             self.mag.addItem(line)
             self.mode_lines.append(line)

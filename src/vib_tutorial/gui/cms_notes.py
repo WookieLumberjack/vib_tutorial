@@ -12,25 +12,21 @@ from ..core import (
     substructure_damping,
 )
 from ..core.modal import TWO_PI
+from .style import colors
 
-# Cell tint for each partition block, keyed by the sorted (row, column) group pair.
-BLOCK_TINTS = {
-    ("i", "i"): "#dbe8f5",
-    ("b", "b"): "#dcefd8",
-    ("b", "i"): "#fbe7d3",
-    ("q", "q"): "#ebe2f5",
-    ("b", "q"): "#f6efcc",
-    ("i", "q"): "#efe6f7",
-}
-LEGEND_HTML = (
-    "<p><small>Cell colors: "
-    f"<span style='background:{BLOCK_TINTS['i', 'i']}'>&nbsp;interior–interior (ii)&nbsp;</span> "
-    f"<span style='background:{BLOCK_TINTS['b', 'i']}'>&nbsp;interior–boundary (ib, bi)&nbsp;</span> "
-    f"<span style='background:{BLOCK_TINTS['b', 'b']}'>&nbsp;boundary–boundary (bb)&nbsp;</span> "
-    f"<span style='background:{BLOCK_TINTS['q', 'q']}'>&nbsp;modal–modal (qq)&nbsp;</span> "
-    f"<span style='background:{BLOCK_TINTS['b', 'q']}'>&nbsp;modal–boundary (qb)&nbsp;</span>"
-    "</small></p>"
-)
+
+def legend_html() -> str:
+    """The key to the cell tints (Theme.block_tints: one per partition block)."""
+    tints = colors.block_tints
+    return (
+        "<p><small>Cell colors: "
+        f"<span style='background:{tints['i', 'i']}'>&nbsp;interior–interior (ii)&nbsp;</span> "
+        f"<span style='background:{tints['b', 'i']}'>&nbsp;interior–boundary (ib, bi)&nbsp;</span> "
+        f"<span style='background:{tints['b', 'b']}'>&nbsp;boundary–boundary (bb)&nbsp;</span> "
+        f"<span style='background:{tints['q', 'q']}'>&nbsp;modal–modal (qq)&nbsp;</span> "
+        f"<span style='background:{tints['b', 'q']}'>&nbsp;modal–boundary (qb)&nbsp;</span>"
+        "</small></p>"
+    )
 
 THEORY_HTML = """
 <p><i>Symbols are defined in the <a href="#notation">Notation</a> table at the end.</i></p>
@@ -479,9 +475,9 @@ def matrix_html(
         cells = []
         for c, cg in enumerate(col_groups):
             dim = dim_cols is not None and c >= dim_cols
-            tint = "#f4f4f4" if dim else BLOCK_TINTS[tuple(sorted((rg, cg)))]
+            tint = colors.dim_tint if dim else colors.block_tints[tuple(sorted((rg, cg)))]
             text = fmt(A[r, c], scale)
-            color = " style='color:#aaa'" if text == "0" or dim else ""
+            color = f" style='color:{colors.grey}'" if text == "0" or dim else ""
             cells.append(f"<td align='right' bgcolor='{tint}'{color}>{text}</td>")
         out.append(f"<tr><th>{label}</th>{''.join(cells)}</tr>")
     out.append("</table>")
@@ -522,7 +518,7 @@ def matrices_html(model: CMSModel, full: ModalResult | None = None) -> str:
     groups = ["b" if d in bnd else "i" for d in range(n)]
     labels = _dof_labels(np.arange(n))
     interfaces = [int(b) for b in model.boundary[:-1]]
-    parts = [LEGEND_HTML]
+    parts = [legend_html()]
 
     parts.append("<h3>1. The full model</h3>")
     parts.append(
@@ -591,7 +587,7 @@ def _fixed_steps(model: CMSModel) -> list[str]:
                          "it is represented by its boundary DOFs alone.</p>")
             continue
         freqs = ", ".join(
-            (f"<b>{f:.4g}</b>" if r < sub.n_kept else f"<span style='color:#999'>{f:.4g}</span>")
+            (f"<b>{f:.4g}</b>" if r < sub.n_kept else f"<span style='color:{colors.grey}'>{f:.4g}</span>")
             for r, f in enumerate(sub.omegas / TWO_PI)
         )
         parts.append(
@@ -666,7 +662,7 @@ def _free_steps(model: CMSModel) -> list[str]:
                          "kept as its physical boundary DOFs.</p>")
             continue
         freqs = ", ".join(
-            (f"<b>{f:.4g}</b>" if r < sub.n_kept else f"<span style='color:#999'>{f:.4g}</span>")
+            (f"<b>{f:.4g}</b>" if r < sub.n_kept else f"<span style='color:{colors.grey}'>{f:.4g}</span>")
             for r, f in enumerate(np.where(sub.omegas > 1e-9, sub.omegas, 0.0) / TWO_PI)
         )
         rigid = (f" {sub.n_rigid} rigid-body mode{'s' if sub.n_rigid > 1 else ''} at 0 Hz." if sub.n_rigid
@@ -834,12 +830,13 @@ def _damped_comparison(model: CMSModel, full: ModalResult | None) -> str:
     for c in compare_modes(model, full):
         cells = [str(c.index), "overdamped" if c.zeta_true is None else f"{c.zeta_true:.4f}"]
         if c.fn_red is None:
-            cells += ["<span style='color:#999'>not in model</span>", "—"]
+            cells += [f"<span style='color:{colors.grey}'>not in model</span>", "—"]
         elif c.zeta_red is None:
             cells += ["overdamped", "—"]
         else:
             err = c.zeta_error
-            color = "#000" if err is None else "#2a7d2a" if abs(err) < 1e-3 else "#b07000" if abs(err) < 0.05 else "#c1121f"
+            color = (colors.foreground if err is None else colors.good if abs(err) < 1e-3
+                     else colors.fair if abs(err) < 0.05 else colors.poor)
             cells += [f"{c.zeta_red:.4f}", "—" if err is None else f"<span style='color:{color}'>{100 * err:+.3g}%</span>"]
         rows.append("<tr>" + "".join(f"<td align='right'>{x}</td>" for x in cells) + "</tr>")
     rows.append("</table>")

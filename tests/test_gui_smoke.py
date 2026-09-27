@@ -1,11 +1,16 @@
 """Headless smoke test: build the window and exercise the main interactions."""
 
 import os
+import tempfile
 
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 QtWidgets = pytest.importorskip("PySide6.QtWidgets")
+from PySide6 import QtCore  # noqa: E402
+
+# Keep the theme the tests pick out of the user's own settings.
+QtCore.QSettings.setPath(QtCore.QSettings.Format.NativeFormat, QtCore.QSettings.Scope.UserScope, tempfile.mkdtemp())
 
 from vib_tutorial.core import ForceKind  # noqa: E402
 
@@ -727,13 +732,66 @@ def test_base_excitation_and_chirp(app):
     w.close()
 
 
-def test_make_app_sets_up_light_colours(app):
+def test_make_app_themes(app):
     import pyqtgraph as pg
 
-    from vib_tutorial.gui import make_app
+    from vib_tutorial.gui import make_app, theming
+    from vib_tutorial.gui.style import colors
 
-    # The offscreen platform has no colour scheme to override, so this checks the
-    # result (a light palette and white plots), not the switch from a dark desktop.
-    assert make_app() is app
-    assert app.palette().window().color().lightness() > 200
-    assert pg.getConfigOption("background") == "w"
+    try:
+        assert make_app("Light") is app
+        assert app.palette().window().color().lightness() > 200
+        assert pg.getConfigOption("background") == "#ffffff" and colors.name == "Light"
+        make_app("Dark")
+        assert app.palette().window().color().lightness() < 60
+        assert pg.getConfigOption("background") == colors.background == "#1c1e21"
+        # The offscreen platform reports no desktop scheme, so System means Light.
+        make_app("System")
+        assert colors.name == "Light" and theming.current_name() == "System"
+    finally:
+        theming.apply("Light")
+
+
+def test_switch_themes_live(app):
+    import numpy as np
+    import pyqtgraph as pg
+
+    from vib_tutorial.gui import theming
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.style import THEMES, colors
+
+    w = MainWindow()
+    w.show()
+    w.force_panel.button.click()
+    w._sim_target = 0.5
+    w._tick()
+    try:
+        for name in THEMES:
+            w.theme_combo.textActivated.emit(name)
+            assert theming.saved_name() == name and colors.name == name
+            # Plots, the animation and the curves pick up the theme.
+            assert w.chain.backgroundBrush().color().name() == colors.background
+            assert w.time_plot.x_plot.getAxis("left").pen().color().name() == colors.foreground
+            assert w.time_plot.x_curves[0].opts["pen"].color().name() == colors.mass[0]
+            assert w.chain._rects[0].brush().color().name() == colors.mass[0]
+            assert w.table.item(0, 0).foreground().color().name() == colors.mode[0]
+            assert w.energy.bars.grab().toImage().pixelColor(2, 2).name() == colors.background
+            # Every page redraws in it when shown.
+            for page in (w.frf_page, w.cms_page, w.test_page):
+                w.pages.setCurrentWidget(page)
+                app.processEvents()
+            assert w.frf_page.grid.full[0][0].opts["pen"].color().name() == colors.strong
+            assert w.cms_page.plots.frf.getAxis("bottom").textPen().color().name() == colors.foreground
+            assert all(s.plot.getAxis("left").pen().color().name() == colors.foreground
+                       for s in w.cms_page.basis._slots)
+            while not w.test_page.acq.done:
+                w.test_page._measure_some()
+            assert w.test_page.frf_view.measured[0].opts["pen"].color().name() == colors.mass[w.sim.system.n - 1]
+            w.pages.setCurrentWidget(w.sim_page)
+            w._tick()
+            assert np.isfinite(w.sim.displacement).all()
+            for view in w.findChildren(pg.GraphicsView):
+                assert view.backgroundBrush().color().name() == colors.background
+    finally:
+        w.set_theme("Light")
+        w.close()
