@@ -37,11 +37,15 @@ def close_graphics(widget) -> None:
 
 
 def run() -> int:
+    from PySide6 import QtCore
+
     from .main_window import MainWindow
 
     app = make_app()
     window = MainWindow()
     window.show()
+    if "--smoke-test" in sys.argv:  # release builds check the packaged app starts, then quit
+        QtCore.QTimer.singleShot(2000, app.quit)
     code = app.exec()
     close_graphics(window)
     return code
