@@ -35,6 +35,7 @@ from ..core import (
 )
 from ..core.substructure import METHOD_SHORT, SUBSTRUCTURE_NAMES
 from .animation import MASS_WIDTH, spring_path
+from .axes import log_axes
 from .cms_notes import THEORY_HTML, matrices_html
 from .cms_recovery import BackExpansionView
 from .cms_time import CMSTimeView
@@ -334,7 +335,7 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         self.shape.setYRange(-1.15, 1.5, padding=0)
         self.shape.getAxis("left").setTicks([[(v, f"{v:g}") for v in (-1, -0.5, 0, 0.5, 1)]])
         self.shape_legend = self.shape.addLegend(offset=(5, 2), colCount=3)
-        self.frf = self.addPlot(row=1, col=0)
+        self.frf = self.addPlot(row=1, col=0, axisItems=log_axes())
         self.frf.setLogMode(x=True, y=True)
         self.frf.setLabel("left", "|X / F|  [m/N]")
         self.frf.setLabel("bottom", "Frequency", units="Hz")
@@ -613,7 +614,7 @@ class MethodComparison(QtWidgets.QWidget):
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self.plot = pg.PlotWidget()
+        self.plot = pg.PlotWidget(axisItems=log_axes())
         self.plot.setLogMode(y=True)
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.plot.setLabel("bottom", "Reduced-model coordinates (modes kept + boundary DOFs)")

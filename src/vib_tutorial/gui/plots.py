@@ -9,6 +9,7 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..core import ChainSystem, ModalResult, frf, modal_analysis, transmissibility
+from .axes import log_axes
 from .modes import Method, ModeEntry, time_constant_text
 from .style import colors
 
@@ -450,12 +451,12 @@ class FrfPlot(pg.GraphicsLayoutWidget):
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
-        self.mag = self.addPlot(row=0, col=0)
+        self.mag = self.addPlot(row=0, col=0, axisItems=log_axes())
         self.mag.setLogMode(x=True, y=True)
         self.mag.setLabel("left", "|X / F|  [m/N]")
         self.mag.showGrid(x=True, y=True, alpha=0.3)
         self.mag.addLegend(offset=(-5, 5), colCount=2)
-        self.phase = self.addPlot(row=1, col=0)
+        self.phase = self.addPlot(row=1, col=0, axisItems=log_axes())
         self.phase.setLogMode(x=True, y=False)
         self.phase.setLabel("left", "Phase", units="deg")
         self.phase.setLabel("bottom", "Frequency", units="Hz")

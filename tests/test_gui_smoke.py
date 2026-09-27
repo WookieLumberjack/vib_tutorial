@@ -1199,3 +1199,30 @@ def test_modal_coupling_page(app):
     assert page.model is not None
     w.pages.setCurrentWidget(w.sim_page)
     w.close()
+
+
+def test_log_axis_labels(app):
+    import math
+
+    from vib_tutorial.gui.axes import LogAxis, log_label
+
+    assert [log_label(v) for v in (1e-5, 3e-5, 1e-4, 0.05, 1.0, 20.0, 1000.0, 1e4, 2e6)] == [
+        "10⁻⁵", "3·10⁻⁵", "0.0001", "0.05", "1", "20", "1000", "10⁴", "2·10⁶"]
+    values = [math.log10(m * 0.1) for m in range(1, 10)] + [0.0]
+    for orientation in ("left", "bottom"):
+        axis = LogAxis(orientation)
+        axis.setLogMode(True)
+        assert not axis.autoSIPrefix
+        labelled = {}
+        for px in (2000.0, 250.0, 20.0):  # pixels per decade: room for all, for 1-2-5, for the decades only
+            axis._px_per_decade = px
+            labelled[px] = [s for s in axis.logTickStrings(values, 1.0, None) if s]
+        assert labelled[2000.0] == ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1"]
+        assert labelled[250.0] == ["0.1", "0.2", "0.5", "1"]
+        assert labelled[20.0] == ["0.1", "1"]
+    # The minor level does not repeat the decades of a major level.
+    axis = LogAxis("left")
+    axis.setLogMode(True)
+    levels = axis.logTickValues(-2.2, 0.3, 300, [(1.0, [-2.0, -1.0, 0.0])])
+    minor = next(v for s, v in levels if s is None)
+    assert not {round(v, 9) for v in minor} & {-2.0, -1.0, 0.0}
