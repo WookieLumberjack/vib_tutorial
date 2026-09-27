@@ -20,7 +20,16 @@ from .measurement import (
     impact_spectrum,
     transfer,
 )
-from .modal import ComplexMode, ModalResult, Mode, frf, modal_analysis, modal_coordinate_map, receptance
+from .modal import (
+    ComplexMode,
+    ModalResult,
+    Mode,
+    frf,
+    modal_analysis,
+    modal_coordinate_map,
+    receptance,
+    transmissibility,
+)
 from .model import ChainSystem, assemble_chain, element_forces, pluck_shape, state_space
 from .simulator import Simulator, foh_discretize, foh_quadratic_integrals
 from .substructure import (
@@ -97,4 +106,5 @@ __all__ = [
     "state_space",
     "stored_energy",
     "substructure_damping",
+    "transmissibility",
 ]

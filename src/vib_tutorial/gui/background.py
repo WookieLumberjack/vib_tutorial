@@ -164,6 +164,26 @@ another. The complex modes do not split the energy this way: they are not orthog
 with respect to M and K, so their energies have cross terms. The panel always uses the
 classical modes.</p>
 
+<h3>Sweeps and ground motion</h3>
+<p>A <b>chirp</b> is a sine whose frequency sweeps from a start to an end frequency. Each
+mode swells as the sweep passes its natural frequency, so a slow sweep traces the
+frequency response out in time. A sweep that is fast compared with a mode's decay
+(time constant 1/(ζω<sub>n</sub>)) leaves it no time to build up: the peak comes late and
+low, and the mode rings on after the sweep has moved on. A log sweep spends equal time
+in every octave.</p>
+<p>With <b>ground motion</b> the wall moves as x<sub>g</sub>(t) instead of a force pushing
+a mass. Element 1 then stretches by x<sub>1</sub> − x<sub>g</sub>, so the ground reaches
+the chain only through k<sub>1</sub> and c<sub>1</sub>:</p>
+<p>&nbsp;&nbsp;Mẍ + Cẋ + Kx = (k<sub>1</sub>x<sub>g</sub> + c<sub>1</sub>ẋ<sub>g</sub>) e<sub>1</sub></p>
+<p>For a harmonic x<sub>g</sub> the <i>transmissibility</i> X<sub>i</sub>/X<sub>g</sub> is
+receptance column 1 times k<sub>1</sub> + iωc<sub>1</sub>. It is 1 at low frequency (the
+chain moves with the ground), peaks at every mode, and falls away above the highest one:
+isolation. The damper c<sub>1</sub> passes on the ground's velocity, so at high frequency
+x<sub>1</sub> falls only as 1/ω rather than 1/ω². The work the ground does is the tension
+in element 1 times the ground's velocity, with a minus sign: −∫T<sub>1</sub>ẋ<sub>g</sub> dt.
+While the ground moves, the modal coordinates and the energy by mode use the motion
+relative to it, x − x<sub>g</sub>.</p>
+
 <h3>Try it</h3>
 <ol>
 <li>Set c<sub>1</sub> = 15 and leave the other dampers at 2. The note switches to

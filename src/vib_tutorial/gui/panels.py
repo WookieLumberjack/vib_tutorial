@@ -122,19 +122,48 @@ class ParameterPanel(QtWidgets.QGroupBox):
         self._set_all(ChainSystem.uniform(s.n, s.masses[0], s.stiffness[0], s.damping[0]))
 
 
+BASE_TIP = (
+    "<p><b>Ground motion (base excitation):</b> instead of pushing a mass, the wall that "
+    "k<sub>1</sub> and c<sub>1</sub> are fixed to moves, x<sub>g</sub>(t), like a machine on a "
+    "shaking floor or a building in an earthquake. It reaches the chain only through element 1, "
+    "as the force k<sub>1</sub>x<sub>g</sub> + c<sub>1</sub>ẋ<sub>g</sub> on m1.</p>"
+    "<p>The plots show the absolute displacements x; the <i>Frequency response</i> tab shows "
+    "the transmissibility |X<sub>i</sub>/X<sub>g</sub>|, which is 1 at low frequency (the chain "
+    "moves with the ground) and falls away above the modes (isolation).</p>"
+)
+CHIRP_TIP = (
+    "<p><b>Chirp:</b> a sine whose frequency sweeps from the start to the end frequency over "
+    "the sweep time, then stops. As it passes each natural frequency the response swells, so "
+    "a slow sweep traces out the frequency response in time. The dashed line on the "
+    "<i>Frequency response</i> tab follows the frequency.</p>"
+    "<p>Sweep too fast and a lightly damped mode has no time to build up: its peak comes "
+    "late and low, and it rings on after the sweep has moved on.</p>"
+    "<p><b>Log sweep:</b> equal time per octave rather than per hertz, so the low modes, "
+    "which are closer together, get as long as the high ones.</p>"
+)
+
+
 class ForcePanel(QtWidgets.QGroupBox):
     """Edits the ForceController's settings in place and switches it on/off."""
 
     settings_changed = QtCore.Signal()
 
     def __init__(self, force: ForceController, parent: QtWidgets.QWidget | None = None) -> None:
-        super().__init__("Applied force", parent)
+        super().__init__("Excitation", parent)
         self.force = force
         s = force.settings
         form = QtWidgets.QFormLayout(self)
 
+        self.input = QtWidgets.QComboBox()
+        self.input.addItem("Force on a mass", False)
+        self.input.addItem("Ground motion (base)", True)
+        self.input.setCurrentIndex(int(s.base))
+        self.input.setToolTip(BASE_TIP)
+        form.addRow("Input:", self.input)
+
         self.target = QtWidgets.QComboBox()
-        form.addRow("Apply to:", self.target)
+        self.target_label = QtWidgets.QLabel("Apply to:")
+        form.addRow(self.target_label, self.target)
 
         self.kind = QtWidgets.QComboBox()
         for k in ForceKind:
@@ -142,8 +171,12 @@ class ForcePanel(QtWidgets.QGroupBox):
         self.kind.setCurrentIndex(list(ForceKind).index(s.kind))
         form.addRow("Type:", self.kind)
 
+        amp_row = QtWidgets.QHBoxLayout()
         self.amplitude = spin(-1e5, 1e5, s.amplitude, 3, " N")
-        form.addRow("Amplitude:", self.amplitude)
+        self.base_amplitude = spin(-1e4, 1e4, s.base_amplitude * 1e3, 3, " mm")
+        amp_row.addWidget(self.amplitude)
+        amp_row.addWidget(self.base_amplitude)
+        form.addRow("Amplitude:", amp_row)
 
         freq_row = QtWidgets.QHBoxLayout()
         self.freq = spin(0.001, 1000.0, s.freq_hz, 3, " Hz")
@@ -158,17 +191,45 @@ class ForcePanel(QtWidgets.QGroupBox):
         self.duration_label = QtWidgets.QLabel("Pulse length:")
         form.addRow(self.duration_label, self.duration)
 
+        sweep_row = QtWidgets.QHBoxLayout()
+        self.sweep_start = spin(0.001, 1000.0, s.sweep_start_hz, 3, " Hz")
+        self.sweep_end = spin(0.001, 1000.0, s.sweep_end_hz, 3, " Hz")
+        sweep_to = QtWidgets.QLabel("to")
+        sweep_row.addWidget(self.sweep_start, 1)
+        sweep_row.addWidget(sweep_to)
+        sweep_row.addWidget(self.sweep_end, 1)
+        self.sweep_label = QtWidgets.QLabel("Sweep:")
+        form.addRow(self.sweep_label, sweep_row)
+        time_row = QtWidgets.QHBoxLayout()
+        self.sweep_time = spin(0.1, 3600.0, s.sweep_time, 1, " s")
+        self.sweep_log = QtWidgets.QCheckBox("Log sweep")
+        self.sweep_log.setChecked(s.sweep_log)
+        time_row.addWidget(self.sweep_time, 1)
+        time_row.addWidget(self.sweep_log)
+        self.sweep_time_label = QtWidgets.QLabel("Sweep time:")
+        form.addRow(self.sweep_time_label, time_row)
+        self._sweep_widgets = (
+            self.sweep_label, self.sweep_start, sweep_to, self.sweep_end,
+            self.sweep_time_label, self.sweep_time, self.sweep_log,
+        )
+        for w in self._sweep_widgets:
+            w.setToolTip(CHIRP_TIP)
+
         self.button = QtWidgets.QPushButton()
         self.button.setMinimumHeight(40)
         self.button.setShortcut("Space")
         self.button.clicked.connect(self._on_button)
         form.addRow(self.button)
 
+        self.input.currentIndexChanged.connect(self._apply)
         self.target.currentIndexChanged.connect(self._apply)
         self.kind.currentIndexChanged.connect(self._apply)
-        self.amplitude.valueChanged.connect(self._apply)
-        self.freq.valueChanged.connect(self._apply)
-        self.duration.valueChanged.connect(self._apply)
+        for box in (
+            self.amplitude, self.base_amplitude, self.freq, self.duration,
+            self.sweep_start, self.sweep_end, self.sweep_time,
+        ):
+            box.valueChanged.connect(self._apply)
+        self.sweep_log.toggled.connect(self._apply)
         self.tune.activated.connect(self._on_tune)
         self.refresh()
 
@@ -192,13 +253,20 @@ class ForcePanel(QtWidgets.QGroupBox):
     def _apply(self) -> None:
         s = self.force.settings
         kind = self.kind.currentData()
-        if kind is not s.kind:
+        base = bool(self.input.currentData())
+        if kind is not s.kind or base != s.base:
             self.force.switch_off()
+        s.base = base
         s.target = max(0, self.target.currentIndex())
         s.kind = kind
         s.amplitude = self.amplitude.value()
+        s.base_amplitude = self.base_amplitude.value() * 1e-3
         s.freq_hz = self.freq.value()
         s.pulse_duration = self.duration.value()
+        s.sweep_start_hz = self.sweep_start.value()
+        s.sweep_end_hz = self.sweep_end.value()
+        s.sweep_time = self.sweep_time.value()
+        s.sweep_log = self.sweep_log.isChecked()
         self.refresh()
         self.settings_changed.emit()
 
@@ -213,21 +281,31 @@ class ForcePanel(QtWidgets.QGroupBox):
         self.settings_changed.emit()
 
     def refresh(self) -> None:
-        kind = self.force.settings.kind
-        harmonic = kind is ForceKind.HARMONIC
-        pulse = kind is ForceKind.PULSE
+        s = self.force.settings
+        harmonic = s.kind is ForceKind.HARMONIC
+        pulse = s.kind is ForceKind.PULSE
+        chirp = s.kind is ForceKind.CHIRP
         for w in (self.freq_label, self.freq, self.tune):
             w.setVisible(harmonic)
         self.duration_label.setVisible(pulse)
         self.duration.setVisible(pulse)
+        for w in self._sweep_widgets:
+            w.setVisible(chirp)
+        self.target_label.setVisible(not s.base)
+        self.target.setVisible(not s.base)
+        self.amplitude.setVisible(not s.base)
+        self.base_amplitude.setVisible(s.base)
+        noun = "ground motion" if s.base else "force"
         if pulse:
             self.button.setText("Fire pulse  [Space]")
             self.button.setStyleSheet("")
         elif self.force.on:
-            self.button.setText("Force ON — click to release  [Space]")
+            action = "sweeping" if chirp else "ON"
+            self.button.setText(f"{noun.capitalize()} {action} — click to stop  [Space]")
             self.button.setStyleSheet("background-color: #c1121f; color: white; font-weight: bold;")
         else:
-            self.button.setText("Apply force  [Space]")
+            verb = "Start sweep" if chirp else ("Move ground" if s.base else "Apply force")
+            self.button.setText(f"{verb}  [Space]")
             self.button.setStyleSheet("")
 
 

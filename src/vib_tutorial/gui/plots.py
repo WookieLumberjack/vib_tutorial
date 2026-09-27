@@ -8,7 +8,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from ..core import ChainSystem, ModalResult, frf
+from ..core import ChainSystem, ModalResult, frf, transmissibility
 from .modes import Method, ModeEntry, time_constant_text
 from .style import FORCE_COLOR, MASS_COLORS, MODE_COLORS
 
@@ -62,6 +62,13 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
         legend = self.x_plot.legend
         size = legend.layout.effectiveSizeHint(QtCore.Qt.SizeHint.PreferredSize)
         legend.setGeometry(0, 0, size.width(), size.height())
+
+    def set_input(self, base: bool) -> None:
+        """Label the lower plot for a force (N) or a ground displacement (m)."""
+        if base:
+            self.f_plot.setLabel("left", "Ground x_g", units="m")
+        else:
+            self.f_plot.setLabel("left", "Force", units="N")
 
     def set_auto_range(self, on: bool) -> None:
         """Auto-fit the y axes each frame, or freeze them at their current range."""
@@ -416,7 +423,7 @@ def frequency_grid(result: ModalResult, points: int) -> np.ndarray:
 
 
 class FrfPlot(pg.GraphicsLayoutWidget):
-    """Receptance |X_i / F| and phase for a force applied at the target mass."""
+    """Receptance |X_i / F| and phase for a force at the target mass, or transmissibility |X_i / X_g|."""
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -443,11 +450,13 @@ class FrfPlot(pg.GraphicsLayoutWidget):
         self.mag.addItem(self.drive_lines[0])
         self.phase.addItem(self.drive_lines[1])
 
-    def set_system(self, system: ChainSystem, result: ModalResult, input_dof: int) -> None:
+    def set_system(self, system: ChainSystem, result: ModalResult, input_dof: int, base: bool = False) -> None:
+        """Receptance for a force at input_dof, or with base=True the transmissibility from the ground."""
         f = frequency_grid(result, 1500)
         lo, hi = f[0], f[-1]
         freqs_n = np.array([m.fn_hz for m in result.modes if lo < m.fn_hz])
-        H = frf(system, f, input_dof)
+        H = transmissibility(system, f) if base else frf(system, f, input_dof)
+        self.mag.setLabel("left", "|X / X_g|" if base else "|X / F|  [m/N]")
 
         for c in self.mag_curves + self.mode_lines:
             self.mag.removeItem(c)
@@ -470,7 +479,8 @@ class FrfPlot(pg.GraphicsLayoutWidget):
             )
             self.mag.addItem(line)
             self.mode_lines.append(line)
-        self.mag.setTitle(f"Force at m{input_dof + 1} · dotted: fₙ · dashed: drive", size="10pt")
+        source = "Ground motion" if base else f"Force at m{input_dof + 1}"
+        self.mag.setTitle(f"{source} · dotted: fₙ · dashed: drive", size="10pt")
         self.mag.setXRange(math.log10(lo), math.log10(hi), padding=0)
 
     def set_drive(self, freq_hz: float | None) -> None:

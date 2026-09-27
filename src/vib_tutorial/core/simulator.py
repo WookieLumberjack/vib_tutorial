@@ -20,6 +20,17 @@ force, found with Van Loan's matrix exponential. So, to rounding error,
 
 where energy_added counts the jumps in stored energy when the state is set
 (a mode release) or the parameters are edited.
+
+With base excitation the input is the ground displacement u = x_g instead of
+a force. It reaches mass 1 through spring 1 and damper 1, as
+k1 x_g + c1 x_g', so the step also depends on the input's slope du:
+
+    w' = Aw w,  w = [z, u, du],  z[k+1] = Phi z[k] + g_u u[k] + g_du du
+
+(for a force g_du only carries the FOH interpolation). The ground is then
+piecewise linear in time and simulated exactly. x stays the absolute
+displacement; spring 1 stretches by x1 - x_g, and "work" is the work the
+moving ground does on the chain, -integral of (tension in element 1) x_g' dt.
 """
 
 from __future__ import annotations
@@ -52,11 +63,36 @@ def foh_discretize(A: np.ndarray, B: np.ndarray, h: float) -> tuple[np.ndarray, 
     return Phi, G1 - G2, G2
 
 
-def foh_quadratic_integrals(A: np.ndarray, b: np.ndarray, h: float, Qs: list[np.ndarray]) -> list[np.ndarray]:
+def input_system(A: np.ndarray, b: np.ndarray, b_du: np.ndarray | None = None) -> np.ndarray:
+    """Aw for w = [z, u, du] over a step with u(s) = u0 + du s: z' = A z + b u + b_du du."""
+    ns = A.shape[0]
+    Aw = np.zeros((ns + 2, ns + 2))
+    Aw[:ns, :ns] = A
+    Aw[:ns, ns] = b
+    if b_du is not None:
+        Aw[:ns, ns + 1] = b_du
+    Aw[ns, ns + 1] = 1.0
+    return Aw
+
+
+def foh_input_step(
+    A: np.ndarray, b: np.ndarray, b_du: np.ndarray | None, h: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (Phi, g0, g1): z1 = Phi z0 + g0 u0 + g1 u1 for a scalar input linear over the step."""
+    ns = A.shape[0]
+    E = scipy.linalg.expm(input_system(A, b, b_du) * h)
+    g_du = E[:ns, ns + 1] / h
+    return E[:ns, :ns], E[:ns, ns] - g_du, g_du
+
+
+def foh_quadratic_integrals(
+    A: np.ndarray, b: np.ndarray, h: float, Qs: list[np.ndarray], b_du: np.ndarray | None = None
+) -> list[np.ndarray]:
     """Exact integrals of quadratic forms over one first-order-hold step.
 
     Over the step, w(s) = [z(s), u(s), du] with u(s) = u0 + du s and
-    du = (u1 - u0) / h obeys the linear system w' = Aw w. For each symmetric
+    du = (u1 - u0) / h obeys the linear system w' = Aw w (see input_system;
+    b_du feeds the input's slope, as a damper to a moving ground does). For each symmetric
     Q (size len(z) + 2) this returns W with
 
         integral_0^h w(s)^T Q w(s) ds = w0^T W w0,   w0 = [z0, u0, du],
@@ -64,12 +100,8 @@ def foh_quadratic_integrals(A: np.ndarray, b: np.ndarray, h: float, Qs: list[np.
     using Van Loan's result: expm([[-Aw^T, Q], [0, Aw]] h) = [[., F12], [0, F22]]
     and W = F22^T F12.
     """
-    ns = A.shape[0]
-    m = ns + 2
-    Aw = np.zeros((m, m))
-    Aw[:ns, :ns] = A
-    Aw[:ns, ns] = b
-    Aw[ns, ns + 1] = 1.0
+    Aw = input_system(A, b, b_du)
+    m = Aw.shape[0]
     out = []
     for Q in Qs:
         big = np.zeros((2 * m, 2 * m))
@@ -90,17 +122,28 @@ class Simulator:
         self.state = np.zeros(2 * system.n)
         self._A, self._B = state_space(system)
         self._fmax_natural = self._highest_natural_freq()
-        self._cache: dict[float, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-        self._energy_cache: dict[tuple[float, int], tuple[np.ndarray, np.ndarray]] = {}
+        self._cache: dict[tuple, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        self._energy_cache: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
+        # The input where the last step ended, and whether it was a ground motion.
+        # The next advance starts from it, so a switch or a jump in the input
+        # is a ramp over one step whose work is counted, not a jump in stored energy.
+        self._u = 0.0
+        self._u_base = self.force.settings.base
+        self.ground_velocity = np.empty(0)  # x_g' (m/s) over each step of the last advance
         self.work = 0.0  # J, done by the applied force since reset
         self.dissipated = 0.0  # J, taken out by the dampers since reset
         self.energy_added = 0.0  # J, jumps in stored energy from set_state and parameter edits
         self.ledger = np.empty((0, 3))  # (added, work, dissipated) at each sample of the last advance
 
     @property
+    def ground(self) -> float:
+        """Ground displacement x_g (m) now; 0 unless the input is a ground motion."""
+        return self._u if self._u_base else 0.0
+
+    @property
     def stored_energy(self) -> float:
-        """Kinetic plus potential energy now (J)."""
-        return stored_energy(self.system, self.displacement, self.velocity)
+        """Kinetic plus potential energy now (J); spring 1 stretches by x1 - x_g."""
+        return stored_energy(self.system, self.displacement - self.ground, self.velocity)
 
     # ----------------------------------------------------------------- setup
     def set_system(self, system: ChainSystem) -> None:
@@ -129,6 +172,7 @@ class Simulator:
         self.t = 0.0
         self.state = np.zeros(2 * self.system.n)
         self.force.reset()
+        self._u = 0.0
         self.work = self.dissipated = self.energy_added = 0.0
 
     def set_displacement(self, x: np.ndarray) -> None:
@@ -164,41 +208,70 @@ class Simulator:
         while the user drags the frequency around.
         """
         s = self.force.settings
-        fmax = self._fmax_natural
-        if s.kind is ForceKind.HARMONIC:
-            fmax = max(fmax, s.freq_hz)
+        fmax = max(self._fmax_natural, s.max_freq_hz)
         h = MAX_STEP if fmax <= 0 else min(MAX_STEP, 1.0 / (STEPS_PER_PERIOD * fmax))
         if s.kind is ForceKind.PULSE:
             h = min(h, s.pulse_duration / 10.0)
         return 2.0 ** math.floor(math.log2(h))
 
-    def _discrete(self, h: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        if h not in self._cache:
-            self._cache[h] = foh_discretize(self._A, self._B, h)
-        return self._cache[h]
+    def _input(self) -> tuple[tuple, np.ndarray, np.ndarray | None]:
+        """(key, b, b_du): how the scalar input u and its slope enter z' = A z + b u + b_du u'."""
+        if self.force.settings.base:
+            # The ground pulls mass 1 through k1 and c1: A[n:, :n] @ 1 = -M^-1 K 1 = -k1/m1 e1.
+            n = self.system.n
+            ones = np.ones(n)
+            b = np.zeros(2 * n)
+            b_du = np.zeros(2 * n)
+            b[n:] = -self._A[n:, :n] @ ones
+            b_du[n:] = -self._A[n:, n:] @ ones
+            return ("base",), b, b_du
+        j = self.force.settings.target
+        return ("force", j), self._B[:, j], None
 
-    def _energy_forms(self, h: float, j: int) -> tuple[np.ndarray, np.ndarray]:
-        """(W_dissipated, W_work) for steps of length h with the force on mass j."""
-        key = (h, j)
-        if key not in self._energy_cache:
+    def _discrete(self, h: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        key, b, b_du = self._input()
+        if (h, key) not in self._cache:
+            self._cache[h, key] = foh_input_step(self._A, b, b_du, h)
+        return self._cache[h, key]
+
+    def _energy_forms(self, h: float) -> tuple[np.ndarray, np.ndarray]:
+        """(W_dissipated, W_work) for steps of length h with the current input."""
+        key, b, b_du = self._input()
+        if (h, key) not in self._energy_cache:
             n = self.system.n
             m = 2 * n + 2
-            u = 2 * n  # index of the force in w = [x, v, u, du]
-            Qd = np.zeros((m, m))
-            Qd[n : 2 * n, n : 2 * n] = self.system.matrices()[1]  # v^T C v
+            u, du = 2 * n, 2 * n + 1  # indices of the input and its slope in w = [x, v, u, du]
+            C = self.system.matrices()[1]
             Qw = np.zeros((m, m))
-            Qw[u, n + j] = Qw[n + j, u] = 0.5  # u v_j
-            Wd, Ww = foh_quadratic_integrals(self._A, self._B[:, j], h, [Qd, Qw])
-            self._energy_cache[key] = (Wd, Ww)
-        return self._energy_cache[key]
+            if key[0] == "base":
+                # Dampers see v - x_g' 1 (C 1 = c1 e1): (v - du 1)^T C (v - du 1).
+                S = np.zeros((n, m))
+                S[:, n : 2 * n] = np.eye(n)
+                S[:, du] = -1.0
+                Qd = S.T @ C @ S
+                # Work by the ground: -(k1 (x1 - u) + c1 (v1 - du)) du.
+                k1, c1 = self.system.stiffness[0], self.system.damping[0]
+                for i, coef in ((0, -k1), (u, k1), (n, -c1)):
+                    Qw[i, du] += 0.5 * coef
+                    Qw[du, i] += 0.5 * coef
+                Qw[du, du] += c1
+            else:
+                Qd = np.zeros((m, m))
+                Qd[n : 2 * n, n : 2 * n] = C  # v^T C v
+                Qw[u, n + key[1]] = Qw[n + key[1], u] = 0.5  # u v_j
+            Wd, Ww = foh_quadratic_integrals(self._A, b, h, [Qd, Qw], b_du)
+            self._energy_cache[h, key] = (Wd, Ww)
+        return self._energy_cache[h, key]
 
     def advance(self, duration: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Advance by approximately `duration` seconds of simulated time.
 
         Returns per-step samples (t, x, v, force) with shapes (k,), (k, n),
-        (k, n), (k,), which the GUI appends to its history buffers. The
-        energy ledger at each of those samples is left in ``self.ledger``,
-        shape (k, 3): columns energy_added, work, dissipated.
+        (k, n), (k,), which the GUI appends to its history buffers; force is
+        the ground displacement (m) with base excitation. The energy ledger at
+        each of those samples is left in ``self.ledger``, shape (k, 3):
+        columns energy_added, work, dissipated, and the ground's velocity over
+        each step in ``self.ground_velocity``.
         """
         h = self.step_size()
         steps = min(MAX_STEPS_PER_ADVANCE, max(0, int(round(duration / h))))
@@ -207,15 +280,20 @@ class Simulator:
         zs = np.empty((steps, 2 * n))
         fs = np.empty(steps)
         self.ledger = np.empty((steps, 3))
+        self.ground_velocity = np.zeros(steps)
+        base = self.force.settings.base
+        if base != self._u_base:
+            # The new kind of input starts from 0. A displaced ground snaps back,
+            # which changes spring 1's energy at once: book it like a set_state.
+            before = self.stored_energy
+            self._u, self._u_base = 0.0, base
+            self.energy_added += self.stored_energy - before
         if steps == 0:
             return ts, zs[:, :n], zs[:, n:], fs
 
-        Phi, G0, G1 = self._discrete(h)
-        j = self.force.settings.target
-        g0 = G0[:, j].copy()
-        g1 = G1[:, j].copy()
+        Phi, g0, g1 = self._discrete(h)
         z = self.state
-        z_start, f_start = z.copy(), self.force.value()
+        z_start, f_start = z.copy(), self._u
         f0 = f_start
         for k in range(steps):
             self.force.advance(h)
@@ -227,14 +305,17 @@ class Simulator:
             fs[k] = f1
             f0 = f1
         self.state = z
+        self._u = float(fs[-1])
 
         # Energy ledger: each step's integrals are quadratic in w0 = [z0, f0, (f1 - f0) / h].
         z0s = np.vstack([z_start, zs[:-1]])
         f0s = np.concatenate([[f_start], fs[:-1]])
         w = np.column_stack([z0s, f0s, (fs - f0s) / h])
-        Wd, Ww = self._energy_forms(h, j)
+        Wd, Ww = self._energy_forms(h)
         dissipated = self.dissipated + np.cumsum(np.einsum("ki,ij,kj->k", w, Wd, w))
         work = self.work + np.cumsum(np.einsum("ki,ij,kj->k", w, Ww, w))
         self.dissipated, self.work = float(dissipated[-1]), float(work[-1])
         self.ledger = np.column_stack([np.full(steps, self.energy_added), work, dissipated])
+        if base:
+            self.ground_velocity = w[:, -1]
         return ts, zs[:, :n], zs[:, n:], fs

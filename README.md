@@ -25,7 +25,7 @@ uv run pytest         # run the tests
 
 | Area | What it holds |
 |---|---|
-| **Left** | System parameters (m, k, c for each element, 1 to 8 masses), the applied force, and simulation controls (run/pause, speed, plot window, auto-scale) |
+| **Left** | System parameters (m, k, c for each element, 1 to 8 masses), the excitation (a force on a mass, or motion of the ground), and simulation controls (run/pause, speed, plot window, auto-scale) |
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
@@ -38,9 +38,11 @@ measures the FRF from simulated force and response signals, as in a lab (all bel
 
 - **Edit any mass, stiffness, or damping value while the simulation runs.** The state is
   kept, so you see the system respond to the change.
-- **Apply a force to any mass**: a step, a harmonic `F sin(2πft)`, or a rectangular pulse.
-  Press **Space** (or the button) to switch it on and off, and watch the transients as it
-  starts and stops.
+- **Apply a force to any mass**: a step, a harmonic `F sin(2πft)`, a rectangular pulse, or a
+  chirp (a frequency sweep). Press **Space** (or the button) to switch it on and off, and
+  watch the transients as it starts and stops.
+- **Shake the ground instead** (base excitation): the wall moves with the same waveforms,
+  and the *Frequency response* tab shows the transmissibility (below).
 - **Pluck a mass**: drag any mass sideways with the mouse and let go (below).
 - **Tune the drive frequency to a natural frequency** from the "Tune to…" menu to see
   resonance build up.
@@ -69,6 +71,28 @@ mode, so most of the energy starts in mode 1 (see *Energy: by mode*). Pull on m1
 more of it goes into the higher modes.
 
 ![Holding m2 after an earlier pluck: the static shape, the holding force, and the shares of its energy in each mode](docs/images/pluck.png)
+
+### Chirp and ground motion
+
+*Type → Chirp* sweeps the drive frequency from a start to an end frequency over the sweep
+time (linear, or logarithmic for equal time per octave), then stops. Each mode swells in
+turn as the sweep passes it, and the dashed drive line on the *Frequency response* tab
+follows the frequency. Below, a 40 s sweep from 2 to 7 Hz at m4 is plotted in modal
+coordinates: mode 1 rings from the switch-on and decays, then modes 2, 3 and 4 swell
+one after the other. Sweep faster and the peaks come later and lower.
+
+![A chirp from 2 to 7 Hz at m4 in modal coordinates: modes 2, 3 and 4 swell in turn as the sweep passes them](docs/images/chirp.png)
+
+*Input → Ground motion (base)* moves the wall instead of pushing a mass, with the same
+waveforms and an amplitude in mm. The ground reaches the chain only through k<sub>1</sub>
+and c<sub>1</sub>, as the force k<sub>1</sub>x<sub>g</sub> + c<sub>1</sub>ẋ<sub>g</sub> on m1.
+The plots show absolute displacements, the lower plot shows x<sub>g</sub>, and the
+*Frequency response* tab shows the transmissibility |X<sub>i</sub>/X<sub>g</sub>|. It is 1
+at low frequency, where the chain moves with the ground, and falls away above the modes.
+The energy balance counts the work the moving ground does. Element forces, modal
+coordinates and energy by mode use the motion relative to the ground.
+
+![Ground motion at 1.6 Hz, 5 mm: the wall moves, and the transmissibility is 1 at low frequency and peaks at each mode](docs/images/base_excitation.png)
 
 ### Two modal-analysis methods
 
@@ -343,6 +367,15 @@ contributes $2\,\mathrm{Re}(\psi_x\eta_r)$ to $x$. The app scales each coordinat
 mode's displacement at the mass where its normalized shape is 1: $\phi_{r,\max}\,q_r$
 and $2\,\mathrm{Re}(\eta_r)$.
 
+**Ground motion.** When the wall moves as $x_g(t)$, element 1 stretches by $x_1 - x_g$,
+so the ground enters as a force on mass 1:
+
+$$M\ddot{x} + C\dot{x} + Kx = (k_1x_g + c_1\dot{x}_g)\,e_1, \qquad
+\frac{X}{X_g} = H(\omega)\,e_1\,(k_1 + i\omega c_1)$$
+
+The simulator steps this exactly for a piecewise-linear $x_g$ by adding $x_g$ and its
+slope to the state of the matrix exponential, as for the energy integrals below.
+
 **Frequency response.** The receptance is solved directly at each frequency:
 $H(\omega) = (K - \omega^2 M + i\omega C)^{-1}$. It is also a sum of modal terms. With the
 state-space eigenvectors $V$ (and $V^{-1}$), every eigenvalue contributes a residue matrix,
@@ -422,10 +455,17 @@ E = modal_energies(chain, res, x, v)                           # (steps, N), J; 
 sim.energy_added + sim.work - sim.dissipated - sim.stored_energy  # ~1e-15 J: exact balance
 added, work, dissipated = sim.ledger.T                          # the same ledger at each step of the last advance
 
-from vib_tutorial.core import element_forces, pluck_shape
+from vib_tutorial.core import ForceController, ForceKind, ForceSettings, element_forces, pluck_shape, transmissibility
 
 spring, damper = element_forces(chain, x, v)                   # (steps, N) tension, N
 sim.set_displacement(pluck_shape(chain, 1, 0.02))              # hold m2 at 20 mm, then let go
+
+shake = ForceController(ForceSettings(kind=ForceKind.CHIRP, sweep_start_hz=0.5, sweep_end_hz=8.0,
+                                      base=True, base_amplitude=0.005))  # 5 mm ground sweep
+sim = Simulator(chain, shake)
+shake.switch_on()
+t, x, v, xg = sim.advance(2.0)                                 # xg: the ground motion, m
+transmissibility(chain, np.array([0.5, 2.0]))                  # X / X_g, (freqs, N)
 
 from vib_tutorial.core import compare_modes, craig_bampton
 
@@ -458,7 +498,6 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 
 ## Ideas for extension
 
-- Frequency sweep (chirp) forcing, and base excitation instead of an applied force
 - Tuned mass damper and vibration absorber presets
 - Save and load parameter presets for classroom exercises
 - Substructuring: time-simulate the Craig–Bampton reduced model alongside the full one
