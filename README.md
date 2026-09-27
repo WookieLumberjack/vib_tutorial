@@ -17,7 +17,12 @@ ground ──[k1,c1]── m1 ──[k2,c2]── m2 ──[k3,c3]── m3 ─�
 
 ## Quick start
 
-Requires [uv](https://docs.astral.sh/uv/).
+Standalone builds for Windows, macOS (Apple Silicon) and Linux, which need no Python
+install, are on the [Releases](https://github.com/WookieLumberjack/vib_tutorial/releases)
+page. They aren't code-signed; the release notes say how to open them past the system's
+warning.
+
+To run from source instead, you need [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync               # create .venv and install dependencies
