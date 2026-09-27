@@ -660,3 +660,85 @@ def test_pluck_shape_is_the_static_shape_under_a_point_load():
     # Without k1 the chain floats on the held mass; a part joined to nothing stays put.
     np.testing.assert_allclose(pluck_shape(ChainSystem([1.0] * 3, [0.0, 400.0, 400.0], [0.0] * 3), 2, 0.02), 0.02)
     np.testing.assert_allclose(pluck_shape(ChainSystem([1.0] * 3, [400.0, 0.0, 0.0], [0.0] * 3), 0, 0.02), [0.02, 0, 0])
+
+
+def test_chirp_sweeps_its_frequency_and_stops():
+    for log, f_mid in ((False, 5.0), (True, 3.0)):
+        force = ForceController(
+            ForceSettings(kind=ForceKind.CHIRP, sweep_start_hz=1.0, sweep_end_hz=9.0, sweep_time=4.0, sweep_log=log)
+        )
+        force.switch_on()
+        assert force.frequency() == 1.0
+        for _ in range(2000):
+            force.advance(1e-3)
+        assert force.frequency() == pytest.approx(f_mid)  # halfway: arithmetic or geometric mean
+        # The phase is the integral of the frequency.
+        cycles = 2.0 * (1.0 + 5.0) / 2 if not log else 8.0 / math.log(9.0)
+        assert abs(np.exp(1j * force.phase) - np.exp(2j * math.pi * cycles)) < 1e-6
+        for _ in range(2001):
+            force.advance(1e-3)
+        assert not force.active and force.value() == 0.0
+
+
+def test_chirp_steps_resolve_the_highest_frequency():
+    force = ForceController(ForceSettings(kind=ForceKind.CHIRP, sweep_start_hz=40.0, sweep_end_hz=2.0))
+    sim = Simulator(ChainSystem.uniform(2), force)
+    assert sim.step_size() <= 1 / (40 * 40.0)
+
+
+def test_base_excitation_matches_transmissibility():
+    from vib_tutorial.core import transmissibility
+
+    s = ChainSystem([1.0, 2.0, 1.0], [400.0, 300.0, 200.0], [3.0, 1.0, 2.0])
+    f_hz, xg = 2.9, 0.004
+    force = ForceController(ForceSettings(kind=ForceKind.HARMONIC, freq_hz=f_hz, base=True, base_amplitude=xg))
+    sim = Simulator(s, force)
+    force.switch_on()
+    _run(sim, 60.0)
+    _, xs, _, fs = sim.advance(5.0)
+    assert (fs.max() - fs.min()) / 2 == pytest.approx(xg, rel=1e-4)  # fs is the ground motion
+    measured = (xs.max(axis=0) - xs.min(axis=0)) / 2
+    np.testing.assert_allclose(measured, xg * np.abs(transmissibility(s, np.array([f_hz]))[0]), rtol=2e-3)
+    # Statically the chain just moves with the ground.
+    np.testing.assert_allclose(transmissibility(s, np.array([1e-6]))[0], 1.0, atol=1e-6)
+
+
+def test_base_step_moves_the_chain_with_the_ground():
+    s = ChainSystem.uniform(3, damping=10.0)
+    force = ForceController(ForceSettings(kind=ForceKind.STEP, base=True, base_amplitude=0.02))
+    sim = Simulator(s, force)
+    force.switch_on()
+    _run(sim, 40.0)
+    np.testing.assert_allclose(sim.displacement, 0.02, atol=1e-9)
+    assert sim.ground == 0.02 and sim.stored_energy < 1e-12
+
+
+def test_energy_balance_with_base_excitation():
+    from vib_tutorial.core import element_forces, kinetic_energy, potential_energy
+
+    s = ChainSystem([1.0, 2.0, 0.5], [400.0, 300.0, 500.0], [15.0, 2.0, 2.0])
+    force = ForceController(
+        ForceSettings(kind=ForceKind.CHIRP, sweep_start_hz=0.5, sweep_end_hz=6.0, sweep_time=3.0, base=True)
+    )
+    sim = Simulator(s, force)
+    sim.set_displacement(np.array([0.01, -0.02, 0.03]))
+    force.switch_on()
+    _, xs, vs, fs = sim.advance(1.0)
+    added, work, dissipated = sim.ledger.T
+    xr, vr = xs - fs[:, None], vs - sim.ground_velocity[:, None]
+    stored = kinetic_energy(s, vs).sum(axis=1) + potential_energy(s, xr).sum(axis=1)
+    np.testing.assert_allclose(added + work - dissipated, stored, rtol=0, atol=1e-12)
+    # Work by the ground = -integral of (tension in element 1) x_g'; check by quadrature.
+    spring, damper = element_forces(s, xr, vr)
+    dt = sim.step_size()
+    assert sim.work == pytest.approx(-np.sum((spring[:, 0] + damper[:, 0]) * sim.ground_velocity) * dt, rel=1e-2)
+
+    # Switching the kind of input (or stepping the ground) mid-run keeps the balance.
+    for kind, base in ((ForceKind.STEP, True), (ForceKind.HARMONIC, False), (ForceKind.PULSE, True)):
+        force.switch_off()
+        force.settings.kind, force.settings.base = kind, base
+        force.switch_on()
+        _run(sim, 1.5)
+        assert abs(_balance(sim)) < 1e-10 * (sim.energy_added + abs(sim.work))
+    sim.reset()
+    assert sim.ground == 0.0

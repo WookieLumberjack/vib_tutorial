@@ -70,7 +70,8 @@ COORDS_TIP_COMMON = (
     "<p><b>Modal coordinates:</b> the same motion split into one curve per mode, "
     "in mode colors. Each curve is that mode's share of the displacement of the mass it "
     "moves most (where its shape is 1), so its size compares directly with x. "
-    "The past motion is projected onto the modes of the current parameters.</p>"
+    "The past motion is projected onto the modes of the current parameters. While the "
+    "ground moves, the modes split the motion relative to it, x − x<sub>g</sub>.</p>"
 )
 COORDS_TIP = {
     Method.CLASSICAL: COORDS_TIP_COMMON
@@ -88,7 +89,8 @@ COORDS_TIP = {
 ENERGY_COORDS_TIP = (
     "<p><b>Energy:</b> the energy bars beside the animation as time histories. "
     "Kinetic energy T, potential energy V and the stored energy T + V; the energy given "
-    "by a release or a parameter edit E<sub>0</sub>, the work done by the force W and "
+    "by a release or a parameter edit E<sub>0</sub>, the work done by the force (or the moving "
+    "ground) W and "
     "the energy dissipated by the dampers D, all since the last reset. At every instant</p>"
     "<p>&nbsp;&nbsp;E<sub>0</sub> + W = T + V + D.</p>"
     "<p>Release a mode: T and V swap twice per cycle while T + V decays and D rises to "
@@ -112,7 +114,8 @@ FORCES_COORDS_TIP = (
     "damper: c<sub>i</sub>(ẋ<sub>i</sub> − ẋ<sub>i−1</sub>)</p>"
     "<p>Positive is tension: the element is stretched (or stretching) and pulls its two "
     "masses together. <i>Spring + damper</i> is the total force the element carries; "
-    "for element 1 that is the force on the ground.</p>"
+    "for element 1 that is the force on the ground. With ground motion, element 1 stretches "
+    "by x<sub>1</sub> − x<sub>g</sub>.</p>"
     "<p>Apply a step force at the last mass: once the motion settles, every spring carries "
     "the full force and the dampers carry none. While it vibrates, each element also carries "
     "the inertia force of the masses beyond it. The damper force leads the spring force "
@@ -145,6 +148,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.entries = mode_entries(self.modal, self.method)
         self.running = True
         self._energy_scale = 0.0  # J at full bar height; follows the plot window while auto-scaling
+        self._ground_velocity = 0.0  # m/s over the last step, for the motion relative to the ground
+        self._force_active = False  # to notice a chirp or pulse ending by itself
 
         # --- left: inputs
         self.params = ParameterPanel(system)
@@ -451,8 +456,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_force_changed(self) -> None:
         s = self.force.settings
-        self.frf_plot.set_system(self.sim.system, self.modal, s.target)
-        self.frf_plot.set_drive(s.freq_hz if s.kind is ForceKind.HARMONIC else None)
+        self.frf_plot.set_system(self.sim.system, self.modal, s.target, base=s.base)
+        self._set_drive()
+        self.time_plot.set_input(s.base)
+
+    def _set_drive(self) -> None:
+        """Mark the drive frequency: the harmonic's, or where a running chirp has swept to."""
+        s = self.force.settings
+        chirping = s.kind is ForceKind.CHIRP and self.force.on
+        self.frf_plot.set_drive(self.force.frequency() if s.kind is ForceKind.HARMONIC or chirping else None)
 
     def _on_auto_scale(self, on: bool) -> None:
         self.chain.auto_scale = on
@@ -466,6 +478,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sim.reset()
         self.history.reset(self.sim.system.n)
         self._sim_target = 0.0
+        self._ground_velocity = 0.0
         self.force_panel.refresh()
 
     def _release_mode(self) -> None:
@@ -488,7 +501,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_mass_dragged(self, i: int, x: float) -> None:
         """Hold mass i at x (m) with the rest of the chain in static balance and at rest."""
-        self.sim.set_displacement(pluck_shape(self.sim.system, i, x))
+        xg = self.sim.ground  # a ground motion stops, but only once time runs again
+        self.sim.set_displacement(xg + pluck_shape(self.sim.system, i, x - xg))
 
     def _on_mass_released(self, _: int) -> None:
         self._sim_target = self.sim.t  # time stood still while the mass was held
@@ -496,16 +510,18 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_energy(self, es: np.ndarray) -> None:
         """Show the energy now; the stored energy in recent samples es sets the bar scale."""
         system, x, v = self.sim.system, self.sim.displacement, self.sim.velocity
+        xr, vr = x - self.sim.ground, v - self._ground_velocity  # relative to the ground
         if self.controls.auto_scale.isChecked() and es.size:
             self._energy_scale = float((es[:, 0] + es[:, 1]).max())
         self.energy.bars.set_state(
             EnergyState(
                 kinetic=float(kinetic_energy(system, v).sum()),
-                potential=float(potential_energy(system, x).sum()),
-                modal=modal_energies(system, self.modal, x, v),
+                potential=float(potential_energy(system, xr).sum()),
+                modal=modal_energies(system, self.modal, xr, vr),
                 added=self.sim.energy_added,
                 work=self.sim.work,
                 dissipated=self.sim.dissipated,
+                relative=bool(self.sim.ground or self._ground_velocity),
             ),
             self._energy_scale,
         )
@@ -532,35 +548,50 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sim_target = min(self._sim_target, self.sim.t + 0.25 * speed + 0.05)
             ts, xs, vs, fs = self.sim.advance(self._sim_target - self.sim.t)
             system = self.sim.system
+            # With ground motion fs is x_g; the springs and dampers see the motion relative to it.
+            xg = fs if self.force.settings.base else np.zeros_like(fs)
+            vg = self.sim.ground_velocity
+            if vg.size:
+                self._ground_velocity = float(vg[-1])
+            xr, vr = xs - xg[:, None], vs - vg[:, None]
             kinetic = kinetic_energy(system, vs).sum(axis=1)
-            potential = potential_energy(system, xs).sum(axis=1)
+            potential = potential_energy(system, xr).sum(axis=1)
             energy = np.column_stack([kinetic, potential, self.sim.ledger])
-            self.history.extend(ts, xs, vs, fs, energy, np.hstack(element_forces(system, xs, vs)))
+            forces = np.hstack(element_forces(system, xr, vr))
+            self.history.extend(ts, xs, vs, fs, energy, forces, np.column_stack([xg, vg]))
+        if self.force.active != self._force_active:  # e.g. a chirp reached its end
+            self._force_active = self.force.active
+            self.force_panel.refresh()
 
         # The simulation keeps running behind the other pages; skip drawing it.
         if self.pages.currentWidget() is not self.sim_page:
             return
         window = self.controls.window.value()
-        t, x, v, f, e, s_el = self.history.window(window)
+        t, x, v, f, e, s_el, g = self.history.window(window)
         peak = float(np.abs(x[-min(len(x), 20_000) :]).max()) if x.size else 0.0
         if held is None:
             s = self.force.settings
-            self.chain.update_state(self.sim.displacement, peak, self.force.value(), s.target, abs(s.amplitude))
+            force = 0.0 if s.base else self.force.value()  # a moving ground shows as the wall
+            self.chain.update_state(
+                self.sim.displacement, peak, force, s.target, abs(s.amplitude), ground=self.sim.ground
+            )
         else:  # the arrow shows the force holding the mass: the springs' pull on it, reversed
-            hold = float(self.sim.system.matrices()[2][held] @ self.sim.displacement)
-            self.chain.update_state(self.sim.displacement, peak, hold, held, abs(hold))
+            hold = float(self.sim.system.matrices()[2][held] @ (self.sim.displacement - self.sim.ground))
+            self.chain.update_state(self.sim.displacement, peak, hold, held, abs(hold), ground=self.sim.ground)
         if self.forces_view:
             y = self._element_curves(s_el)
         elif self.energy_view:
             y = energy_curves(e)
         elif self.modal_view:
             n = self.sim.system.n
-            y = x @ self._modal_map[:n] + v @ self._modal_map[n:]
+            y = (x - g[:, :1]) @ self._modal_map[:n] + (v - g[:, 1:]) @ self._modal_map[n:]
         else:
             y = x
         self.time_plot.update_data(t, y, f, window)
         if self.energy.isVisible():
             self._update_energy(e[-min(len(e), 20_000) :])
+        if self.force.settings.kind is ForceKind.CHIRP:
+            self._set_drive()
         if self.animate_modes.isChecked():
             self._animate_modes(2 * math.pi * MODE_ANIMATION_HZ * now)
         self.controls.time_label.setText(f"{self.sim.t:8.3f} s   (step {self.sim.step_size() * 1e3:.3g} ms)")

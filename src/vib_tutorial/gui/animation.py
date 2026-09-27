@@ -97,13 +97,15 @@ class ChainView(pg.PlotWidget):
         self.held: int | None = None  # mass being dragged
 
         pen = pg.mkPen(STRUCTURE_COLOR, width=2)
-        # Ground wall with hatching.
-        self.addItem(pg.PlotDataItem([0, 0], [-0.45, 0.45], pen=pg.mkPen(STRUCTURE_COLOR, width=4)))
+        # Ground wall with hatching; it moves with base excitation.
+        self._wall = [pg.PlotDataItem([0, 0], [-0.45, 0.45], pen=pg.mkPen(STRUCTURE_COLOR, width=4))]
         hx, hy = [], []
         for yy in np.linspace(-0.4, 0.45, 9):
             hx += [0, -0.1, np.nan]
             hy += [yy, yy - 0.1, np.nan]
-        self.addItem(pg.PlotDataItem(hx, hy, pen=pen, connect="finite"))
+        self._wall.append(pg.PlotDataItem(hx, hy, pen=pen, connect="finite"))
+        for item in self._wall:
+            self.addItem(item)
 
         self._pen = pen
         self._springs: list[pg.PlotDataItem] = []
@@ -168,8 +170,10 @@ class ChainView(pg.PlotWidget):
         return BASE_HEIGHT * float(np.clip(rel ** (1 / 3), 0.6, 1.5))
 
     # ---------------------------------------------------------------- update
-    def update_state(self, x: np.ndarray, peak: float, force: float, force_target: int, force_scale: float) -> None:
-        """Redraw for displacements x (m).
+    def update_state(
+        self, x: np.ndarray, peak: float, force: float, force_target: int, force_scale: float, ground: float = 0.0
+    ) -> None:
+        """Redraw for displacements x (m) and the ground at `ground` (m).
 
         peak is the largest recent |x| used for auto-scaling; force_scale is
         the force magnitude that maps to a full-length arrow.
@@ -181,7 +185,9 @@ class ChainView(pg.PlotWidget):
         self._scale_text.setText(f"= {_fmt_len(MAX_SWING / self.gain)}")
 
         rest_gap = SPACING - MASS_WIDTH
-        right_prev = 0.0
+        right_prev = self.gain * ground
+        for item in self._wall:
+            item.setPos(right_prev, 0)
         self._centers = (np.arange(self._n) + 1) * SPACING + self.gain * np.asarray(x[: self._n])
         for i in range(self._n):
             xc = self._centers[i]

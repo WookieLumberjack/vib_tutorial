@@ -19,7 +19,8 @@ BY_TYPE_TIP = (
     "V twice per cycle while their sum only decays.</p>"
     "<p><b>Since reset:</b> where the energy came from and where it went. <i>In</i>: "
     "energy given by releasing a mode or editing a parameter (a stiffer spring holds more "
-    "energy at the same stretch), and the work done by the force, ∫F·ẋ dt. <i>Out</i>: "
+    "energy at the same stretch), and the work done by the force, ∫F·ẋ dt, or by the moving "
+    "ground, −∫T<sub>1</sub>ẋ<sub>g</sub> dt (T<sub>1</sub>: tension in element 1). <i>Out</i>: "
     "the energy stored now, and the energy the dampers turned into heat, "
     "∫ẋ<sup>T</sup>Cẋ dt. Both are integrated exactly, so the two columns always match. "
     "A force that pushes against the motion takes energy out; it then shows in the "
@@ -39,6 +40,8 @@ BY_MODE_TIP = (
     "modes: release mode 3 with c<sub>1</sub> = 15 and watch the energy move to mode 1.</p>"
     "<p>The split uses the classical modes whichever <i>Method</i> is selected: the complex "
     "modes are not orthogonal in energy, so their energies do not add up to the total.</p>"
+    "<p>While the ground moves (base excitation) the modes split the motion relative to the "
+    "ground, x − x<sub>g</sub>, whose kinetic energy differs from T.</p>"
 )
 
 
@@ -58,6 +61,7 @@ class EnergyState:
     added: float = 0.0
     work: float = 0.0
     dissipated: float = 0.0
+    relative: bool = False  # modal holds the energy of the motion relative to a moving ground
 
     @property
     def stored(self) -> float:
@@ -155,8 +159,12 @@ class EnergyBars(QtWidgets.QWidget):
 
     def _paint_modes(self, p: QtGui.QPainter, group: QtCore.QRectF) -> None:
         s = self.state
-        total = s.stored
-        self._caption(p, group, f"Share of the stored energy ({fmt_energy(total)}) in each mode")
+        if s.relative:  # the modes split the motion relative to the ground, not T + V
+            total = float(s.modal.sum())
+            self._caption(p, group, f"Share of the energy relative to the ground ({fmt_energy(total)}) in each mode")
+        else:
+            total = s.stored
+            self._caption(p, group, f"Share of the stored energy ({fmt_energy(total)}) in each mode")
         bars = self._bars_rect(group)
         p.setPen(QtGui.QPen(QtGui.QColor("#e3e3e3"), 1))
         for frac in (0.25, 0.5, 0.75, 1.0):
@@ -238,7 +246,7 @@ class EnergyPanel(QtWidgets.QWidget):
                     ("potential V", ENERGY_COLORS["potential"]),
                     ("stored", ENERGY_COLORS["stored"]),
                     ("release or edit", ENERGY_COLORS["added"]),
-                    ("force work", FORCE_COLOR),
+                    ("work by force or ground", FORCE_COLOR),
                     ("dissipated", ENERGY_COLORS["dissipated"]),
                 )
             )

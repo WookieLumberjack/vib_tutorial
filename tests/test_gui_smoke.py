@@ -665,3 +665,60 @@ def test_drag_a_mass_and_let_go(app):
     QTest.mousePress(view.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=pixel(0.5 * SPACING, 0.4))
     assert view.held is None
     w.close()
+
+
+def test_base_excitation_and_chirp(app):
+    import math
+
+    import numpy as np
+
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.force_panel
+    p.button.click()  # a running force stops when the input changes
+    p.input.setCurrentIndex(1)
+    assert w.force.settings.base and not w.force.on
+    assert not p.target.isVisibleTo(p) and p.base_amplitude.isVisibleTo(p) and not p.amplitude.isVisibleTo(p)
+    assert p.button.text().startswith("Move ground")
+    assert w.frf_plot.mag.titleLabel.text.startswith("Ground motion")
+    assert "Ground" in w.time_plot.f_plot.getAxis("left").labelText
+
+    p.base_amplitude.setValue(5.0)
+    p.button.click()
+    for _ in range(4):
+        w._sim_target = w.sim.t + 0.1
+        w._tick()
+    assert w.force.settings.base_amplitude == 0.005 and w.sim.ground != 0.0
+    assert w.chain._wall[0].pos().x() == pytest.approx(w.chain.gain * w.sim.ground)
+    assert w.sim.work != 0.0
+    assert w.sim.energy_added + w.sim.work == pytest.approx(w.sim.stored_energy + w.sim.dissipated)
+    for key in ("modal", "forces", "energy"):
+        w.coords_combo.setCurrentIndex(w.coords_combo.findData(key))
+        w._tick()
+
+    # A short chirp: the drive line follows it, and the panel notices when it ends.
+    p.sweep_time.setValue(0.5)
+    p.kind.setCurrentIndex(list(ForceKind).index(ForceKind.CHIRP))
+    assert p.sweep_start.isVisibleTo(p) and not p.freq.isVisibleTo(p)
+    p.button.click()
+    assert "sweeping" in p.button.text()
+    drive = w.frf_plot.drive_lines[0]
+    w._sim_target = w.sim.t + 0.25
+    w._tick()
+    assert drive.isVisible()
+    assert 10 ** drive.value() == pytest.approx(w.force.frequency(), rel=1e-6) and w.force.frequency() > 1.0
+    while w.force.on:
+        w._sim_target = w.sim.t + 0.1
+        w._tick()
+    assert p.button.text().startswith("Start sweep") and not drive.isVisible()
+    assert not math.isnan(w.sim.stored_energy)
+
+    # Back to a force: the ground returns and the FRF is a receptance again.
+    p.input.setCurrentIndex(0)
+    w._sim_target = w.sim.t + 0.1
+    w._tick()
+    assert w.sim.ground == 0.0 and w.frf_plot.mag.titleLabel.text.startswith("Force at")
+    assert np.isclose(w.sim.energy_added + w.sim.work, w.sim.stored_energy + w.sim.dissipated)
+    w.close()

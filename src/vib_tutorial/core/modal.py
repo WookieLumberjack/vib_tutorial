@@ -249,6 +249,17 @@ def frf(system: ChainSystem, freqs_hz: np.ndarray, input_dof: int) -> np.ndarray
     return receptance(*system.matrices(), freqs_hz, e)
 
 
+def transmissibility(system: ChainSystem, freqs_hz: np.ndarray) -> np.ndarray:
+    """X_i / X_g for a harmonic ground motion x_g: shape (len(freqs), n), complex.
+
+    The ground acts on mass 1 through spring and damper 1 only, as a force
+    (k1 + i w c1) X_g, so this is receptance column 1 times that stiffness.
+    """
+    w = TWO_PI * np.asarray(freqs_hz, dtype=float)
+    k1, c1 = system.stiffness[0], system.damping[0]
+    return frf(system, freqs_hz, 0) * (k1 + 1j * w * c1)[:, None]
+
+
 def receptance(M: np.ndarray, C: np.ndarray, K: np.ndarray, freqs_hz: np.ndarray, f: np.ndarray) -> np.ndarray:
     """(K - w^2 M + i w C)^-1 f at each frequency, shape (len(freqs), len(f))."""
     w = TWO_PI * np.asarray(freqs_hz, dtype=float)
