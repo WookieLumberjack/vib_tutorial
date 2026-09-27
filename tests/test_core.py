@@ -792,3 +792,21 @@ def test_cms_response_of_a_reduced_model():
     force.switch_on()
     _, _, x_red, _ = resp.advance(1e-3)
     assert x_red[0, 5] > 0.0
+
+
+def test_one_substructure_without_a_cut():
+    from vib_tutorial.core import compare_modes, component_mode_synthesis, kept_ranges
+
+    s = ChainSystem.uniform(6)
+    full = modal_analysis(s)
+    guyan = component_mode_synthesis(s, [], [0])
+    assert guyan.labels == ["x6"] and guyan.n_red == 1
+    # Guyan onto the tip: omega^2 = the tip's static stiffness / the mass it drags along.
+    assert compare_modes(guyan, full)[0].error > 0.01
+    assert all(abs(c.error) < 1e-9 for c in compare_modes(component_mode_synthesis(s, [], [5]), full))
+    # Free interface: the one substructure's free modes are the chain's modes, so kept ones are exact.
+    rubin = component_mode_synthesis(s, [], [2], "rubin")
+    errors = [c.error for c in compare_modes(rubin, full)]
+    assert abs(errors[0]) < 1e-9 and abs(errors[1]) < 1e-9 and errors[2] > 0.01
+    assert kept_ranges(s, [], "macneal") == [(1, 5)]  # else no mass at all
+    assert kept_ranges(s, [], "craig-bampton") == [(0, 5)]

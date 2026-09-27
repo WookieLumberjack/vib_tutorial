@@ -185,7 +185,10 @@ def test_substructuring_page(app):
     # N set on this page drives the shared chain; the interface starts in the middle.
     page.dof.setValue(8)
     assert w.sim.system.n == 8 and w.params.dof.value() == 8
-    assert page.interface.currentText() == "m4"
+    assert page.interfaces == [] and len(page.cut_buttons) == 7  # starts as one substructure
+    assert page.model.labels == ["q_A1", "x8"]
+    page.cut_buttons[3].click()  # cut at m4
+    assert page.interfaces == [3] and page.cut_buttons[3].isChecked()
     assert page.model.labels == ["q_A1", "q_B1", "x4", "x8"]
     assert page.table.rowCount() == 8 and page.table.item(4, 3).text() == "not in model"
     assert page.table.horizontalHeaderItem(5).text() == "ζ CB" and page.table.item(0, 5).text() != "—"
@@ -207,7 +210,7 @@ def test_substructuring_page(app):
     assert all(c.error == pytest.approx(0.0, abs=1e-9) for c in page.comparisons)
 
     # Interface at the last possible mass: B has no interior DOFs, its spin is disabled.
-    page.interface.setCurrentIndex(page.interface.count() - 1)
+    page.set_interfaces([len(page.cut_buttons) - 1])
     assert not page.kept[1].isEnabled() and page.model.substructures[1].ni == 0
 
     # A parameter edit on the Simulation page reaches this page; a floating interior is reported.
@@ -232,6 +235,7 @@ def test_substructuring_time_response(app):
     w.show()
     w.pages.setCurrentWidget(page)
     page.dof.setValue(6)
+    page.set_interfaces([2])
     page.tabs.setCurrentWidget(page.time)
     app.processEvents()
     tv = page.time
@@ -272,12 +276,91 @@ def test_substructuring_time_response(app):
     tv.reset_button.click()
     assert tv.sim.t == 0.0 and not tv.force.active
 
-    # No model with one mass; the tab says why and stops.
+    # One mass is one substructure of just the tip: exact, 1 DOF.
     page.dof.setValue(1)
-    assert tv.sim is None and "at least 2 masses" in tv.header.text()
+    assert page.interfaces == [] and page.model.labels == ["x1"] and tv.sim is not None
+    # No model at all (Craig-Bampton with a floating interior): the tab says why.
+    page.dof.setValue(4)
+    w.params.rows[0][2].setValue(0.0)
+    w.params.rows[1][2].setValue(0.0)
+    assert tv.sim is None and "K_ii" in tv.header.text()
     w.pages.setCurrentWidget(w.sim_page)
     assert not tv._timer.isActive()
     w.set_theme("Light")
+    w.close()
+
+
+def test_substructuring_several_interfaces(app):
+    import pyqtgraph as pg
+
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    page = w.cms_page
+    w.show()
+    w.pages.setCurrentWidget(page)
+    page.dof.setValue(8)
+    page.set_interfaces([3])
+    app.processEvents()
+
+    # Click m2 and m6 on as well: four substructures, one "modes kept" row each.
+    page.cut_buttons[1].click()
+    page.cut_buttons[5].click()
+    assert page.interfaces == [1, 3, 5]
+    assert [sub.name for sub in page.model.substructures] == ["A", "B", "C", "D"]
+    assert len(page.kept) == 4 and page.kept_labels[3].text().endswith("Modes kept in D:</b>")
+    assert page.model.labels == ["q_A1", "q_B1", "q_C1", "q_D1", "x2", "x4", "x6", "x8"]
+    assert page.kept[3].maximum() == 1  # D is m7 (interior) and m8
+    assert "A: keep 1 of 1" in [i.textItem.toPlainText() for i in page.schematic._items
+                                 if isinstance(i, pg.TextItem)]
+    assert page.compare.current["rubin"] is not None and page.compare.current["rubin"].n_red == 8
+
+    # Fewer modes in C only; the other rows keep theirs.
+    page.kept[2].setValue(0)
+    assert [sub.n_kept for sub in page.model.substructures] == [1, 1, 0, 1]
+    page.guyan_button.click()
+    assert page.model.n_red == 4 and "Guyan" in page.summary.text()
+    page.exact_button.click()
+    assert all(c.error == pytest.approx(0.0, abs=1e-9) for c in page.comparisons)
+
+    # The component table names every substructure; the FRF shows the tip and each interface.
+    names = {page.component_table.item(r, 0).text()[0] for r in range(page.component_table.rowCount())}
+    assert names == {"A", "B", "C", "D"}
+    assert len(page.plots.frf_legend.items) == 8  # 4 masses, true and reduced
+
+    # The time response follows the tip and all three interfaces.
+    page.tabs.setCurrentWidget(page.time)
+    page.guyan_button.click()
+    tv = page.time
+    assert tv._dofs == [7, 1, 3, 5] and len(tv.e_curves) == 4
+    tv.button.click()
+    tv.step(0.3)
+    t, y = tv.history.window(10.0)
+    assert y.shape[1] == 8 and "interfaces" in tv.error_note.text()
+
+    # No cut: the whole chain is one substructure, with the tip its only boundary DOF.
+    page.set_interfaces([2])
+    assert len(page.kept) == 2
+    page.cut_buttons[2].click()
+    assert page.interfaces == [] and not page.cut_buttons[2].isChecked()
+    assert len(page.kept) == 1 and page.kept[0].maximum() == 7
+    assert [sub.name for sub in page.model.substructures] == ["A"]
+    assert "one substructure" in page.summary.text()
+    assert "nothing to join" in page.matrices.toPlainText()
+    page.guyan_button.click()
+    assert page.model.labels == ["x8"] and page.comparisons[0].error > 0.05  # Guyan onto the tip alone
+    assert tv._dofs == [7] and len(tv.e_curves) == 1
+    tv.step(0.3)
+    assert "interface" not in tv.error_note.text()
+    page.method.setCurrentIndex(2)  # MacNeal keeps at least one mode, or it would have no mass
+    assert page.kept[0].minimum() == 1 and page.model is not None
+    page.method.setCurrentIndex(0)
+    with pytest.raises(ValueError):
+        page.set_interfaces([7])
+
+    # A new N starts again from one cut in the middle.
+    page.dof.setValue(6)
+    assert page.interfaces == [] and len(page.cut_buttons) == 5
     w.close()
 
 
@@ -289,6 +372,7 @@ def test_substructuring_free_interface(app):
     w.show()
     w.pages.setCurrentWidget(page)
     page.dof.setValue(8)
+    page.set_interfaces([3])
     app.processEvents()
     assert page.compare.table.rowCount() == 8
     cb_error = page.comparisons[0].error

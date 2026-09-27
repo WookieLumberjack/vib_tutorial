@@ -43,7 +43,7 @@ class Theme:
     mass: tuple[str, ...] = ()
     # Mode shapes use a separate palette so they are not confused with masses.
     mode: tuple[str, ...] = ()
-    sub: tuple[str, ...] = ()  # substructures A, B (bands, springs, labels)
+    sub: tuple[str, ...] = ()  # substructures A, B, C, ... in turn (bands, springs, labels)
     roots: tuple[str, ...] = ()  # non-oscillatory (overdamped) roots in the FRF matrix
     force: str = "#c1121f"  # the force, and anything drawn to stand out (selection, sums)
     energy: dict[str, str] = field(default_factory=dict)  # kinetic, potential, stored, added, dissipated
@@ -79,7 +79,7 @@ LIGHT = Theme(
     fair="#a35f00",
     mass=("#1f77b4", "#ec7000", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#d35db1", "#0e9fae"),
     mode=("#264653", "#2a9d8f", "#b08900", "#e76f51", "#6a4c93", "#1982c4", "#62a01a", "#ff595e"),
-    sub=("#3a6ea5", "#d17a00", "#4f8f3a"),
+    sub=("#3a6ea5", "#d17a00", "#4f8f3a", "#8a4fa8"),
     roots=("#888888", "#b0b0b0", "#606060"),
     energy={"kinetic": "#1982c4", "potential": "#2a9d8f", "stored": "#7b889e", "added": "#6a4c93",
             "dissipated": "#e76f51"},
@@ -111,7 +111,7 @@ DARK = Theme(
     band_shade=(255, 255, 255, 16),
     mass=("#4c9fea", "#ff9a3c", "#4cc46a", "#ff6161", "#b996e6", "#d0a07c", "#f27fca", "#35d0e0"),
     mode=("#b9a4ff", "#3ccab8", "#e3b82c", "#f58f70", "#e07be0", "#4fb3f5", "#9ed84a", "#ff7c82"),
-    sub=("#6fa6e6", "#f2a33a", "#7ccb66"),
+    sub=("#6fa6e6", "#f2a33a", "#7ccb66", "#c792ea"),
     roots=("#9a9a9a", "#6f6f6f", "#c4c4c4"),
     force="#ff4f5e",
     energy={"kinetic": "#4fb3f5", "potential": "#3ccab8", "stored": "#a9b4c6", "added": "#a88cf0",
@@ -155,7 +155,7 @@ SOLARIZED = Theme(
     band_shade=(88, 110, 117, 22),
     mass=("#268bd2", "#cb4b16", "#6c7d00", "#dc322f", "#6c71c4", "#9a7400", "#d33682", "#1f8a82"),
     mode=("#6c71c4", "#1f8a82", "#8a6d00", "#bd3613", "#a0307e", "#1d6fa5", "#5f7000", "#b0185a"),
-    sub=("#1d6fa5", "#cb4b16", "#5f7000"),
+    sub=("#1d6fa5", "#cb4b16", "#5f7000", "#6c71c4"),
     roots=("#93a1a1", "#b4bcb6", "#657b83"),
     force="#dc322f",
     energy={"kinetic": "#1d6fa5", "potential": "#1f8a82", "stored": "#7f8f8f", "added": "#6c71c4",
@@ -198,7 +198,7 @@ NORD = Theme(
     band_shade=(236, 239, 244, 18),
     mass=("#81a1c1", "#d08770", "#a3be8c", "#e06c75", "#b48ead", "#ebcb8b", "#e39ec1", "#88c0d0"),
     mode=("#b48ead", "#8fbcbb", "#dfb65f", "#e5957a", "#8f9cff", "#6fc3e6", "#b4d38f", "#f08c93"),
-    sub=("#81a1c1", "#d08770", "#a3be8c"),
+    sub=("#81a1c1", "#d08770", "#a3be8c", "#b48ead"),
     roots=("#8e99ae", "#6b758a", "#b8c0cf"),
     force="#ef6f7a",
     energy={"kinetic": "#6fb7e6", "potential": "#8fbcbb", "stored": "#aab3c5", "added": "#c3a0d9",

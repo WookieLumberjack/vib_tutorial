@@ -2,7 +2,7 @@
 
 Both models feel the same force at the tip. The two chains are animated one above the
 other at the same scale, and the tip and interface displacements are plotted with their
-difference, so the reduction error shows up as motion rather than as a number in a table.
+differences, so the reduction error shows up as motion rather than as a number in a table.
 """
 
 from __future__ import annotations
@@ -45,8 +45,8 @@ class CMSTimeView(QtWidgets.QWidget):
         self.sim: CMSResponse | None = None
         self.model: CMSModel | None = None
         self._key: tuple | None = None
-        self._interface = 0
-        self.history = _Buffer()  # tip and interface: full, then reduced
+        self._dofs = [0]  # plotted masses: the tip, then each interface
+        self.history = _Buffer(2)  # the plotted masses: full model, then reduced
 
         self.header = QtWidgets.QLabel()
         self.header.setWordWrap(True)
@@ -102,8 +102,8 @@ class CMSTimeView(QtWidgets.QWidget):
             p.setDownsampling(auto=True, mode="peak")
             p.setMouseEnabled(x=False, y=False)
             p.hideButtons()
-        self.x_curves = [self.x_plot.plot() for _ in range(4)]  # tip full, tip reduced, interface full, reduced
-        self.e_curves = [self.e_plot.plot() for _ in range(2)]  # tip, interface
+        self.x_curves: list[pg.PlotDataItem] = []  # per plotted mass: full, reduced
+        self.e_curves: list[pg.PlotDataItem] = []  # per plotted mass: reduced - full
         self.error_note = QtWidgets.QLabel()
         mute(self.error_note)
 
@@ -139,22 +139,30 @@ class CMSTimeView(QtWidgets.QWidget):
         self.x_plot.legend.setBrush(colors.legend_brush())  # opaque, over the curves
         self._set_pens()
 
+    def _make_curves(self) -> None:
+        """Two displacement curves and one difference curve per plotted mass."""
+        for c in self.x_curves:
+            self.x_plot.removeItem(c)
+        for c in self.e_curves:
+            self.e_plot.removeItem(c)
+        self.x_curves = [self.x_plot.plot() for _ in range(2 * len(self._dofs))]
+        self.e_curves = [self.e_plot.plot() for _ in self._dofs]
+
     def _set_pens(self) -> None:
-        n = self.model.system.n if self.model is not None else 1
-        tip, j = n - 1, self._interface
         short = self.model.short_name if self.model is not None else "reduced"
-        styles = [
-            (colors.mass[tip], None, f"x{tip + 1} (tip) full"),
-            (colors.strong, DASH, f"x{tip + 1} {short}"),
-            (colors.mass[j], None, f"x{j + 1} (interface) full"),
-            (colors.mass[j], DASH, f"x{j + 1} {short}"),
-        ]
         self.x_plot.legend.clear()
-        for curve, (color, style, name) in zip(self.x_curves, styles):
-            # Full model wider, so it still shows where the reduced one lies on top of it.
-            curve.setPen(pg.mkPen(color, width=2 if style else 3.5, style=style or QtCore.Qt.PenStyle.SolidLine))
-            self.x_plot.legend.addItem(curve, name)
-        for curve, d in zip(self.e_curves, (tip, j)):
+        for k, d in enumerate(self._dofs):
+            where = "tip" if k == 0 else "interface"
+            styles = [
+                (colors.mass[d], None, f"x{d + 1} ({where}) full"),
+                (colors.strong if k == 0 else colors.mass[d], DASH, f"x{d + 1} {short}"),
+            ]
+            for curve, (color, style, name) in zip(self.x_curves[2 * k : 2 * k + 2], styles):
+                # Full model wider, so it still shows where the reduced one lies on top of it.
+                width = 2 if style else 3.5
+                curve.setPen(pg.mkPen(color, width=width, style=style or QtCore.Qt.PenStyle.SolidLine))
+                self.x_plot.legend.addItem(curve, name)
+        for curve, d in zip(self.e_curves, self._dofs):
             curve.setPen(pg.mkPen(colors.mass[d], width=2))
 
     def set_model(self, model: CMSModel | None, full: ModalResult | None, reason: str = "") -> None:
@@ -172,7 +180,9 @@ class CMSTimeView(QtWidgets.QWidget):
             self._draw()
             return
         n = model.system.n
-        self._interface = int(model.boundary[0])
+        self._dofs = [n - 1] + [int(b) for b in model.boundary[:-1]]
+        self.history = _Buffer(2 * len(self._dofs))
+        self._make_curves()
         on = self.force.on
         self.sim = CMSResponse(model, self.force)
         self.sim.reset()
@@ -183,7 +193,7 @@ class CMSTimeView(QtWidgets.QWidget):
             view.set_masses(model.system.masses)
             view.gain = 10.0
         self.full_view.setTitle(f"Full model: {n} DOFs", size="10pt")
-        self.red_view.setTitle(f"{model.name} reduced model: {model.n_red} DOFs "
+        self.red_view.setTitle(f"{model.name} reduced model: {model.n_red} DOF{'s' if model.n_red != 1 else ''} "
                                f"({model.n_modal} modal + {model.boundary.size} boundary)", size="10pt")
         self.header.setText(
             f"<b>The {model.name} model against the full chain, in time.</b> The same force acts at the "
@@ -279,7 +289,7 @@ class CMSTimeView(QtWidgets.QWidget):
             return
         self._target = min(self._target + duration, self.sim.t + 0.25 + duration)
         ts, xf, xr, _ = self.sim.advance(self._target - self.sim.t)
-        cols = [self.model.system.n - 1, self._interface]
+        cols = self._dofs
         self.history.extend(ts, np.hstack([xf[:, cols], xr[:, cols]]))
         if self.force.settings.kind is ForceKind.PULSE or not self.force.on:
             self._refresh_button()
@@ -293,7 +303,8 @@ class CMSTimeView(QtWidgets.QWidget):
             self.error_note.setText("")
             return
         t, y = self.history.window(self.window.value())
-        xf, xr = y[:, :2], y[:, 2:]
+        k = len(self._dofs)
+        xf, xr = y[:, :k], y[:, k:]
         x_now, r_now = sim.x_full, sim.x_reduced
         peak = max(float(np.abs(x_now).max()), float(np.abs(r_now).max()),
                    float(np.abs(xf).max()) if xf.size else 0.0, float(np.abs(xr).max()) if xr.size else 0.0)
@@ -319,8 +330,9 @@ class CMSTimeView(QtWidgets.QWidget):
             rel = float(np.sqrt(np.mean(err[:, 0] ** 2))) / rms if rms > MIN_SPAN else 0.0
             self.error_note.setText(
                 f"Over the last {min(w, t[-1] - t[0]):.3g} s: tip error {100 * rel:.3g}% RMS of the full "
-                f"model's tip motion; largest |error| {_fmt(float(np.abs(err[:, 0]).max()))} at the tip, "
-                f"{_fmt(float(np.abs(err[:, 1]).max()))} at the interface.   t = {sim.t:.2f} s"
+                f"model's tip motion; largest |error| {_fmt(float(np.abs(err[:, 0]).max()))} at the tip"
+                + (f", {_fmt(float(np.abs(err[:, 1:]).max()))} at the interface{'s' if k > 2 else ''}" if k > 1 else "")
+                + f".   t = {sim.t:.2f} s"
             )
 
 
@@ -339,11 +351,11 @@ def _fmt(meters: float) -> str:
 
 
 class _Buffer:
-    """Recent samples (t, 4 columns), dropping the oldest half when full: amortized O(1) per sample."""
+    """Recent samples (t, columns), dropping the oldest half when full: amortized O(1) per sample."""
 
-    def __init__(self, capacity: int = 200_000) -> None:
+    def __init__(self, columns: int, capacity: int = 200_000) -> None:
         self.t = np.empty(capacity)
-        self.y = np.empty((capacity, 4))
+        self.y = np.empty((capacity, columns))
         self.size = 0
 
     def clear(self) -> None:
