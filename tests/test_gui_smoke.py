@@ -580,6 +580,9 @@ def test_modal_extraction_on_the_test_page(app):
     w = MainWindow()
     w.show()
     p = w.test_page
+    # Fixed random signals and noise: with fresh ones, about 1 run in 8 fits an
+    # extra mode inside the 0.5-4 Hz band below.
+    p.seed = 0
     w.pages.setCurrentWidget(p)
     assert "complete" in p.results.notes.text()  # nothing extracted while measuring
     p.excitation.setCurrentIndex(list(Excitation).index(Excitation.PERIODIC_RANDOM))

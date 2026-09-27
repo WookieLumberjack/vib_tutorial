@@ -341,6 +341,7 @@ class ModalTestPage(QtWidgets.QWidget):
         self.result: ModalResult | None = None
         self.acq: Acquisition | None = None
         self.estimator: FrfEstimator | None = None
+        self.seed: int | None = None  # fixed random signals and noise (tests); None: fresh each test
         self.estimate: Estimate | None = None
         self.stab: Stabilization | None = None
         self.poles: list[tuple[int, int]] = []  # (order, index) of the LSCF poles used
@@ -607,6 +608,7 @@ class ModalTestPage(QtWidgets.QWidget):
             tip_width=self.tip.value() * 1e-3,
             burst=self.burst.value() / 100.0,
             sine_points=self.points.value(),
+            seed=self.seed,
         )
 
     def processing(self) -> Processing:
