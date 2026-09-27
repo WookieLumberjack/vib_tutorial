@@ -3,8 +3,8 @@ import math
 import numpy as np
 import pytest
 
-from vib_tutorial.core import ChainSystem, compare_coupled, coupled_model, modal_analysis, subsystems
-from vib_tutorial.core.modal_coupling import coupled_frf, sweep
+from vib_tutorial.core import ChainSystem, compare_coupled, coupled_model, frf, modal_analysis, subsystems
+from vib_tutorial.core.modal_coupling import alone_frf, coupled_frf, sweep
 
 
 def random_chain(rng, n):
@@ -113,6 +113,24 @@ def test_pairing_and_frf():
     # Static receptance at the interface: 1 / k_a (B's spring carries no static load).
     H0 = coupled_frf(model, np.array([1e-6]))[0]
     assert H0.real == pytest.approx(1.0 / model.osc_a.k, rel=1e-6)
+    # At the free end: x = u_a + g (u_b - u_a), so statically 1 / k_a + g^2 / k_b.
+    g = model.B.participation[0] * model.B.Phi[-1, 0]
+    H0 = coupled_frf(model, np.array([1e-6]), "free")[0]
+    assert H0.real == pytest.approx(1.0 / model.osc_a.k + g**2 / model.osc_b.k, rel=1e-6)
+
+
+def test_frf_points_exact_with_one_mass_each_side():
+    # One mass per side: the 2-DOF model is the chain, so both drive-point FRFs match it.
+    s = ChainSystem([1.0, 0.3], [400.0, 90.0], [2.0, 0.5])
+    model = coupled_model(s, 1)
+    f = np.geomspace(0.5, 20.0, 50)
+    for point, dof in (("interface", 0), ("free", 1)):
+        assert np.allclose(coupled_frf(model, f, point), frf(s, f, dof)[:, dof], rtol=1e-9)
+    # B alone at its tip, base on the ground: m2 on k2. A alone: m1 on k1.
+    H = alone_frf(model, f, "B")
+    w = 2 * np.pi * f
+    assert np.allclose(H, 1.0 / (90.0 - 0.3 * w**2 + 0.5j * w), rtol=1e-9)
+    assert np.allclose(alone_frf(model, f, "A"), 1.0 / (400.0 - w**2 + 2.0j * w), rtol=1e-9)
 
 
 def test_sweeps():

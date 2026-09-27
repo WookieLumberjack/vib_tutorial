@@ -20,12 +20,14 @@ from ..core import ChainSystem, ModalResult, frf, modal_analysis
 from ..core.modal_coupling import (
     A_MASS_NAMES,
     A_MASSES,
+    FRF_POINTS,
     SWEEPS,
     CoupledComparison,
     CoupledModel,
     Subsystem,
     Sweep,
     alone_frf,
+    chain_dof,
     compare_coupled,
     coupled_frf,
     coupled_model,
@@ -34,6 +36,7 @@ from ..core.modal_coupling import (
 )
 from .animation import MASS_WIDTH, spring_path
 from .coupling_notes import THEORY_HTML, matrices_html
+from .frf_matrix import log_ticks
 from .style import MAX_DOF, colors, text_on
 from .substructuring import error_color, zeta_text
 from .theming import mute
@@ -70,6 +73,16 @@ SWEEP_TIP = (
     "<p>B's dampers are scaled with it, so its damping ratios stay the same.</p>"
 )
 SWEEP_NAMES = {"frequency": "B's frequency (f_B / f_A)", "mass": "Mass ratio (μ = m_b / m_a)"}
+FRF_POINT_TIP = (
+    "<p>Where the force is applied and the response read (a drive-point FRF).</p>"
+    "<p><b>A's tip (the interface):</b> the 2-DOF model's u<sub>a</sub>.</p>"
+    "<p><b>B's tip (the free end):</b> where a force is usually applied. The 2-DOF model gives it as "
+    "u<sub>a</sub> + Γφ<sub>tip</sub>(u<sub>b</sub> − u<sub>a</sub>): B moving with its base plus its "
+    "mode relative to it (the shapes on the Mode shapes tab).</p>"
+    "<p>Both views also show A and B on their own, each at its own tip: A with B removed, B with A "
+    "removed and its base on the ground. Their peaks are the modes the oscillators stand for.</p>"
+)
+FRF_POINT_NAMES = {"interface": "A's tip (the interface)", "free": "B's tip (the free end)"}
 
 
 def sub_color(name: str) -> str:
@@ -332,6 +345,7 @@ class VeeringPlot(QtWidgets.QWidget):
         bottom = max(min(s.two_dof.min(), s.f_a.min()), 1e-9) / 1.4
         self.plot.setYRange(math.log10(bottom), math.log10(top), padding=0)
         self.plot.setXRange(math.log10(s.x[0]), math.log10(s.x[-1]), padding=0)
+        self.plot.getAxis("bottom").setTicks(log_ticks(s.x[0], s.x[-1], (1, 2, 5)))
         if kind == "frequency":
             self.plot.setLabel("bottom", "f_B / f_A (B's springs scaled)")
             self.plot.setTitle(f"μ = {model.mass_ratio:.3g} fixed", size="10pt")
@@ -425,44 +439,75 @@ class ShapePlots(pg.GraphicsLayoutWidget):
             p.getAxis("bottom").setTicks([[(0, "ground")] + [(i, f"m{i}") for i in range(1, n + 1)]])
 
 
-class InterfaceFrf(pg.PlotWidget):
-    """Receptance at A's tip for a force there: the chain, the 2-DOF model, and A alone."""
+class DrivePointFrf(QtWidgets.QWidget):
+    """Receptance at A's tip (the interface) or B's tip (the free end) for a force there.
+
+    The chain, the 2-DOF model, and the side that holds the point on its own.
+    """
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setLogMode(x=True, y=True)
-        self.showGrid(x=True, y=True, alpha=0.3)
-        self.setLabel("left", "|X / F|  [m/N]")
-        self.setLabel("bottom", "Frequency", units="Hz")
-        self.legend = self.addLegend(offset=(-5, 5))
+        self.point = QtWidgets.QComboBox()
+        for p in FRF_POINTS:
+            self.point.addItem(FRF_POINT_NAMES[p], p)
+        self.point.setToolTip(FRF_POINT_TIP)
+        top = QtWidgets.QHBoxLayout()
+        label = QtWidgets.QLabel("Force and response at:")
+        label.setToolTip(FRF_POINT_TIP)
+        top.addWidget(label)
+        top.addWidget(self.point)
+        top.addStretch(1)
+        self.plot = pg.PlotWidget()
+        self.plot.setLogMode(x=True, y=True)
+        self.plot.showGrid(x=True, y=True, alpha=0.3)
+        self.plot.setLabel("left", "|X / F|  [m/N]")
+        self.plot.setLabel("bottom", "Frequency", units="Hz")
+        self.legend = self.plot.addLegend(offset=(-5, 5))
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addLayout(top)
+        layout.addWidget(self.plot, 1)
+        self.point.currentIndexChanged.connect(self._redraw)
+        self._args: tuple[CoupledModel | None, ChainSystem, ModalResult] | None = None
 
     def apply_theme(self) -> None:
         self.legend.setBrush(colors.legend_brush())
 
     def set_model(self, model: CoupledModel | None, system: ChainSystem, full: ModalResult) -> None:
-        self.clear()
+        self._args = (model, system, full)
+        self._redraw()
+
+    def _redraw(self) -> None:
+        p = self.plot
+        p.clear()
         self.legend.clear()
+        model = self._args[0] if self._args is not None else None
         if model is None:
-            self.setTitle("")
+            p.setTitle("")
             return
-        tip = model.split - 1
+        _, system, full = self._args
+        point = self.point.currentData()
+        dof = chain_dof(model, point)
         fn = np.array([m.fn_hz for m in full.modes if m.fn_hz > 0])
         ref = np.concatenate([fn, model.fn_hz[model.fn_hz > 0]])
         lo = 0.2 * ref.min() if ref.size else 0.1
         hi = 1.5 * ref.max() if ref.size else 10.0
         f = np.unique(np.concatenate([np.geomspace(lo, hi, 2000), ref[(ref > lo) & (ref < hi)]]))
-        self.plot(f, np.abs(frf(system, f, tip)[:, tip]), pen=pg.mkPen(colors.strong, width=2),
-                  name=f"chain: x{tip + 1} / F{tip + 1}")
-        self.plot(f, np.abs(coupled_frf(model, f)), pen=pg.mkPen(colors.force, width=2, style=DASH),
-                  name="2-DOF: u_a / F")
-        self.plot(f, np.abs(alone_frf(model, f)), pen=pg.mkPen(sub_color("A"), width=1.5, style=DOT),
-                  name="A alone (B removed)")
+        x = f"x{dof + 1} / F{dof + 1}"
+        p.plot(f, np.abs(frf(system, f, dof)[:, dof]), pen=pg.mkPen(colors.strong, width=2), name=f"chain: {x}")
+        p.plot(f, np.abs(coupled_frf(model, f, point)), pen=pg.mkPen(colors.force, width=2, style=DASH),
+               name=f"2-DOF: {x}" if point == "free" else "2-DOF: u_a / F")
+        n = system.n
+        for side, name in (("A", f"A alone at m{model.split} (B removed)"),
+                           ("B", f"B alone at m{n} (A removed, base on ground)")):
+            p.plot(f, np.abs(alone_frf(model, f, side)), pen=pg.mkPen(sub_color(side), width=1.5, style=DOT),
+                   name=name)
         for fr in model.fn_hz:
             if lo < fr < hi:
-                self.addItem(pg.InfiniteLine(pos=math.log10(fr), angle=90,
-                                             pen=pg.mkPen(colors.grey, width=1, style=DOT)))
-        self.setTitle(f"Force at m{tip + 1}, A's tip (the interface) · dotted lines: 2-DOF fₙ", size="10pt")
-        self.setXRange(math.log10(lo), math.log10(hi), padding=0)
+                p.addItem(pg.InfiniteLine(pos=math.log10(fr), angle=90,
+                                          pen=pg.mkPen(colors.grey, width=1, style=DOT)))
+        where = "A's tip (the interface)" if point == "interface" else "B's tip (the free end)"
+        p.setTitle(f"Force at m{dof + 1}, {where} · dotted lines: 2-DOF fₙ", size="10pt")
+        p.setXRange(math.log10(lo), math.log10(hi), padding=0)
 
 
 class ModalCouplingPage(QtWidgets.QWidget):
@@ -589,14 +634,14 @@ class ModalCouplingPage(QtWidgets.QWidget):
         self.veering = VeeringPlot()
         self.veering.kind.currentIndexChanged.connect(self._on_sweep_kind)
         self.shapes = ShapePlots()
-        self.frf = InterfaceFrf()
+        self.frf = DrivePointFrf()
         self.matrices = QtWidgets.QTextBrowser()
         self.theory = QtWidgets.QTextBrowser()
         self.theory.setHtml(THEORY_HTML)
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(self.veering, "Veering && splitting")
         self.tabs.addTab(self.shapes, "Mode shapes")
-        self.tabs.addTab(self.frf, "Interface FRF")
+        self.tabs.addTab(self.frf, "Drive-point FRF")
         self.tabs.addTab(self.matrices, "Matrices (step by step)")
         self.tabs.addTab(self.theory, "Theory")
 

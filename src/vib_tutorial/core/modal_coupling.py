@@ -49,6 +49,7 @@ from .substructure import damped_poles
 A_MASSES = ("tip", "effective")  # how A's oscillator mass is chosen
 A_MASS_NAMES = {"tip": "modal mass at the interface", "effective": "effective mass (base)"}
 SWEEPS = ("frequency", "mass")
+FRF_POINTS = ("interface", "free")  # drive point of the FRF: A's tip, or B's tip (the chain's free end)
 
 
 @dataclass(frozen=True)
@@ -304,16 +305,43 @@ def _mac(a: np.ndarray, b: np.ndarray) -> float:
     return float((a @ b) ** 2 / den) if den > 0 else 0.0
 
 
-def coupled_frf(model: CoupledModel, freqs_hz: np.ndarray) -> np.ndarray:
-    """Receptance u_a / F of the 2-DOF model for a force on m_a (the interface), complex."""
-    return receptance(model.M, model.C, model.K, freqs_hz, np.array([1.0, 0.0]))[:, 0]
+def point_vector(model: CoupledModel, point: str) -> np.ndarray:
+    """t with x = t^T [u_a, u_b] at the chosen point of the chain; a force F there is t F on [m_a, m_b].
+
+    The interface (A's tip) is u_a. The free end (B's tip) is u_a + g (u_b - u_a),
+    g = Gamma phi_tip of B's mode, as in chain_shapes.
+    """
+    if point not in FRF_POINTS:
+        raise ValueError(f"point must be one of {FRF_POINTS}")
+    if point == "interface":
+        return np.array([1.0, 0.0])
+    g = float(model.B.participation[model.mode_b] * model.B.Phi[-1, model.mode_b])
+    return np.array([1.0 - g, g])
 
 
-def alone_frf(model: CoupledModel, freqs_hz: np.ndarray) -> np.ndarray:
-    """Receptance of A on its own at its tip (the interface), with every mode of A, complex."""
-    tip = np.zeros(model.split)
+def chain_dof(model: CoupledModel, point: str) -> int:
+    """0-based DOF of the chain at the chosen point: A's tip or B's tip (the last mass)."""
+    return model.split - 1 if point == "interface" else model.system.n - 1
+
+
+def coupled_frf(model: CoupledModel, freqs_hz: np.ndarray, point: str = "interface") -> np.ndarray:
+    """Drive-point receptance x / F of the 2-DOF model at the interface or the free end, complex."""
+    t = point_vector(model, point)
+    return receptance(model.M, model.C, model.K, freqs_hz, t) @ t
+
+
+def alone_frf(model: CoupledModel, freqs_hz: np.ndarray, side: str = "A") -> np.ndarray:
+    """Drive-point receptance of one side on its own at its tip, with every mode of it, complex.
+
+    A: at its free tip (the interface), B removed. B: at its tip (the chain's
+    free end), A removed and B's base on the ground, as B is analysed here.
+    """
+    if side not in ("A", "B"):
+        raise ValueError("side must be 'A' or 'B'")
+    sub = model.A if side == "A" else model.B
+    tip = np.zeros(sub.dofs.size)
     tip[-1] = 1.0
-    return receptance(model.A.M, model.A.C, model.A.K, freqs_hz, tip)[:, -1]
+    return receptance(sub.M, sub.C, sub.K, freqs_hz, tip)[:, -1]
 
 
 @dataclass(frozen=True)
