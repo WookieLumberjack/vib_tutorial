@@ -247,11 +247,12 @@ plots (row: response, column: force), on shared axes so their sizes compare dire
 
 ### Substructuring (component mode synthesis)
 
-The *Substructuring* page cuts the chain at one *interface* mass into substructure A
-(grounded) and B (free end). The boundary (master) DOFs are the interface and the last
-mass, which is where the force is applied, so the loaded DOF stays physical. Each
-substructure keeps a chosen number of its own modes plus one static shape per boundary
-DOF, and the reduced substructures are assembled on the shared interface DOF. The
+The *Substructuring* page cuts the chain at one or more *interface* masses (*Interfaces at*:
+click a mass to add or remove a cut) into substructures A (grounded), B, C, ... up to the
+free end. The boundary (master) DOFs are the interfaces and the last mass, which is where
+the force is applied, so the loaded DOF stays physical. Each substructure keeps its own
+chosen number of modes plus one static shape per boundary DOF, and the reduced
+substructures are assembled on the shared interface DOFs. The
 *Method* selector chooses the component modes:
 
 - **Craig–Bampton** (fixed interface): modes with the boundary held, plus constraint modes.
@@ -294,6 +295,12 @@ Everything on the page follows the selector:
   table.
 - **Presets**: *Guyan (0 modes)* (*Fewest modes* for the free-interface methods) and *All
   modes*.
+
+With more cuts each substructure is smaller and has fewer modes to keep, but every interface
+stays in the model as a physical DOF. For 8 masses and a 6-DOF model, one cut with 2 modes
+each gets modes 1 to 4 within 0.7%; two cuts with 1 mode each only within 2.3%:
+
+![Three substructures: cuts at m3 and m6 with one clamped mode each; the six columns of T are three clamped modes and three constraint-mode "tents"](docs/images/substructuring_three.png)
 
 For each substructure, partitioned into interior $i$ and boundary $b$ DOFs,
 
@@ -561,6 +568,3 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 ## Ideas for extension
 
 - Save and load parameter presets for classroom exercises
-- Substructuring: more than one interface (three or more substructures); the core
-  (`craig_bampton`) already accepts several cuts, so only the controls and schematic need
-  extending

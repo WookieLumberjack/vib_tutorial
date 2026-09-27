@@ -41,7 +41,9 @@ be changed or re-analysed without touching the others. <b>Component mode synthes
 <b>A</b> (grounded) and <b>B</b> (free end). The interface mass belongs to both: A owns its
 mass and the springs to its left, B owns the springs to its right. (The free-interface methods
 split the interface mass half and half instead, so that each substructure has mass wherever it
-can move.)</p>
+can move.) Click more masses under <i>Interfaces at</i> to cut the chain into three or more
+substructures, A, B, C, ... from the ground: each interface is shared by the two on either side
+of it, and each substructure keeps its own number of modes.</p>
 <p>The <i>Method</i> selector chooses how each substructure is reduced: <b>Craig–Bampton</b>
 (fixed interface, the next few sections) or <b>Rubin</b> and <b>MacNeal</b> (free interface,
 from <a href="#free">Free-interface methods</a> on). The <i>Compare methods</i> tab runs all
@@ -50,8 +52,8 @@ three on the same cut.</p>
 <h3>Boundary (master) and interior DOFs</h3>
 <ul>
 <li><b>Boundary DOFs x<sub>b</sub></b> are kept as physical displacements. Here they are
-the interface mass, shared by A and B, and the last mass of the chain, where the force is
-applied.</li>
+the interface masses, each shared by the substructures either side of it, and the last mass
+of the chain, where the force is applied.</li>
 <li><b>Interior DOFs x<sub>i</sub></b> are every other mass. Each belongs to exactly one
 substructure and is replaced by a few modal coordinates q.</li>
 </ul>
@@ -360,6 +362,11 @@ static solutions. So a slowly varying load is reproduced, and the error lives in
 vibration: in the ringing after a step, and above all near a resonance. A resonant peak is
 only about 2ζf<sub>n</sub> wide, so a frequency error of a few per cent there is a response
 error of tens of per cent, in amplitude and in phase.</li>
+<li><b>More substructures.</b> Each extra cut adds one boundary DOF that stays in the model
+whatever is kept, in exchange for smaller components with fewer, lower modes each. For the
+same model size, fewer interfaces and more modes are usually more accurate; many
+interfaces pay off when components are analysed or changed separately, or when their
+own modes are cheap to find.</li>
 <li><b>Interface size.</b> Every boundary DOF stays in the model. On this chain an
 interface is one DOF; on a 3D finite-element model it can be thousands, which is why
 interface reduction methods exist.</li>
@@ -398,6 +405,10 @@ two stay together (under 1%). Tune to <i>Mode 4 true</i> (3.84 Hz): the Craig–
 resonates at 4.11 Hz instead, so its tip moves 30% less and lags behind; the error is about
 half the motion. Keep 2 modes in each substructure and it drops to 9%; keep 3 and the two
 chains move as one.</li>
+<li>Still with 8 masses: one cut at m4 and 2 modes each gives 6 DOFs, and modes 1 to 4 are within
+0.71%. Now cut at m3 and m6 instead (click m4 off, m3 and m6 on) and keep 1 mode in each of A, B
+and C: also 6 DOFs, but 3 of them are interfaces and the tip, and mode 4 is 2.3% high. Click
+<i>Guyan</i>: 3 physical DOFs, and mode 3 is 16% high.</li>
 </ol>
 <p><b>Free interface</b> (back to 8 masses, the interface at m4, 1 mode each):</p>
 <ol start="9">
@@ -540,7 +551,7 @@ def matrices_html(model: CMSModel, full: ModalResult | None = None) -> str:
     parts.append("<h3>1. The full model</h3>")
     parts.append(
         f"<p>N = {n} physical DOFs. Boundary (master) DOFs: <b>{_join(_dof_labels(model.boundary))}</b> "
-        f"(the interface and the loaded tip). Interior: {_join([l for l, g in zip(labels, groups) if g == 'i'])}. "
+        f"(the interface{'s' if len(interfaces) > 1 else ''} and the loaded tip). Interior: {_join([l for l, g in zip(labels, groups) if g == 'i'])}. "
         "K [N/m], C [N·s/m] and M [kg]. C is assembled from the dampers exactly like K from the "
         "springs, so it has the same tridiagonal pattern.</p>"
     )
