@@ -50,7 +50,7 @@ from ..core.measurement import AA_CUTOFF
 from .modal_extraction import EXTRACTION_THEORY_HTML, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
 from .style import MAX_DOF, colors
-from .theming import mute
+from .theming import SETTINGS, mute
 
 FRAME_MS = 30
 STEP_BUDGET_MS = 25  # measuring per frame, so the page stays responsive
@@ -58,6 +58,15 @@ STEP_BUDGET_MS = 25  # measuring per frame, so the page stays responsive
 SPEEDS = [("Instant", None), ("100× real time", 100.0), ("30× real time", 30.0), ("10× real time", 10.0),
           ("3× real time", 3.0), ("Real time", 1.0)]
 BLOCK_SIZES = [256, 512, 1024, 2048, 4096, 8192]
+
+
+def saved_playback() -> str:
+    """The playback speed picked last (its label), kept in the user's settings like the theme."""
+    return str(QtCore.QSettings(*SETTINGS).value("playback", SPEEDS[0][0]))
+
+
+def save_playback(label: str) -> None:
+    QtCore.QSettings(*SETTINGS).setValue("playback", label)
 OVERLAPS = [0.0, 0.5, 0.75]
 
 # The window each excitation is normally measured with; picked when the excitation changes.
@@ -563,6 +572,7 @@ class ModalTestPage(QtWidgets.QWidget):
         self.speed = QtWidgets.QComboBox()
         for label, speed in SPEEDS:
             self.speed.addItem(label, speed)
+        self.speed.setCurrentIndex(max(0, self.speed.findText(saved_playback())))  # the last one picked
         self.speed.setToolTip(
             "<p>How fast the test plays. <b>Instant</b> measures it all at once. The others draw "
             "each block (or stepped-sine frequency) as it is recorded, at that multiple of real "
@@ -755,6 +765,7 @@ class ModalTestPage(QtWidgets.QWidget):
             self._timer.start()
 
     def _on_speed(self) -> None:
+        save_playback(self.speed.currentText())
         if self.speed.currentData() is None and self._shown is not None:  # finish the record now
             self._shown = None
             self.redraw()
