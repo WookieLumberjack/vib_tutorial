@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtWidgets
 
-from ..core import ChainSystem, ForceController, ForceKind
+from ..core import ChainSystem, ForceController, ForceKind, ForceSettings
 from ..core.model import DEFAULT_DAMPING, DEFAULT_MASS, DEFAULT_STIFFNESS
+from ..core.presets import Preset, presets
 from .modes import ModeEntry
 from .style import MAX_DOF, colors, text_on
 from .theming import mute
@@ -35,14 +36,41 @@ def fill_mode_combo(
             combo.addItem(f"{e.key} ({e.freq_hz:.3g} Hz)", data(e))
 
 
+PRESET_TIP = (
+    "<p>Load a ready-made chain, and the excitation that shows it off. The simulation is "
+    "reset.</p>"
+    "<p>The absorber presets put one small mass on the end of the chain, tuned to a mode of "
+    "the chain it is attached to. The <i>Frequency response</i> tab then also shows the "
+    "chain without it (dashed). Edit the absorber's k and c to see what mistuning does.</p>"
+)
+
+
 class ParameterPanel(QtWidgets.QGroupBox):
     """Mass, spring and damper values for each element of the chain."""
 
     changed = QtCore.Signal(object)  # ChainSystem
+    preset_chosen = QtCore.Signal(object)  # Preset, after its system has been loaded
 
     def __init__(self, system: ChainSystem, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__("System parameters", parent)
         layout = QtWidgets.QVBoxLayout(self)
+
+        preset_row = QtWidgets.QHBoxLayout()
+        preset_row.addWidget(QtWidgets.QLabel("Preset:"))
+        self.presets = presets()
+        self.preset = QtWidgets.QComboBox()
+        self.preset.addItem("Load a preset…")
+        for p in self.presets:
+            self.preset.addItem(p.name, p)
+        self.preset.setToolTip(PRESET_TIP)
+        self.preset.activated.connect(self._on_preset)
+        preset_row.addWidget(self.preset, 1)
+        layout.addLayout(preset_row)
+        self.preset_note = QtWidgets.QLabel()
+        self.preset_note.setWordWrap(True)
+        self.preset_note.setVisible(False)
+        mute(self.preset_note)
+        layout.addWidget(self.preset_note)
 
         top = QtWidgets.QHBoxLayout()
         top.addWidget(QtWidgets.QLabel("Number of masses:"))
@@ -85,7 +113,7 @@ class ParameterPanel(QtWidgets.QGroupBox):
         for i in range(system.n):
             label = QtWidgets.QLabel()
             m = spin(1e-3, 1e4, system.masses[i], 3)
-            k = spin(0.0, 1e7, system.stiffness[i], 1)
+            k = spin(0.0, 1e7, system.stiffness[i], 2)
             c = spin(0.0, 1e5, system.damping[i], 3)
             for col, w in enumerate((label, m, k, c)):
                 self.grid.addWidget(w, i + 1, col)
@@ -120,6 +148,29 @@ class ParameterPanel(QtWidgets.QGroupBox):
                 box.setValue(v)
                 box.blockSignals(False)
         self._emit()
+
+    def set_system(self, system: ChainSystem) -> None:
+        """Show every value of `system` (any number of masses) and emit it once."""
+        if system.n != len(self.rows):
+            self.dof.blockSignals(True)
+            self.dof.setValue(system.n)
+            self.dof.blockSignals(False)
+            self._build_rows(system)
+            self._emit()
+        else:
+            self._set_all(system)
+
+    def load_preset(self, preset: Preset) -> None:
+        self.set_system(preset.system)
+        self.preset_note.setText(f"<b>{preset.name}.</b> {preset.summary}")
+        self.preset_note.setVisible(True)
+        self.preset_chosen.emit(preset)
+
+    def _on_preset(self, index: int) -> None:
+        preset = self.preset.itemData(index)
+        self.preset.setCurrentIndex(0)
+        if preset is not None:
+            self.load_preset(preset)
 
     def _reset_defaults(self) -> None:
         self._set_all(ChainSystem.uniform(len(self.rows), DEFAULT_MASS, DEFAULT_STIFFNESS, DEFAULT_DAMPING))
@@ -246,6 +297,26 @@ class ForcePanel(QtWidgets.QGroupBox):
         self.target.addItems([f"m{i + 1}" for i in range(n)])
         self.target.setCurrentIndex(min(self.force.settings.target, n - 1))
         self.target.blockSignals(False)
+        self._apply()
+
+    def load(self, s: ForceSettings) -> None:
+        """Show the settings `s` (switching the excitation off) and apply them."""
+        self.force.switch_off()
+        values = (
+            (self.input, int(s.base)), (self.target, s.target), (self.kind, list(ForceKind).index(s.kind)),
+            (self.amplitude, s.amplitude), (self.base_amplitude, s.base_amplitude * 1e3),
+            (self.freq, s.freq_hz), (self.duration, s.pulse_duration), (self.sweep_start, s.sweep_start_hz),
+            (self.sweep_end, s.sweep_end_hz), (self.sweep_time, s.sweep_time), (self.sweep_log, s.sweep_log),
+        )
+        for w, v in values:
+            w.blockSignals(True)
+            if isinstance(w, QtWidgets.QComboBox):
+                w.setCurrentIndex(min(v, w.count() - 1))
+            elif isinstance(w, QtWidgets.QCheckBox):
+                w.setChecked(v)
+            else:
+                w.setValue(v)
+            w.blockSignals(False)
         self._apply()
 
     def set_modes(self, entries: list[ModeEntry]) -> None:

@@ -858,3 +858,39 @@ def test_switch_themes_live(app):
     finally:
         w.set_theme("Light")
         w.close()
+
+
+def test_load_presets(app):
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    names = [w.params.preset.itemText(i) for i in range(w.params.preset.count())]
+    tmd = names.index("Tuned mass damper (Den Hartog)")
+    w.force_panel.button.click()
+    w._sim_target = 0.5
+    w._tick()
+    w.params.preset.activated.emit(tmd)
+    assert w.params.preset.currentIndex() == 0  # a one-shot menu
+    preset = w.params.presets[tmd - 1]
+    assert w.sim.system.n == 2 and len(w.params.rows) == 2
+    assert list(w.sim.system.stiffness) == pytest.approx(list(preset.system.stiffness), rel=1e-3)
+    assert w.sim.t == 0.0 and not w.force.on  # starts from rest, force off
+    assert w.force.settings.target == 0 and w.force.settings.freq_hz == pytest.approx(preset.force.freq_hz, abs=1e-3)
+    assert w.frf_compare.isChecked() and w.tabs.currentWidget() is w.frf_tab
+    assert "without m2" in w.frf_plot.mag.titleLabel.text
+    assert len(w.frf_plot.mag_curves) == 3  # x1, x2 and x1 without the absorber
+    assert "Den Hartog" in w.params.preset_note.text()
+
+    # The building: ground motion, five masses.
+    w.params.preset.activated.emit(names.index("TMD on a 4-storey building"))
+    assert w.sim.system.n == 5 and w.force.settings.base
+    assert w.force_panel.target.isHidden()  # no mass to pick for ground motion
+    w.force_panel.button.click()
+    w._sim_target = 0.5
+    w._tick()
+    assert w.sim.t > 0.1
+
+    # Back to the plain chain: no comparison.
+    w.params.preset.activated.emit(names.index("Uniform chain (4 masses)"))
+    assert w.sim.system.n == 4 and not w.force.settings.base and not w.frf_compare.isChecked()
+    assert len(w.frf_plot.mag_curves) == 4

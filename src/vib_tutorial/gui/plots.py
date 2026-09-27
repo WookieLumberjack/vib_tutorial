@@ -8,7 +8,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from ..core import ChainSystem, ModalResult, frf, transmissibility
+from ..core import ChainSystem, ModalResult, frf, modal_analysis, transmissibility
 from .modes import Method, ModeEntry, time_constant_text
 from .style import colors
 
@@ -476,10 +476,28 @@ class FrfPlot(pg.GraphicsLayoutWidget):
         for line in self.drive_lines:
             line.setPen(pg.mkPen(colors.force, width=2, style=QtCore.Qt.PenStyle.DashLine))
 
-    def set_system(self, system: ChainSystem, result: ModalResult, input_dof: int, base: bool = False) -> None:
-        """Receptance for a force at input_dof, or with base=True the transmissibility from the ground."""
+    def set_system(
+        self,
+        system: ChainSystem,
+        result: ModalResult,
+        input_dof: int,
+        base: bool = False,
+        reference: ChainSystem | None = None,
+    ) -> None:
+        """Receptance for a force at input_dof, or with base=True the transmissibility from the ground.
+
+        A reference system (fewer masses: the chain without its absorber) is drawn thin and dashed,
+        unless the force is on a mass it lacks.
+        """
         f = frequency_grid(result, 1500)
         lo, hi = f[0], f[-1]
+        if reference is not None and not base and input_dof >= reference.n:
+            reference = None
+        if reference is not None:
+            # Its resonant peaks, so a lightly damped one is not clipped (its undamped fₙ is
+            # left out: an undamped absorber tuned to it would put an exact zero there).
+            peaks = [m.damped.fd_hz for m in modal_analysis(reference).modes if m.damped is not None]
+            f = np.union1d(f, [p for p in peaks if lo < p < hi])
         freqs_n = np.array([m.fn_hz for m in result.modes if lo < m.fn_hz])
         H = transmissibility(system, f) if base else frf(system, f, input_dof)
         self.mag.setLabel("left", "|X / X_g|" if base else "|X / F|  [m/N]")
@@ -495,6 +513,11 @@ class FrfPlot(pg.GraphicsLayoutWidget):
             self.mag_curves.append(self.mag.plot(f, np.abs(H[:, i]), pen=pen, name=f"x{i + 1}"))
             ph = np.degrees(np.unwrap(np.angle(H[:, i])))
             self.phase_curves.append(self.phase.plot(f, ph, pen=pen))
+        if reference is not None:
+            H0 = transmissibility(reference, f) if base else frf(reference, f, input_dof)
+            for i in range(reference.n):
+                pen = pg.mkPen(colors.mass[i], width=1.5, style=QtCore.Qt.PenStyle.DashLine)
+                self.mag_curves.append(self.mag.plot(f, np.abs(H0[:, i]), pen=pen))
 
         self.mode_lines = []
         for r, fn in enumerate(freqs_n):
@@ -506,7 +529,8 @@ class FrfPlot(pg.GraphicsLayoutWidget):
             self.mag.addItem(line)
             self.mode_lines.append(line)
         source = "Ground motion" if base else f"Force at m{input_dof + 1}"
-        self.mag.setTitle(f"{source} · dotted: fₙ · dashed: drive", size="10pt")
+        without = f" · thin dashed: without m{system.n}" if reference is not None else ""
+        self.mag.setTitle(f"{source} · dotted: fₙ · dashed: drive{without}", size="10pt")
         self.mag.setXRange(math.log10(lo), math.log10(hi), padding=0)
 
     def set_drive(self, freq_hz: float | None) -> None:

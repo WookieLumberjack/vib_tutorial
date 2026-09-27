@@ -68,6 +68,10 @@ legible on its background. The choice is remembered.
   mode's share. *Plot coordinates → Energy* draws the same quantities against time (below).
 - **Plot the force in every spring and damper** (*Plot coordinates → Element forces*):
   the springs, the dampers, or both together (below).
+- **Load a preset** (*System parameters → Preset*): the plain chain, an undamped
+  vibration absorber, a tuned mass damper with Den Hartog's tuning, or a damper on the roof
+  of a 4-storey building shaken by the ground, each with the excitation that shows it off
+  (below).
 - **Slow motion** (0.05× to 2×) for the higher modes, and auto-scaled animation and plots
   so small motions stay visible.
 
@@ -103,6 +107,30 @@ The energy balance counts the work the moving ground does. Element forces, modal
 coordinates and energy by mode use the motion relative to the ground.
 
 ![Ground motion at 1.6 Hz, 5 mm: the wall moves, and the transmissibility is 1 at low frequency and peaks at each mode](docs/images/base_excitation.png)
+
+### Vibration absorbers and tuned mass dampers
+
+*System parameters → Preset* loads a chain with one small mass hung on the end of it, tuned
+to a mode of the chain it is attached to, and sets up the excitation. The *Frequency
+response* tab then also shows the chain without it, thin and dashed (*Compare with the
+chain without its last mass*).
+
+- **Vibration absorber (undamped)**: a 0.1 kg absorber on a 1 kg, 3.18 Hz machine, tuned
+  to 3.18 Hz with no damper. Driven there, the machine stands still: the absorber's
+  spring pushes back with exactly the applied force. The one resonance becomes two, one
+  either side.
+- **Tuned mass damper (Den Hartog)**: a 5% damper tuned to f<sub>a</sub>/f<sub>1</sub> =
+  1/(1 + μ) with ζ<sub>a</sub> = √(3μ/8(1 + μ)³). The resonance at 40 times the static
+  deflection becomes two flat peaks under 6. Set c2 to 0 or to 5 to see why the damping
+  has an optimum.
+- **TMD on a 4-storey building**: the default chain shaken by the ground at its first
+  mode, with a damper on the roof sized from mode 1's *modal mass* there
+  (1/φ<sub>roof</sub>², φ mass-normalized).
+
+Edit the absorber's k and c to see what mistuning does. The *Background* tab derives the
+antiresonance, the fixed points and Den Hartog's tuning.
+
+![Tuned mass damper: driven at the old resonance, the primary m1 moves under a third as much as the absorber; its FRF has two low peaks where it had one tall one (dashed)](docs/images/tuned_mass_damper.png)
 
 ### Two modal-analysis methods
 
@@ -427,6 +455,7 @@ $w_k^T W w_k$, so the energy balance closes to rounding error.
   (`scipy.linalg.eig`), the MAC pairing, the modal-coordinate map, and the frequency response.
 - `core/frf_matrix.py`: the full receptance matrix and its modal (pole–residue) terms.
 - `core/simulator.py`: the exact first-order-hold time stepper and its exact energy ledger.
+- `core/presets.py`: the preset chains, vibration absorbers and Den Hartog's tuning.
 - `core/energy.py`: kinetic, potential and stored energy, and the energy in each mode.
 - `core/measurement.py`: the virtual modal test: excitation signals, a fast exact response
   (the FOH update diagonalized into one first-order filter per eigenvalue), anti-alias
@@ -479,6 +508,11 @@ shake.switch_on()
 t, x, v, xg = sim.advance(2.0)                                 # xg: the ground motion, m
 transmissibility(chain, np.array([0.5, 2.0]))                  # X / X_g, (freqs, N)
 
+from vib_tutorial.core.presets import den_hartog, tuned_mass_damper, with_absorber
+
+tmd = tuned_mass_damper(ChainSystem.uniform(4), mu=0.05)       # 5-mass chain, damper on m4 tuned to mode 1
+den_hartog(0.05)                                               # (f_a / f_1, zeta_a) = (0.952, 0.127)
+
 from vib_tutorial.core import compare_modes, craig_bampton
 
 s = ChainSystem.uniform(8)
@@ -510,7 +544,6 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 
 ## Ideas for extension
 
-- Tuned mass damper and vibration absorber presets
 - Save and load parameter presets for classroom exercises
 - Substructuring: time-simulate the Craig–Bampton reduced model alongside the full one
   under the same tip force, so the reduction error shows up in the animation and time
