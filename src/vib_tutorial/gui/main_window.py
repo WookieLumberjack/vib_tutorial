@@ -298,16 +298,16 @@ class MainWindow(QtWidgets.QMainWindow):
         splitter.setSizes([400, 750, 550])
         self.sim_page = splitter
 
-        # --- second page: substructuring (same chain, its own layout)
+        # --- the other pages: same chain, each its own layout
         self.cms_page = SubstructuringPage()
         self.pages = QtWidgets.QTabWidget()
         self.pages.setDocumentMode(True)
         self.pages.addTab(self.sim_page, "Simulation && modal analysis")
         self.frf_page = FrfMatrixPage()
         self.pages.addTab(self.frf_page, "FRF matrix")
-        self.pages.addTab(self.cms_page, "Substructuring (CMS)")
         self.coupling_page = ModalCouplingPage()
         self.pages.addTab(self.coupling_page, "Modal coupling")
+        self.pages.addTab(self.cms_page, "Substructuring (CMS)")
         self.test_page = ModalTestPage()
         self.pages.addTab(self.test_page, "Virtual modal test")
         self.theme_combo = QtWidgets.QComboBox()

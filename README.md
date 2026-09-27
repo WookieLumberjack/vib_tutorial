@@ -29,11 +29,12 @@ uv run pytest         # run the tests
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
-Four more pages work on the same chain: **FRF matrix** shows every term of the receptance
-matrix and how the modes build it up, **Substructuring (CMS)** reduces the chain by
-component mode synthesis (Craig–Bampton, Rubin or MacNeal), **Modal coupling** joins two
-halves of the chain one mode each, to show when their modes split, and **Virtual modal test**
-measures the FRF from simulated force and response signals, as in a lab (all below).
+Four more pages work on the same chain, in order from analysis to simplification to test:
+**FRF matrix** shows every term of the receptance matrix and how the modes build it up,
+**Modal coupling** joins two halves of the chain one mode each, to show when their modes split,
+**Substructuring (CMS)** reduces the chain by component mode synthesis (Craig–Bampton, Rubin or
+MacNeal), and **Virtual modal test** measures the FRF from simulated force and response signals,
+as in a lab (all below).
 
 ### Themes
 
@@ -246,6 +247,48 @@ plots (row: response, column: force), on shared axes so their sizes compare dire
 
 ![FRF matrix page: mode 4 left out of the sum; the end-to-end term H14 misses above 5 Hz](docs/images/frf_matrix.png)
 
+### Modal coupling
+
+Two systems that are each fine on their own can misbehave once joined: when a mode of one is
+close in frequency to a mode of the other, and the masses are not too different, the two
+modes **split**. This is how a vibration absorber works, but it usually happens when nobody
+meant it to. The **Modal coupling** page shows it on the chain. *Split after* cuts the chain into
+**A** (the masses up to the cut, on the ground as before) and **B** (the rest, with the spring
+and damper that joined it to A tied to the ground instead). Each is solved on its own, one mode of
+each is replaced by a single-DOF oscillator that keeps its frequency and modal damping ratio, and
+the two oscillators are joined again, B's on A's:
+
+```
+ground ──[k_a,c_a]── m_a ──[k_b,c_b]── m_b
+```
+
+The oscillator masses are the masses the joint feels:
+
+- **B**: its **effective mass** along x, Γ² with Γ = φ<sup>T</sup>M**1** (φ mass-normalized),
+  since B is joined at its base. The rest of B's mass (its other modes) moves rigidly with the
+  base, so it is added to m<sub>a</sub> as B's **residual mass**.
+- **A**: its **modal mass at the interface**, 1/φ<sub>tip</sub>², since A is joined at its tip.
+  A's effective mass can be chosen instead, to see how much worse it does.
+
+With these choices the 2-DOF model is a Rayleigh–Ritz model of the chain (B's part is
+Craig–Bampton with one mode kept; see the next section), so its two frequencies are upper bounds of the chain's lowest
+two. The page compares them with the chain's (frequency, exact damping ratio, MAC) and draws the
+2-DOF modes on the chain. Any mode of A can be coupled with any mode of B. The *Drive-point FRF*
+tab compares the receptance of the chain and of the 2-DOF model at the interface (A's tip) or at
+the free end (B's tip, where a force is usually applied), with A alone (B removed) and B alone
+(A removed, its base on the ground) for reference. *Matrices (step by step)* works both masses through with the current
+numbers: the generalized mass and mass normalization (why 1/φ<sub>tip</sub>² is a mass), the
+influence vector **r** solved from a unit base motion, each mode projected on how the joint loads it
+(a point load **e**<sub>tip</sub> on A, the inertia M**r** on B), the 2-DOF matrices, and the
+Rayleigh–Ritz check, with a notation table.
+
+The **Veering & splitting** tab sweeps B's frequency (or the mass ratio μ = m<sub>b</sub>/m<sub>a</sub>)
+and plots the chain's and the 2-DOF model's frequencies. Near f<sub>B</sub> = f<sub>A</sub> the two
+modes veer apart instead of crossing; two oscillators tuned exactly end up √μ·f<sub>a</sub> apart,
+whatever μ.
+
+![Modal coupling: m3–m4 made light (0.1 kg) and tuned to m1–m2; the 2-DOF model (dashed) follows the chain's two lowest modes through the veering, within 0.33%](docs/images/modal_coupling.png)
+
 ### Substructuring (component mode synthesis)
 
 The *Substructuring* page starts with the whole chain as one substructure, whose only
@@ -345,48 +388,6 @@ model's $x_b(t)$, so it keeps every interior mode and its only error is the erro
 ![Back expansion: driven at mode 4 with 2 modes kept per substructure, the coupled recovery of the force in k2 is off by nearly 40%; the enhanced recovery brings it to about 12%](docs/images/substructuring_recovery.png)
 
 ![Compare methods: the same cut reduced three ways; Craig–Bampton and Rubin converge to the exact mode 3, MacNeal does not](docs/images/substructuring_compare.png)
-
-### Modal coupling
-
-Two systems that are each fine on their own can misbehave once joined: when a mode of one is
-close in frequency to a mode of the other, and the masses are not too different, the two
-modes **split**. This is how a vibration absorber works, but it usually happens when nobody
-meant it to. The **Modal coupling** page shows it on the chain. *Split after* cuts the chain into
-**A** (the masses up to the cut, on the ground as before) and **B** (the rest, with the spring
-and damper that joined it to A tied to the ground instead). Each is solved on its own, one mode of
-each is replaced by a single-DOF oscillator that keeps its frequency and modal damping ratio, and
-the two oscillators are joined again, B's on A's:
-
-```
-ground ──[k_a,c_a]── m_a ──[k_b,c_b]── m_b
-```
-
-The oscillator masses are the masses the joint feels:
-
-- **B**: its **effective mass** along x, Γ² with Γ = φ<sup>T</sup>M**1** (φ mass-normalized),
-  since B is joined at its base. The rest of B's mass (its other modes) moves rigidly with the
-  base, so it is added to m<sub>a</sub> as B's **residual mass**.
-- **A**: its **modal mass at the interface**, 1/φ<sub>tip</sub>², since A is joined at its tip.
-  A's effective mass can be chosen instead, to see how much worse it does.
-
-With these choices the 2-DOF model is a Rayleigh–Ritz model of the chain (B's part is
-Craig–Bampton with one mode kept), so its two frequencies are upper bounds of the chain's lowest
-two. The page compares them with the chain's (frequency, exact damping ratio, MAC) and draws the
-2-DOF modes on the chain. Any mode of A can be coupled with any mode of B. The *Drive-point FRF*
-tab compares the receptance of the chain and of the 2-DOF model at the interface (A's tip) or at
-the free end (B's tip, where a force is usually applied), with A alone (B removed) and B alone
-(A removed, its base on the ground) for reference. *Matrices (step by step)* works both masses through with the current
-numbers: the generalized mass and mass normalization (why 1/φ<sub>tip</sub>² is a mass), the
-influence vector **r** solved from a unit base motion, each mode projected on how the joint loads it
-(a point load **e**<sub>tip</sub> on A, the inertia M**r** on B), the 2-DOF matrices, and the
-Rayleigh–Ritz check, with a notation table.
-
-The **Veering & splitting** tab sweeps B's frequency (or the mass ratio μ = m<sub>b</sub>/m<sub>a</sub>)
-and plots the chain's and the 2-DOF model's frequencies. Near f<sub>B</sub> = f<sub>A</sub> the two
-modes veer apart instead of crossing; two oscillators tuned exactly end up √μ·f<sub>a</sub> apart,
-whatever μ.
-
-![Modal coupling: m3–m4 made light (0.1 kg) and tuned to m1–m2; the 2-DOF model (dashed) follows the chain's two lowest modes through the veering, within 0.33%](docs/images/modal_coupling.png)
 
 ### Virtual modal test
 
