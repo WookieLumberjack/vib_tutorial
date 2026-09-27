@@ -581,6 +581,39 @@ def test_modal_test_page(app):
     w.close()
 
 
+def test_modal_test_playback_draws_each_record_as_it_is_recorded(app):
+    from vib_tutorial.gui.main_window import MainWindow
+
+    def size(curve):
+        x = curve.getData()[0]
+        return 0 if x is None else x.size
+
+    w = MainWindow()
+    w.show()
+    p = w.test_page
+    w.pages.setCurrentWidget(p)
+    assert p.speed.currentData() is None  # instant by default
+    p.speed.setCurrentIndex(p.speed.findText("10× real time"))
+    p.restart()
+    # One hit recorded; its time plots are drawn from the start, the FRF waits for it.
+    assert p.acq.progress[0] == 1 and p._shown is not None
+    full = p._live.t.size
+    assert size(p.signals.f_curve) < full and size(p.frf_view.measured[0]) == 0
+    assert "recording 1" in p.progress.text()
+    p._shown = 0.5 * p._live.t[-1]
+    p._measure_some()
+    assert full // 3 < size(p.signals.f_curve) < full
+    p._shown = p._live.t[-1]  # the record is complete: spectrum and FRF follow
+    p._measure_some()
+    assert p._shown is None and size(p.signals.f_curve) == full and size(p.frf_view.measured[0]) > 0
+    # Instant finishes the rest at once.
+    p.speed.setCurrentIndex(0)
+    while not p.acq.done:
+        p._measure_some()
+    assert p.progress.text().startswith("10 / 10") and not p.running
+    w.close()
+
+
 def test_modal_extraction_on_the_test_page(app):
     from vib_tutorial.core import Excitation, Window
     from vib_tutorial.core.identification import Method
