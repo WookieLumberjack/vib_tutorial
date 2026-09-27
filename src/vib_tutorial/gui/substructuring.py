@@ -35,15 +35,8 @@ from ..core import (
 from ..core.substructure import METHOD_SHORT
 from .animation import MASS_WIDTH, spring_path
 from .cms_notes import THEORY_HTML, matrices_html
-from .style import (
-    FORCE_COLOR,
-    MASS_COLORS,
-    MAX_DOF,
-    METHOD_COLORS,
-    MODE_COLORS,
-    STRUCTURE_COLOR,
-    SUB_COLORS,
-)
+from .style import MAX_DOF, colors, current, text_on
+from .theming import mute, restyle_plot_item
 
 SUB_NAMES = "AB"
 CB_PEN_STYLE = QtCore.Qt.PenStyle.DashLine
@@ -72,7 +65,7 @@ class SubstructureSchematic(pg.PlotWidget):
         for item in self._items:
             self.removeItem(item)
         self._items = []
-        self._add(pg.PlotDataItem([0, 0], [-0.35, 0.35], pen=pg.mkPen(STRUCTURE_COLOR, width=4)))
+        self._add(pg.PlotDataItem([0, 0], [-0.35, 0.35], pen=pg.mkPen(colors.structure, width=4)))
         boundary = set() if model is None else {int(b) for b in model.boundary}
         owner = np.zeros(n, dtype=int)  # substructure owning each element
         if model is not None:
@@ -83,9 +76,9 @@ class SubstructureSchematic(pg.PlotWidget):
                 y0, y1 = (-0.62, 0.45) if s % 2 == 0 else (-0.55, 0.52)  # overlap at the interface
                 x0, x1 = left - 0.3, right + 0.3
                 band = QtWidgets.QGraphicsRectItem(QtCore.QRectF(x0, y0, x1 - x0, y1 - y0))
-                color = pg.mkColor(SUB_COLORS[s])
+                color = pg.mkColor(colors.sub[s])
                 band.setPen(pg.mkPen(color, width=1.5, style=QtCore.Qt.PenStyle.DashLine))
-                color.setAlpha(28)
+                color.setAlpha(45 if current().dark else 28)
                 band.setBrush(pg.mkBrush(color))
                 band.setZValue(-5)
                 self._add(band)
@@ -94,37 +87,37 @@ class SubstructureSchematic(pg.PlotWidget):
                 kind = "free" if sub.free else "clamped"
                 text = f"{sub.name}: {sub.ni} interior, keep {sub.n_kept} {kind} mode{'s' if sub.n_kept != 1 else ''}"
                 above = s % 2 == 0
-                label = pg.TextItem(text, color=SUB_COLORS[s], anchor=(0.0, 1.0) if above else (1.0, 0.0))
+                label = pg.TextItem(text, color=colors.sub[s], anchor=(0.0, 1.0) if above else (1.0, 0.0))
                 label.setPos(x0 if above else x1, y1 if above else y0)
                 self._add(label)
 
         right_prev = 0.0
         for i in range(n):
             xc = i + 1.0
-            pen = pg.mkPen(SUB_COLORS[owner[i]] if model is not None else STRUCTURE_COLOR, width=2)
+            pen = pg.mkPen(colors.sub[owner[i]] if model is not None else colors.structure, width=2)
             self._add(pg.PlotDataItem(*spring_path(right_prev, xc - MASS_WIDTH / 2, 0.0), pen=pen))
             right_prev = xc + MASS_WIDTH / 2
             master = i in boundary
             rect = QtWidgets.QGraphicsRectItem(QtCore.QRectF(xc - MASS_WIDTH / 2, -0.2, MASS_WIDTH, 0.4))
-            rect.setBrush(pg.mkBrush(MASS_COLORS[i]))
-            rect.setPen(pg.mkPen(STRUCTURE_COLOR, width=4 if master else 1))
+            rect.setBrush(pg.mkBrush(colors.mass[i]))
+            rect.setPen(pg.mkPen(colors.structure, width=4 if master else 1))
             rect.setZValue(5)
             self._add(rect)
-            name = pg.TextItem(f"m{i + 1}", color="w", anchor=(0.5, 0.5))
+            name = pg.TextItem(f"m{i + 1}", color=text_on(colors.mass[i]), anchor=(0.5, 0.5))
             name.setPos(xc, 0)
             name.setZValue(6)
             self._add(name)
             if model is not None:
-                role = pg.TextItem("boundary" if master else "interior", color="#000" if master else "#777",
+                role = pg.TextItem("boundary" if master else "interior", color=colors.strong if master else colors.muted,
                                    anchor=(0.5, 0.0))
                 role.setPos(xc, -0.2)
                 self._add(role)
 
         # Force at the tip.
         y = 0.28
-        self._add(pg.PlotDataItem([n + MASS_WIDTH / 2, n + 0.6], [y, y], pen=pg.mkPen(FORCE_COLOR, width=3)))
-        self._add(pg.ArrowItem(pos=(n + 0.6, y), angle=180, headLen=12, tipAngle=40, brush=FORCE_COLOR, pen=None))
-        force = pg.TextItem("F", color=FORCE_COLOR, anchor=(0.0, 0.5))
+        self._add(pg.PlotDataItem([n + MASS_WIDTH / 2, n + 0.6], [y, y], pen=pg.mkPen(colors.force, width=3)))
+        self._add(pg.ArrowItem(pos=(n + 0.6, y), angle=180, headLen=12, tipAngle=40, brush=colors.force, pen=None))
+        force = pg.TextItem("F", color=colors.force, anchor=(0.0, 0.5))
         force.setPos(n + 0.65, y)
         self._add(force)
         self.setRange(QtCore.QRectF(-0.4, -0.95, n + 1.4, 1.75), padding=0)
@@ -188,14 +181,14 @@ class ComparisonTable(QtWidgets.QTableWidget):
                 item = QtWidgets.QTableWidgetItem(text)
                 item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
                 if col == 0:
-                    item.setForeground(pg.mkColor(MODE_COLORS[r % len(MODE_COLORS)]))
+                    item.setForeground(pg.mkColor(colors.mode[r % len(colors.mode)]))
                 elif col == 3 and err is not None:
                     item.setForeground(pg.mkColor(error_color(err)))
                 elif col == 5 and c.zeta_error is not None:
                     item.setForeground(pg.mkColor(error_color(c.zeta_error)))
                     item.setToolTip(f"{100 * c.zeta_error:+.3g}% vs ζ true")
                 elif c.fn_red is None:
-                    item.setForeground(pg.mkColor("#999"))
+                    item.setForeground(pg.mkColor(colors.grey))
                 self.setItem(r, col, item)
         height = self.horizontalHeader().height() + 2 * self.frameWidth()
         height += sum(self.rowHeight(r) for r in range(self.rowCount()))
@@ -279,16 +272,16 @@ class ComponentTable(QtWidgets.QTableWidget):
                 f"{m.closest_fn_hz:.4g}",
                 f"{100 * m.share:.0f}%",
             ]
-            color = SUB_COLORS[SUB_NAMES.index(m.substructure)]
+            color = colors.sub[SUB_NAMES.index(m.substructure)]
             for col, text in enumerate(cells):
                 item = QtWidgets.QTableWidgetItem(text)
                 item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
                 if col == 0:
                     item.setForeground(pg.mkColor(color))
                 elif col == 4:
-                    item.setForeground(pg.mkColor(MODE_COLORS[(m.closest - 1) % len(MODE_COLORS)]))
+                    item.setForeground(pg.mkColor(colors.mode[(m.closest - 1) % len(colors.mode)]))
                 elif col == 3 and not m.kept:
-                    item.setForeground(pg.mkColor("#999"))
+                    item.setForeground(pg.mkColor(colors.grey))
                 self.setItem(r, col, item)
         height = self.horizontalHeader().height() + 2 * self.frameWidth()
         height += sum(self.rowHeight(r) for r in range(self.rowCount()))
@@ -301,8 +294,8 @@ def zeta_text(zeta: float | None) -> str:
 
 def error_color(err: float) -> str:
     if abs(err) < 1e-3:
-        return "#2a7d2a"
-    return "#b07000" if abs(err) < 0.05 else "#c1121f"
+        return colors.good
+    return colors.fair if abs(err) < 0.05 else colors.poor
 
 
 class ComparisonPlots(pg.GraphicsLayoutWidget):
@@ -318,7 +311,7 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         # Headroom above +1 for a one-row legend, so it never covers a shape.
         self.shape.setYRange(-1.15, 1.5, padding=0)
         self.shape.getAxis("left").setTicks([[(v, f"{v:g}") for v in (-1, -0.5, 0, 0.5, 1)]])
-        self.shape_legend = self.shape.addLegend(offset=(5, 2), colCount=3, brush=pg.mkBrush(255, 255, 255, 230))
+        self.shape_legend = self.shape.addLegend(offset=(5, 2), colCount=3)
         self.frf = self.addPlot(row=1, col=0)
         self.frf.setLogMode(x=True, y=True)
         self.frf.setLabel("left", "|X / F|  [m/N]")
@@ -332,6 +325,11 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         self.comparisons = []
         self.short = "CB"
         self.free = False
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """The mode-shape legend's opaque background; the curves are drawn in set_comparisons."""
+        self.shape_legend.setBrush(colors.legend_brush())
 
     def set_comparisons(self, comparisons, model: CMSModel | None) -> None:
         self.comparisons = comparisons
@@ -343,8 +341,8 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         n = len(comparisons[0].shape_true) if comparisons else 0
         if model is not None:
             for b in model.boundary[:-1]:  # interface masses
-                line = pg.InfiniteLine(pos=b + 1, angle=90, pen=pg.mkPen("#999", width=1, style=CB_PEN_STYLE),
-                                       label="interface", labelOpts={"position": 0.08, "color": "#777"})
+                line = pg.InfiniteLine(pos=b + 1, angle=90, pen=pg.mkPen(colors.grey, width=1, style=CB_PEN_STYLE),
+                                       label="interface", labelOpts={"position": 0.08, "color": colors.muted})
                 self.shape.addItem(line)
                 self._shape_items.append(line)
         self._true_curve = self.shape.plot(symbol="s", symbolSize=9, symbolPen=None)
@@ -360,7 +358,7 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         if not (0 <= r < len(self.comparisons)):
             return
         c = self.comparisons[r]
-        color = MODE_COLORS[r % len(MODE_COLORS)]
+        color = colors.mode[r % len(colors.mode)]
         xs = np.arange(c.shape_true.size + 1)
         self._true_curve.setData(xs, np.concatenate([[0.0], c.shape_true]))
         self._true_curve.setPen(pg.mkPen(color, width=3))
@@ -371,8 +369,8 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
             self.shape.setTitle(f"Mode {c.index} is not in the reduced model", size="10pt")
         else:
             self._cb_curve.setData(xs, np.concatenate([[0.0], c.shape_red]))
-            self._cb_curve.setPen(pg.mkPen("#000", width=2, style=CB_PEN_STYLE))
-            self._cb_curve.setSymbolPen(pg.mkPen("#000", width=2))
+            self._cb_curve.setPen(pg.mkPen(colors.strong, width=2, style=CB_PEN_STYLE))
+            self._cb_curve.setSymbolPen(pg.mkPen(colors.strong, width=2))
             self.shape_legend.addItem(self._cb_curve, f"Mode {c.index} {self.short}: {c.fn_red:.4g} Hz")
             # No relative error for a rigid-body mode (f_true = 0 when k1 = 0).
             err = "—" if c.error is None else f"{100 * c.error:+.3g}%"
@@ -390,7 +388,7 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         xs, ys = comp.dofs + 1.0, comp.shape
         if comp.substructure == SUB_NAMES[0]:  # A starts at the ground
             xs, ys = np.concatenate([[0.0], xs]), np.concatenate([[0.0], ys])
-        color = SUB_COLORS[SUB_NAMES.index(comp.substructure)]
+        color = colors.sub[SUB_NAMES.index(comp.substructure)]
         self._component_curve.setData(xs, ys)
         self._component_curve.setPen(pg.mkPen(color, width=3, style=QtCore.Qt.PenStyle.DotLine))
         self._component_curve.setSymbolBrush(color)
@@ -421,16 +419,16 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         dofs = [tip] if model is None else [tip] + [int(b) for b in model.boundary[:-1]]
         for d in dofs:
             name = "tip" if d == tip else "interface"
-            pen = pg.mkPen(MASS_COLORS[d], width=2)
+            pen = pg.mkPen(colors.mass[d], width=2)
             self._frf_items.append(self.frf.plot(f, np.abs(H[:, d]), pen=pen, name=f"x{d + 1} ({name}) true"))
             if Hr is not None:
-                pen = pg.mkPen("#000" if d == tip else MASS_COLORS[d], width=2, style=CB_PEN_STYLE)
+                pen = pg.mkPen(colors.strong if d == tip else colors.mass[d], width=2, style=CB_PEN_STYLE)
                 self._frf_items.append(self.frf.plot(f, np.abs(Hr[:, d]), pen=pen, name=f"x{d + 1} {model.short_name}"))
         if model is not None:
             for fr in model.fn_hz:
                 if lo < fr < hi:
                     line = pg.InfiniteLine(pos=math.log10(fr), angle=90,
-                                           pen=pg.mkPen("#aaa", width=1, style=QtCore.Qt.PenStyle.DotLine))
+                                           pen=pg.mkPen(colors.grey, width=1, style=QtCore.Qt.PenStyle.DotLine))
                     self.frf.addItem(line)
                     self._frf_items.append(line)
         short = "reduced" if model is None else model.short_name
@@ -465,6 +463,11 @@ class BasisPlots(QtWidgets.QWidget):
             self._slots.append(_BasisSlot())
         return self._slots[c]
 
+    def apply_theme(self) -> None:
+        """The pooled plots, including those not in the layout now; the curves are drawn in set_model."""
+        for slot in self._slots:
+            slot.apply_theme()
+
     def set_model(self, model: CMSModel | None) -> None:
         # Take the plots out of the layout, but keep them (and so their C++ objects) alive.
         for slot in self._slots[: self.shown]:
@@ -495,7 +498,7 @@ class BasisPlots(QtWidgets.QWidget):
             f"<b>The reduced model's basis ({model.name}):</b> x = T [q; x<sub>b</sub>]. Each of the "
             f"{model.n_red} columns of T is one shape over the whole chain, and every motion the reduced "
             f"model can make is a combination of these {model.n_red} shapes (the full model has {n}). "
-            f"<span style='color:#666'>{detail}</span>"
+            f"<span style='color:{colors.muted}'>{detail}</span>"
         )
         xs = np.arange(n + 1)
         ticks = [[(0, "gnd")] + [(i, f"m{i}") for i in range(1, n + 1)]]
@@ -510,7 +513,7 @@ class BasisPlots(QtWidgets.QWidget):
             col = model.T[:, c]
             if label.startswith("q_"):
                 name = label[2]
-                color = SUB_COLORS[SUB_NAMES.index(name)]
+                color = colors.sub[SUB_NAMES.index(name)]
                 f = freqs[label]
                 if not model.free:
                     what = f"clamped mode {label[3:]} ({f:.3g} Hz)"
@@ -522,7 +525,7 @@ class BasisPlots(QtWidgets.QWidget):
                 ys = col / np.abs(col).max()
                 p.setYRange(-1.15, 1.15, padding=0)
             else:
-                color = "#000"
+                color = colors.strong
                 kind = "residual attachment" if model.free else "constraint"
                 title = f"{label}: {kind} mode ({label} = 1, other boundary held)"
                 ys = col
@@ -543,13 +546,21 @@ class _BasisSlot:
         p.setMouseEnabled(x=False, y=False)
         p.hideButtons()
         p.showGrid(x=True, y=True, alpha=0.25)
-        p.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#bbb", width=1)))
+        self.zero = pg.InfiniteLine(pos=0, angle=0)
+        p.addItem(self.zero)
         self.lines: list[pg.InfiniteLine] = []
         self.curve = p.plot(symbol="o", symbolSize=7, symbolPen=None)
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        restyle_plot_item(self.plot)
+        self.zero.setPen(pg.mkPen(colors.faint, width=1))
+        for line in self.lines:
+            line.setPen(pg.mkPen(colors.faint, width=1, style=CB_PEN_STYLE))
 
     def set_boundaries(self, boundary) -> None:
         while len(self.lines) < len(boundary):
-            line = pg.InfiniteLine(angle=90, pen=pg.mkPen("#bbb", width=1, style=CB_PEN_STYLE))
+            line = pg.InfiniteLine(angle=90, pen=pg.mkPen(colors.faint, width=1, style=CB_PEN_STYLE))
             self.plot.addItem(line)
             self.lines.append(line)
         for i, line in enumerate(self.lines):
@@ -589,7 +600,7 @@ class MethodComparison(QtWidgets.QWidget):
         self.legend = self.plot.addLegend(offset=(-5, 5))
         self.note = QtWidgets.QLabel()
         self.note.setWordWrap(True)
-        self.note.setStyleSheet("color: #666;")
+        mute(self.note)
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self.header)
         layout.addWidget(self.table)
@@ -647,14 +658,14 @@ class MethodComparison(QtWidgets.QWidget):
         modes = self.full.modes
         self.table.setRowCount(len(modes))
         for r, mode in enumerate(modes):
-            cells = [(str(r + 1), MODE_COLORS[r % len(MODE_COLORS)]), (f"{mode.fn_hz:.4g}", None)]
+            cells = [(str(r + 1), colors.mode[r % len(colors.mode)]), (f"{mode.fn_hz:.4g}", None)]
             for method in METHODS:
                 model = self.current[method]
                 err = self._errors(model)[r] if model is not None else np.nan
                 if model is None:
-                    cells.append(("—", "#999"))
+                    cells.append(("—", colors.grey))
                 elif r >= model.omegas.size:
-                    cells.append(("not in model", "#999"))
+                    cells.append(("not in model", colors.grey))
                 elif np.isnan(err):
                     cells.append(("—", None))
                 else:
@@ -676,7 +687,7 @@ class MethodComparison(QtWidgets.QWidget):
             + ("" if n_red is None else f"Each reduced model has {n_red} coordinates. ")
             + ("" if macneal is None else
                f"MacNeal's boundary coordinates have no mass, so it has only {macneal.omegas.size} modes. ")
-            + "".join(f"<br><span style='color:#c1121f'>{METHOD_NAMES[m]}: {e}</span>"
+            + "".join(f"<br><span style='color:{colors.poor}'>{METHOD_NAMES[m]}: {e}</span>"
                       for m, e in self.errors.items())
         )
 
@@ -690,7 +701,7 @@ class MethodComparison(QtWidgets.QWidget):
             return
         for method in METHODS:
             pts = [(n, e[r]) for n, e in self.sweeps.get(method, []) if not np.isnan(e[r])]
-            color = METHOD_COLORS[method]
+            color = colors.method[method]
             if pts:
                 xs, ys = np.array(pts).T
                 ys = 100 * np.maximum(np.abs(ys), ERROR_FLOOR)
@@ -762,18 +773,20 @@ class SubstructuringPage(QtWidgets.QWidget):
         form.addRow("Interface at:", self.interface)
         self.kept: list[QtWidgets.QSpinBox] = []
         self.kept_info: list[QtWidgets.QLabel] = []
+        self.kept_labels: list[QtWidgets.QLabel] = []
         for s, name in enumerate(SUB_NAMES):
             row = QtWidgets.QHBoxLayout()
             spin = QtWidgets.QSpinBox()
             spin.valueChanged.connect(lambda v, s=s: self._on_kept(s, v))
             info = QtWidgets.QLabel()
-            info.setStyleSheet("color: #666;")
+            mute(info)
             row.addWidget(spin)
             row.addWidget(info, 1)
-            label = QtWidgets.QLabel(f"<b style='color:{SUB_COLORS[s]}'>Modes kept in {name}:</b>")
+            label = QtWidgets.QLabel()
             form.addRow(label, row)
             self.kept.append(spin)
             self.kept_info.append(info)
+            self.kept_labels.append(label)
         presets = QtWidgets.QHBoxLayout()
         self.guyan_button = guyan = QtWidgets.QPushButton()
         guyan.clicked.connect(lambda: self._set_all_kept(0))
@@ -785,7 +798,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         link = QtWidgets.QLabel(
             "Masses, springs and dampers are edited on the <a href='#sim'>Simulation page</a>."
         )
-        link.setStyleSheet("color: #666;")
+        mute(link)
         link.linkActivated.connect(lambda _: self.edit_parameters.emit())
         form.addRow(link)
 
@@ -796,7 +809,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.component_table = ComponentTable()
         self.component_note = QtWidgets.QLabel()
         self.component_note.setWordWrap(True)
-        self.component_note.setStyleSheet("color: #666;")
+        mute(self.component_note)
         self.table.itemSelectionChanged.connect(self._on_row)
         self.component_table.itemSelectionChanged.connect(self._on_component_row)
         self.summary = QtWidgets.QLabel()
@@ -839,6 +852,21 @@ class SubstructuringPage(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
         self._apply_method()
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """Recolour the labels now; everything drawn from the model is redrawn when the page shows."""
+        for label, name, color in zip(self.kept_labels, SUB_NAMES, colors.sub):
+            label.setText(f"<b style='color:{color}'>Modes kept in {name}:</b>")
+        self.plots.apply_theme()
+        self.basis.apply_theme()
+        scroll = self.theory.verticalScrollBar().value()
+        self.theory.setHtml(THEORY_HTML)  # its links, in the new link colour
+        self.theory.verticalScrollBar().setValue(scroll)
+        if self.system is not None:
+            self._dirty = True
+            if self.isVisible():
+                self.refresh()
 
     @property
     def method_key(self) -> str:
@@ -967,7 +995,7 @@ class SubstructuringPage(QtWidgets.QWidget):
             info.setText(self._fixed_text(model.substructures[s]) if model else "")
         if model is None:
             reason = error or "Substructuring needs at least 2 masses (an interface and a tip)."
-            self.summary.setText(f"<b style='color:#c1121f'>{reason}</b>")
+            self.summary.setText(f"<b style='color:{colors.poor}'>{reason}</b>")
             self.table.setRowCount(0)
             self.component_table.setRowCount(0)
             self.component_note.setText("")

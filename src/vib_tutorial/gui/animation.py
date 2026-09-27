@@ -6,7 +6,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 
-from .style import FORCE_COLOR, MASS_COLORS, STRUCTURE_COLOR
+from .style import colors, text_on
 
 SPACING = 1.0  # display units between mass centers at rest
 MASS_WIDTH = 0.4
@@ -96,34 +96,52 @@ class ChainView(pg.PlotWidget):
         self._centers = np.zeros(0)  # drawn mass centers (display units)
         self.held: int | None = None  # mass being dragged
 
-        pen = pg.mkPen(STRUCTURE_COLOR, width=2)
         # Ground wall with hatching; it moves with base excitation.
-        self._wall = [pg.PlotDataItem([0, 0], [-0.45, 0.45], pen=pg.mkPen(STRUCTURE_COLOR, width=4))]
+        self._wall = [pg.PlotDataItem([0, 0], [-0.45, 0.45])]
         hx, hy = [], []
         for yy in np.linspace(-0.4, 0.45, 9):
             hx += [0, -0.1, np.nan]
             hy += [yy, yy - 0.1, np.nan]
-        self._wall.append(pg.PlotDataItem(hx, hy, pen=pen, connect="finite"))
+        self._wall.append(pg.PlotDataItem(hx, hy, connect="finite"))
         for item in self._wall:
             self.addItem(item)
 
-        self._pen = pen
         self._springs: list[pg.PlotDataItem] = []
         self._dampers: list[pg.PlotDataItem] = []
         self._rects: list[QtWidgets.QGraphicsRectItem] = []
         self._labels: list[pg.TextItem] = []
         self._rest_marks: list[pg.PlotDataItem] = []
 
-        self._force_shaft = pg.PlotDataItem(pen=pg.mkPen(FORCE_COLOR, width=4))
-        self._force_head = pg.ArrowItem(angle=180, headLen=18, tipAngle=40, brush=FORCE_COLOR, pen=None)
-        self._force_text = pg.TextItem(color=FORCE_COLOR, anchor=(0.5, 1.0))
+        self._force_shaft = pg.PlotDataItem()
+        self._force_head = pg.ArrowItem(angle=180, headLen=18, tipAngle=40, pen=None)
+        self._force_text = pg.TextItem(anchor=(0.5, 1.0))
         for item in (self._force_shaft, self._force_head, self._force_text):
             self.addItem(item)
 
-        self._scale_bar = pg.PlotDataItem(pen=pg.mkPen("#666", width=2))
-        self._scale_text = pg.TextItem(color="#444", anchor=(0, 0.5))
+        self._scale_bar = pg.PlotDataItem()
+        self._scale_text = pg.TextItem(anchor=(0, 0.5))
         self.addItem(self._scale_bar)
         self.addItem(self._scale_text)
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """Draw in the current theme's colours."""
+        self._pen = pg.mkPen(colors.structure, width=2)
+        self._wall[0].setPen(pg.mkPen(colors.structure, width=4))
+        self._wall[1].setPen(self._pen)
+        self._force_shaft.setPen(pg.mkPen(colors.force, width=4))
+        self._force_head.setStyle(brush=colors.force)
+        self._force_text.setColor(colors.force)
+        self._scale_bar.setPen(pg.mkPen(colors.grey, width=2))
+        self._scale_text.setColor(colors.muted)
+        for item in self._springs + self._dampers:
+            item.setPen(self._pen)
+        for item in self._rest_marks:
+            item.setPen(pg.mkPen(colors.grey, width=1))
+        for i, (rect, label) in enumerate(zip(self._rects, self._labels)):
+            rect.setBrush(pg.mkBrush(colors.mass[i]))
+            rect.setPen(pg.mkPen(colors.structure, width=1.5))
+            label.setColor(text_on(colors.mass[i]))
 
     # ------------------------------------------------------------- structure
     def set_masses(self, masses: np.ndarray) -> None:
@@ -140,17 +158,14 @@ class ChainView(pg.PlotWidget):
             self._labels = []
             for i in range(n):
                 xr = (i + 1) * SPACING
-                self._rest_marks.append(
-                    self._add(pg.PlotDataItem([xr, xr], [-0.5, -0.42], pen=pg.mkPen("#999", width=1)))
-                )
+                self._rest_marks.append(self._add(pg.PlotDataItem([xr, xr], [-0.5, -0.42])))
                 rect = QtWidgets.QGraphicsRectItem()
-                rect.setBrush(pg.mkBrush(MASS_COLORS[i]))
-                rect.setPen(pg.mkPen(STRUCTURE_COLOR, width=1.5))
                 rect.setZValue(5)
                 self._rects.append(self._add(rect))
-                label = pg.TextItem(f"m{i + 1}", color="w", anchor=(0.5, 0.5))
+                label = pg.TextItem(f"m{i + 1}", anchor=(0.5, 0.5))
                 label.setZValue(6)
                 self._labels.append(self._add(label))
+            self.apply_theme()
             self._n = n
             # Set both axes in one call: with the aspect ratio locked, separate
             # setXRange/setYRange calls let the second one shrink the first,

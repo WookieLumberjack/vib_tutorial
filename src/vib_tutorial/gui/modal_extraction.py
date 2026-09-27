@@ -16,11 +16,7 @@ from PySide6 import QtCore, QtWidgets
 
 from ..core.identification import Method, ModeMatch, Stabilization, Stability
 from .panels import spin
-from .style import MODE_COLORS
-
-FIT_COLOR = "#2a9d8f"
-SELECT_COLOR = "#c1121f"
-GOOD, FAIR, POOR = "#2a7d2a", "#b36b00", "#c1121f"
+from .style import colors, text_on
 
 METHOD_TIPS = {
     Method.PEAK: "<p>One mode per peak of the summed FRF magnitude. f<sub>n</sub> is the frequency "
@@ -48,7 +44,7 @@ METHOD_TIPS = {
 def colored(value: float, good: float, fair: float, text: str) -> tuple[str, str]:
     """(text, color) by |value| against two thresholds."""
     v = abs(value)
-    return text, GOOD if v <= good else FAIR if v <= fair else POOR
+    return text, colors.good if v <= good else colors.fair if v <= fair else colors.poor
 
 
 class ExtractionControls(QtWidgets.QGroupBox):
@@ -148,24 +144,35 @@ class StabilizationPlot(pg.PlotWidget):
         self.showGrid(x=True, y=True, alpha=0.2)
         self.setMouseEnabled(x=False, y=False)
         self.hideButtons()
-        self.legend = self.addLegend(offset=(-5, -5), brush=pg.mkBrush(255, 255, 255, 220))
-        self.mif = self.plot(pen=pg.mkPen("#aaa", width=1))
+        self.legend = self.addLegend(offset=(-5, -5))
+        self.mif = self.plot()
         self.scatter = {
-            Stability.NEW: pg.ScatterPlotItem(symbol="o", size=4, pen=None, brush=pg.mkBrush("#bbb")),
-            Stability.FREQUENCY: pg.ScatterPlotItem(symbol="t", size=7, pen=pg.mkPen("#e76f51"), brush=None),
-            Stability.STABLE: pg.ScatterPlotItem(symbol="o", size=7, pen=None, brush=pg.mkBrush("#264653")),
+            Stability.NEW: pg.ScatterPlotItem(symbol="o", size=4, pen=None),
+            Stability.FREQUENCY: pg.ScatterPlotItem(symbol="t", size=7, brush=None),
+            Stability.STABLE: pg.ScatterPlotItem(symbol="o", size=7, pen=None),
         }
         names = {Stability.NEW: "new", Stability.FREQUENCY: "stable f", Stability.STABLE: "stable f and ζ"}
         for st, item in self.scatter.items():
             self.addItem(item)
             self.legend.addItem(item, names[st])
             item.sigClicked.connect(self._on_click)
-        self.selected = pg.ScatterPlotItem(symbol="o", size=15, pen=pg.mkPen(SELECT_COLOR, width=2), brush=None)
+        self.selected = pg.ScatterPlotItem(symbol="o", size=15, brush=None)
         self.addItem(self.selected)
         self.legend.addItem(self.selected, "selected")
         self.lines: list[pg.InfiniteLine] = []
-        self.message = pg.TextItem("", color="#666", anchor=(0.5, 0.5))
+        self.message = pg.TextItem("", anchor=(0.5, 0.5))
         self.addItem(self.message)
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """Pole markers and the indicator curve; the mode lines are drawn in set_data."""
+        self.legend.setBrush(colors.legend_brush())
+        self.mif.setPen(pg.mkPen(colors.grey, width=1))
+        self.scatter[Stability.NEW].setBrush(pg.mkBrush(colors.stab_new))
+        self.scatter[Stability.FREQUENCY].setPen(pg.mkPen(colors.stab_freq))
+        self.scatter[Stability.STABLE].setBrush(pg.mkBrush(colors.stab_stable))
+        self.selected.setPen(pg.mkPen(colors.force, width=2))
+        self.message.setColor(colors.muted)
 
     def set_data(
         self,
@@ -206,7 +213,7 @@ class StabilizationPlot(pg.PlotWidget):
             self.mif.setData(freqs, y)
         for r, f in enumerate(exact_hz):
             if lo <= f <= hi:
-                line = pg.InfiniteLine(pos=f, angle=90, pen=pg.mkPen(MODE_COLORS[r % len(MODE_COLORS)], width=1,
+                line = pg.InfiniteLine(pos=f, angle=90, pen=pg.mkPen(colors.mode[r % len(colors.mode)], width=1,
                                                                      style=QtCore.Qt.PenStyle.DotLine))
                 self.addItem(line)
                 self.lines.append(line)
@@ -231,9 +238,14 @@ class MacPlot(pg.PlotWidget):
         self.setLabel("left", "Identified")
         self.setTitle("MAC: identified vs exact shapes", size="9pt")
         self.image = pg.ImageItem()
-        self.image.setLookupTable(pg.ColorMap([0.0, 1.0], [(255, 255, 255), (38, 70, 83)]).getLookupTable(nPts=256))
         self.addItem(self.image)
         self.labels: list[pg.TextItem] = []
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """The colour map, from the background at MAC 0 to colors.mac_high at 1; labels follow in set_matrix."""
+        self.cmap = pg.ColorMap([0.0, 1.0], [pg.mkColor(colors.background), pg.mkColor(colors.mac_high)])
+        self.image.setLookupTable(self.cmap.getLookupTable(nPts=256))
 
     def set_matrix(self, macs: np.ndarray, rows: list[str], cols: list[str]) -> None:
         for t in self.labels:
@@ -247,7 +259,7 @@ class MacPlot(pg.PlotWidget):
         for i in range(macs.shape[0]):
             for j in range(macs.shape[1]):
                 v = macs[i, j]
-                t = pg.TextItem(f"{v:.2f}", color="w" if v > 0.6 else "k", anchor=(0.5, 0.5))
+                t = pg.TextItem(f"{v:.2f}", color=text_on(self.cmap.map(v, mode="qcolor").name()), anchor=(0.5, 0.5))
                 t.setPos(j + 0.5, i + 0.5)
                 self.addItem(t)
                 self.labels.append(t)
@@ -294,7 +306,7 @@ class ResultsView(QtWidgets.QWidget):
         self.table.setRowCount(len(rows))
         for r, m in enumerate(rows):
             cells: list[tuple[str, str | None]] = []
-            color = MODE_COLORS[(m.mode - 1) % len(MODE_COLORS)] if m.mode else "#666"
+            color = colors.mode[(m.mode - 1) % len(colors.mode)] if m.mode else colors.muted
             cells.append((str(m.mode) if m.mode else "extra", color))
             if m.exact is not None:
                 fe, ze = abs(m.exact) / (2 * math.pi), -m.exact.real / abs(m.exact)
@@ -304,7 +316,7 @@ class ResultsView(QtWidgets.QWidget):
                 cells.append(("—", None))
             ident = m.identified
             if ident is None:
-                cells += [("missed", POOR), ("", None), (f"{ze:.4f}", None), ("", None), ("", None), ("", None)]
+                cells += [("missed", colors.poor), ("", None), (f"{ze:.4f}", None), ("", None), ("", None), ("", None)]
             else:
                 cells.append((f"{ident.fn_hz:.4g}", None))
                 cells.append(colored(100 * (ident.fn_hz / fe - 1), 0.5, 2.0, f"{100 * (ident.fn_hz / fe - 1):+.2f}%")

@@ -34,6 +34,16 @@ matrix and how the modes build it up, **Substructuring (CMS)** reduces the chain
 component mode synthesis (Craig–Bampton, Rubin or MacNeal), and **Virtual modal test**
 measures the FRF from simulated force and response signals, as in a lab (all below).
 
+### Themes
+
+*Theme* (top right) switches the whole app between **Light**, **Dark**, **Solarized** and
+**Nord**, live, without resetting the simulation. **System** (the default) follows the
+desktop's light or dark setting, and changes with it. Each theme has its own palettes for
+the masses, modes and substructures, chosen so every curve, label and table entry stays
+legible on its background. The choice is remembered.
+
+![Dark theme: a harmonic force tuned to mode 2, plotted in modal coordinates, with non-proportional damping](docs/images/dark_theme.png)
+
 ## What you can do
 
 - **Edit any mass, stiffness, or damping value while the simulation runs.** The state is
@@ -427,7 +437,9 @@ $w_k^T W w_k$, so the energy balance closes to rounding error.
 - `core/substructure.py`: component mode synthesis (Craig–Bampton, Rubin, MacNeal), mode
   comparison (frequency error, MAC) and the reduced-model FRF.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
-  the simulator by wall-clock time × speed.
+  the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
+  widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and
+  redraws in a new one through its `apply_theme()`.
 
 The `core` package has no Qt dependency, so you can use it from scripts or notebooks:
 
@@ -506,7 +518,3 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 - Substructuring: more than one interface (three or more substructures); the core
   (`craig_bampton`) already accepts several cuts, so only the controls and schematic need
   extending
-- Dark theme: the plots, the animation and the energy bars are drawn in fixed light colours
-  (white backgrounds, dark text and structure), so `gui.make_app()` forces Qt's light colour
-  scheme even on a dark desktop. Give them light and dark palettes that follow the desktop's
-  scheme, and drop the override
