@@ -18,6 +18,19 @@ MAX_SWING = 0.3 * SPACING  # auto-scale target for the largest displacement
 # gain would otherwise grow without bound (magnifying float noise and driving
 # Qt's drawing transforms to absurd values).
 MIN_AUTO_PEAK = 1e-6  # m
+# Farthest a mass can be dragged from rest (display units): the auto-scale
+# target, so letting go does not rescale the view.
+MAX_DRAG = MAX_SWING
+# Magnification when a mass is grabbed at rest: a full drag is then 30 mm,
+# rather than the micrometres the auto-scale grows to while nothing moves.
+DRAG_GAIN = 10.0  # display units per meter
+DRAG_TIP = (
+    "<p><b>Pluck:</b> drag any mass sideways with the mouse and let go.</p>"
+    "<p>While you hold it the force is switched off and time stands still; the other masses "
+    "take the static shape a slow pull gives (every spring balanced), and the red arrow is "
+    "the force your hand needs. Let go and the chain vibrates freely from that shape, "
+    "which excites every mode, most of all the low ones.</p>"
+)
 
 
 def spring_path(x0: float, x1: float, y: float, coils: int = 6, amp: float = 0.05):
@@ -62,8 +75,14 @@ def damper_path(x0: float, x1: float, y: float, rest_gap: float, h: float = 0.04
 
 
 class ChainView(pg.PlotWidget):
+    mass_grabbed = QtCore.Signal(int)  # mass index
+    mass_dragged = QtCore.Signal(int, float)  # mass index, displacement (m)
+    mass_released = QtCore.Signal(int)
+
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setToolTip(DRAG_TIP)
+        self.setMouseTracking(True)
         self.setMenuEnabled(False)
         self.setMouseEnabled(x=False, y=False)
         self.hideButtons()
@@ -74,6 +93,8 @@ class ChainView(pg.PlotWidget):
         self.auto_scale = True
         self._n = 0
         self._masses: np.ndarray = np.ones(1)
+        self._centers = np.zeros(0)  # drawn mass centers (display units)
+        self.held: int | None = None  # mass being dragged
 
         pen = pg.mkPen(STRUCTURE_COLOR, width=2)
         # Ground wall with hatching.
@@ -153,7 +174,7 @@ class ChainView(pg.PlotWidget):
         peak is the largest recent |x| used for auto-scaling; force_scale is
         the force magnitude that maps to a full-length arrow.
         """
-        if self.auto_scale:
+        if self.auto_scale and self.held is None:  # hold the scale still under the mouse
             target = MAX_SWING / max(peak, MIN_AUTO_PEAK)
             # Shrink immediately, grow slowly: keeps the view calm as motion decays.
             self.gain = target if target < self.gain else self.gain + 0.03 * (target - self.gain)
@@ -161,8 +182,9 @@ class ChainView(pg.PlotWidget):
 
         rest_gap = SPACING - MASS_WIDTH
         right_prev = 0.0
+        self._centers = (np.arange(self._n) + 1) * SPACING + self.gain * np.asarray(x[: self._n])
         for i in range(self._n):
-            xc = (i + 1) * SPACING + self.gain * x[i]
+            xc = self._centers[i]
             left = xc - MASS_WIDTH / 2
             hgt = self._height(i)
             self._rects[i].setRect(QtCore.QRectF(left, -hgt / 2, MASS_WIDTH, hgt))
@@ -187,6 +209,56 @@ class ChainView(pg.PlotWidget):
         else:
             for item in (self._force_shaft, self._force_head, self._force_text):
                 item.setVisible(False)
+
+    # ------------------------------------------------------------------ drag
+    def _view_pos(self, event) -> QtCore.QPointF:
+        return self.plotItem.vb.mapSceneToView(self.mapToScene(event.position().toPoint()))
+
+    def mass_at(self, pos: QtCore.QPointF) -> int | None:
+        """Index of the mass drawn under a point in view coordinates, if any."""
+        for i, xc in enumerate(self._centers):
+            if abs(pos.x() - xc) <= MASS_WIDTH / 2 and abs(pos.y()) <= self._height(i) / 2:
+                return i
+        return None
+
+    def _drag_to(self, pos: QtCore.QPointF) -> None:
+        i = self.held
+        offset = float(np.clip(pos.x() - (i + 1) * SPACING, -MAX_DRAG, MAX_DRAG))
+        self.mass_dragged.emit(i, offset / self.gain)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        i = self.mass_at(self._view_pos(event)) if event.button() == QtCore.Qt.MouseButton.LeftButton else None
+        if i is None:
+            super().mousePressEvent(event)
+            return
+        if self.auto_scale:
+            self.gain = min(self.gain, DRAG_GAIN)
+        self.held = i
+        self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+        self.mass_grabbed.emit(i)
+        self._drag_to(self._view_pos(event))
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        pos = self._view_pos(event)
+        if self.held is not None:
+            self._drag_to(pos)
+            event.accept()
+            return
+        if self.mass_at(pos) is None:
+            self.unsetCursor()
+        else:
+            self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if self.held is None:
+            super().mouseReleaseEvent(event)
+            return
+        i, self.held = self.held, None
+        self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
+        self.mass_released.emit(i)
+        event.accept()
 
 
 def _fmt_len(meters: float) -> str:

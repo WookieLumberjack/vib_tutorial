@@ -110,6 +110,24 @@ def element_forces(system: ChainSystem, x: np.ndarray, v: np.ndarray) -> tuple[n
     return spring, damper
 
 
+def pluck_shape(system: ChainSystem, dof: int, x_dof: float) -> np.ndarray:
+    """Static displacements (m) with mass `dof` held at `x_dof` and no other load.
+
+    This is the shape a chain takes when one mass is pulled aside slowly by
+    hand: the other masses sit where their springs balance, K_ff x_f = -K_fd x_d.
+    A part of the chain joined to neither the ground nor the held mass by a
+    spring has no unique rest position; it stays at zero (least squares).
+    """
+    K = system.matrices()[2]
+    free = np.arange(system.n) != dof
+    x = np.zeros(system.n)
+    x[dof] = x_dof
+    if free.any():
+        rhs = -K[np.ix_(free, [dof])][:, 0] * x_dof
+        x[free] = np.linalg.lstsq(K[np.ix_(free, free)], rhs, rcond=None)[0]
+    return x
+
+
 def state_space(system: ChainSystem) -> tuple[np.ndarray, np.ndarray]:
     """First-order form z' = A z + B f with z = [x, v].
 

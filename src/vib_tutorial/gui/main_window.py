@@ -18,6 +18,7 @@ from ..core import (
     modal_analysis,
     modal_coordinate_map,
     modal_energies,
+    pluck_shape,
     potential_energy,
 )
 from .animation import ChainView
@@ -295,6 +296,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.element_combo.currentIndexChanged.connect(self._set_plot_curves)
         self.cms_page.dof_requested.connect(self.params.dof.setValue)
         self.cms_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
+        self.chain.mass_grabbed.connect(self._on_mass_grabbed)
+        self.chain.mass_dragged.connect(self._on_mass_dragged)
+        self.chain.mass_released.connect(self._on_mass_released)
         self.frf_page.dof_requested.connect(self.params.dof.setValue)
         self.frf_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
         self.test_page.dof_requested.connect(self.params.dof.setValue)
@@ -478,6 +482,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.controls.auto_scale.isChecked() and entry.freq_hz > 0:
             self.controls.fit_to_mode(entry.key)
 
+    def _on_mass_grabbed(self, _: int) -> None:
+        self.force.switch_off()
+        self.force_panel.refresh()
+
+    def _on_mass_dragged(self, i: int, x: float) -> None:
+        """Hold mass i at x (m) with the rest of the chain in static balance and at rest."""
+        self.sim.set_displacement(pluck_shape(self.sim.system, i, x))
+
+    def _on_mass_released(self, _: int) -> None:
+        self._sim_target = self.sim.t  # time stood still while the mass was held
+
     def _update_energy(self, es: np.ndarray) -> None:
         """Show the energy now; the stored energy in recent samples es sets the bar scale."""
         system, x, v = self.sim.system, self.sim.displacement, self.sim.velocity
@@ -509,7 +524,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dt = min(now - self._last_wall, 0.1)  # don't jump after a stall
         self._last_wall = now
 
-        if self.running:
+        held = self.chain.held
+        if self.running and held is None:
             speed = self.controls.speed_factor
             self._sim_target += dt * speed
             # If the simulator can't keep up (very stiff system), drop the backlog.
@@ -527,8 +543,12 @@ class MainWindow(QtWidgets.QMainWindow):
         window = self.controls.window.value()
         t, x, v, f, e, s_el = self.history.window(window)
         peak = float(np.abs(x[-min(len(x), 20_000) :]).max()) if x.size else 0.0
-        s = self.force.settings
-        self.chain.update_state(self.sim.displacement, peak, self.force.value(), s.target, abs(s.amplitude))
+        if held is None:
+            s = self.force.settings
+            self.chain.update_state(self.sim.displacement, peak, self.force.value(), s.target, abs(s.amplitude))
+        else:  # the arrow shows the force holding the mass: the springs' pull on it, reversed
+            hold = float(self.sim.system.matrices()[2][held] @ self.sim.displacement)
+            self.chain.update_state(self.sim.displacement, peak, hold, held, abs(hold))
         if self.forces_view:
             y = self._element_curves(s_el)
         elif self.energy_view:
