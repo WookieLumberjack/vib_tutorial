@@ -590,6 +590,7 @@ class ModalTestPage(QtWidgets.QWidget):
             w.valueChanged.connect(self._reprocess)
         self.extract.changed.connect(self._on_extraction_changed)
         self.extract.auto_requested.connect(self._on_auto_poles)
+        self.extract.clear_requested.connect(self._on_clear_poles)
         self.frf_view.fit_band_changed.connect(self._on_fit_band)
         self.stab_plot.pole_clicked.connect(self._on_pole_clicked)
         self._select_window(Excitation.IMPACT)
@@ -770,6 +771,10 @@ class ModalTestPage(QtWidgets.QWidget):
 
     def _on_auto_poles(self) -> None:
         self.picked = None
+        self.identify()
+
+    def _on_clear_poles(self) -> None:
+        self.picked = []
         self.identify()
 
     def _on_pole_clicked(self, order: int, i: int) -> None:

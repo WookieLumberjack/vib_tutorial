@@ -52,6 +52,7 @@ class ExtractionControls(QtWidgets.QGroupBox):
 
     changed = QtCore.Signal()
     auto_requested = QtCore.Signal()
+    clear_requested = QtCore.Signal()
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__("Modal parameters", parent)
@@ -85,7 +86,16 @@ class ExtractionControls(QtWidgets.QGroupBox):
         self.auto.setToolTip("Pick one pole from each column of the diagram that stays stable over "
                              "at least 5 orders. Click poles in the Stabilization tab to add or remove them.")
         self.auto.clicked.connect(self.auto_requested)
-        form.addRow(self.auto)
+        self.clear = QtWidgets.QPushButton("Clear poles")
+        self.clear.setToolTip("Deselect every pole, then click poles in the Stabilization tab to add "
+                              "them one at a time and watch each mode join the fitted FRF.")
+        self.clear.clicked.connect(self.clear_requested)
+        self.pole_row = QtWidgets.QWidget()
+        row = QtWidgets.QHBoxLayout(self.pole_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.auto)
+        row.addWidget(self.clear)
+        form.addRow(self.pole_row)
         self.correct = QtWidgets.QCheckBox("Remove the exponential window's damping")
         self.correct.setChecked(True)
         self.correct.setToolTip("The exponential window moves every pole 1/τ to the left. Moving the "
@@ -126,7 +136,7 @@ class ExtractionControls(QtWidgets.QGroupBox):
 
     def _on_method(self, *_, emit: bool = True) -> None:
         lscf = self.current is Method.LSCF
-        for w in (self.order_label, self.order, self.auto):
+        for w in (self.order_label, self.order, self.pole_row):
             w.setVisible(lscf)
         if emit:
             self.changed.emit()
@@ -157,6 +167,8 @@ class StabilizationPlot(pg.PlotWidget):
             self.legend.addItem(item, names[st])
             item.sigClicked.connect(self._on_click)
         self.selected = pg.ScatterPlotItem(symbol="o", size=15, brush=None)
+        # The ring sits over its pole and takes the click, so it deselects the pole.
+        self.selected.sigClicked.connect(self._on_click)
         self.addItem(self.selected)
         self.legend.addItem(self.selected, "selected")
         self.lines: list[pg.InfiniteLine] = []
@@ -203,8 +215,7 @@ class StabilizationPlot(pg.PlotWidget):
                 if s is st
             ]
             item.setData(spots)
-        chosen = [(abs(stab.pole(o, i)) / (2 * math.pi), o) for o, i in selection]
-        self.selected.setData([c[0] for c in chosen], [c[1] for c in chosen])
+        self.selected.setData([{"pos": (abs(stab.pole(o, i)) / (2 * math.pi), o), "data": (o, i)} for o, i in selection])
         lo, hi = stab.band
         if indicator.size:
             y = np.log10(np.maximum(indicator, 1e-300))
