@@ -33,7 +33,7 @@ from ..core.modal_coupling import (
     sweep,
 )
 from .animation import MASS_WIDTH, spring_path
-from .coupling_notes import THEORY_HTML
+from .coupling_notes import THEORY_HTML, matrices_html
 from .style import MAX_DOF, colors, text_on
 from .substructuring import error_color, zeta_text
 from .theming import mute
@@ -590,12 +590,14 @@ class ModalCouplingPage(QtWidgets.QWidget):
         self.veering.kind.currentIndexChanged.connect(self._on_sweep_kind)
         self.shapes = ShapePlots()
         self.frf = InterfaceFrf()
+        self.matrices = QtWidgets.QTextBrowser()
         self.theory = QtWidgets.QTextBrowser()
         self.theory.setHtml(THEORY_HTML)
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(self.veering, "Veering && splitting")
         self.tabs.addTab(self.shapes, "Mode shapes")
         self.tabs.addTab(self.frf, "Interface FRF")
+        self.tabs.addTab(self.matrices, "Matrices (step by step)")
         self.tabs.addTab(self.theory, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -761,6 +763,9 @@ class ModalCouplingPage(QtWidgets.QWidget):
         self.veering.set_model(model, comparisons)
         self.shapes.set_model(model, full, comparisons)
         self.frf.set_model(model, system, full)
+        scroll = self.matrices.verticalScrollBar().value()
+        self.matrices.setHtml(matrices_html(model, full))
+        self.matrices.verticalScrollBar().setValue(scroll)
 
     def _clear(self, reason: str, n: int, split: int = 0) -> None:
         self.model, self.comparisons = None, []
@@ -774,6 +779,7 @@ class ModalCouplingPage(QtWidgets.QWidget):
             for combo in (self.mode_a, self.mode_b):
                 combo.clear()
         self.veering.clear(reason)
+        self.matrices.setHtml(f"<p>{reason}</p>")
         self.shapes.set_model(None, self.full, [])
         self.frf.set_model(None, self.system, self.full)
 
@@ -822,13 +828,16 @@ class ModalCouplingPage(QtWidgets.QWidget):
             note = ("With the modal mass at the interface and B's residual mass, the 2-DOF model is a "
                     "Rayleigh–Ritz model of the chain (A's mode shape, and B's on a fixed base), so its "
                     "frequencies are upper bounds of the chain's lowest two")
+            if model.a_mass == "effective":
+                note += (" (A is one mass, so its effective mass and its modal mass at the interface are "
+                         "the same)")
             if [c.full_index for c in comparisons] == [1, 2]:
                 note += ". "
             else:
                 note += (f" ({model.fn_hz[0]:.4g} ≥ {full.modes[0].fn_hz:.4g} Hz and {model.fn_hz[1]:.4g} ≥ "
                          f"{full.modes[1].fn_hz:.4g} Hz), not of the modes they are paired with here. ")
         else:
-            note = ("Without " + ("B's residual mass" if model.a_mass == "tip" else "A's modal mass at the "
+            note = ("Without " + ("B's residual mass" if not model.residual else "A's modal mass at the "
                                   "interface") + " the 2-DOF model is no longer a Rayleigh–Ritz model, so "
                     "its errors can have either sign. ")
         if min(c.mac for c in comparisons) < 0.8:

@@ -85,6 +85,9 @@ def test_choices_that_are_not_rayleigh_ritz():
     no_res = coupled_model(s, 4, residual=False)
     eff = coupled_model(s, 4, a_mass="effective")
     assert not no_res.rayleigh_ritz and not eff.rayleigh_ritz
+    # A single mass: its effective mass is its tip modal mass, so the model is still Rayleigh-Ritz.
+    two = ChainSystem([1.0, 0.1], [400.0, 40.0], [1.0, 0.3])
+    assert coupled_model(two, 1, a_mass="effective").rayleigh_ritz
     assert no_res.m_a == pytest.approx(base.m_a - base.m_residual)
     assert eff.osc_a.m == pytest.approx(subsystems(s, 4)[0].effective_masses[0])
     # Each oscillator keeps its mode's frequency and modal damping ratio whatever its mass.

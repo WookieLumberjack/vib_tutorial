@@ -182,8 +182,12 @@ class CoupledModel:
 
     @property
     def rayleigh_ritz(self) -> bool:
-        """With the tip modal mass and the residual mass the model is Rayleigh-Ritz: an upper bound."""
-        return self.a_mass == "tip" and self.residual
+        """With the tip modal mass and the residual mass the model is Rayleigh-Ritz: an upper bound.
+
+        A's effective mass is its tip modal mass too when A is a single mass, so this checks the mass itself.
+        """
+        m_tip = self.A.tip_masses()[self.mode_a]
+        return self.residual and bool(np.isclose(self.osc_a.m, m_tip, rtol=1e-9))
 
 
 def coupled_model(system: ChainSystem, split: int, mode_a: int = 0, mode_b: int = 0,

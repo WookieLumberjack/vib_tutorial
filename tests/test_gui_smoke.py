@@ -1144,6 +1144,14 @@ def test_modal_coupling_page(app):
     # The result table is laid out in full, with no scroll bar.
     assert page.result_table.height() >= page.result_table.horizontalHeader().height() + 2 * page.result_table.rowHeight(0)
 
+    # The step-by-step matrices follow the model: the tip modal mass is the generalized mass of
+    # the tip-scaled shape, and the influence vector r comes out as ones.
+    text = page.matrices.toPlainText()
+    assert "Participation" in text and "r = [1, 1]" in text and "Notation" in text
+    assert f"{page.model.osc_a.m:.4g} kg" in text and "These are the 2-DOF K and M" in text
+    w.params.rows[0][1].setValue(2.0)  # m1 = 2 kg
+    assert page.matrices.toPlainText() != text
+
     # Split after m1, couple B's mode 2 by clicking its row.
     page.split_buttons[0].click()
     assert page.model.split == 1 and page.sub_table.rowCount() == 4
@@ -1153,7 +1161,12 @@ def test_modal_coupling_page(app):
 
     # A's effective mass instead, and no residual mass: no longer Rayleigh-Ritz.
     page.a_mass.setCurrentIndex(1)
-    assert page.model.a_mass == "effective" and "no longer a Rayleigh" in page.result_note.text()
+    assert page.model.a_mass == "effective" and page.model.rayleigh_ritz  # A is one mass: the same mass
+    assert "A is one mass" in page.result_note.text()
+    page.set_split(2)
+    assert not page.model.rayleigh_ritz and "no longer a Rayleigh" in page.result_note.text()
+    assert "These differ" in page.matrices.toPlainText()
+    page.set_split(1)
     page.a_mass.setCurrentIndex(0)
     page.residual.setChecked(False)
     assert not page.model.residual and "no longer a Rayleigh" in page.result_note.text()

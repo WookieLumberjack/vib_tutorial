@@ -373,7 +373,11 @@ With these choices the 2-DOF model is a Rayleigh–Ritz model of the chain (B's 
 Craig–Bampton with one mode kept), so its two frequencies are upper bounds of the chain's lowest
 two. The page compares them with the chain's (frequency, exact damping ratio, MAC), draws the
 2-DOF modes on the chain, and compares the receptance at the interface. Any mode of A can be
-coupled with any mode of B.
+coupled with any mode of B. *Matrices (step by step)* works both masses through with the current
+numbers: the generalized mass and mass normalization (why 1/φ<sub>tip</sub>² is a mass), the
+influence vector **r** solved from a unit base motion, each mode projected on how the joint loads it
+(a point load **e**<sub>tip</sub> on A, the inertia M**r** on B), the 2-DOF matrices, and the
+Rayleigh–Ritz check, with a notation table.
 
 The **Veering & splitting** tab sweeps B's frequency (or the mass ratio μ = m<sub>b</sub>/m<sub>a</sub>)
 and plots the chain's and the 2-DOF model's frequencies. Near f<sub>B</sub> = f<sub>A</sub> the two
