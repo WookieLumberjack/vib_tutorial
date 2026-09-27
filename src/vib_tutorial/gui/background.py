@@ -184,6 +184,39 @@ in element 1 times the ground's velocity, with a minus sign: −∫T<sub>1</sub>
 While the ground moves, the modal coordinates and the energy by mode use the motion
 relative to it, x − x<sub>g</sub>.</p>
 
+<h3>Vibration absorbers and tuned mass dampers</h3>
+<p>A machine or structure that resonates near its operating frequency can be fixed by
+hanging a small mass m<sub>a</sub> on it with a spring k<sub>a</sub> (and perhaps a damper
+c<sub>a</sub>). In this app that is one more mass on the end of the chain
+(<i>System parameters → Preset</i>).</p>
+<p><b>Undamped absorber.</b> For a primary mass m<sub>1</sub> on k<sub>1</sub> driven by
+F sin ωt, the primary's receptance is</p>
+<p>&nbsp;&nbsp;X<sub>1</sub>/F = (k<sub>a</sub> − ω²m<sub>a</sub>) /
+[(k<sub>1</sub> + k<sub>a</sub> − ω²m<sub>1</sub>)(k<sub>a</sub> − ω²m<sub>a</sub>) − k<sub>a</sub>²]</p>
+<p>The numerator vanishes at ω<sub>a</sub> = √(k<sub>a</sub>/m<sub>a</sub>): an
+<i>antiresonance</i>. At that frequency m<sub>1</sub> stands still and the absorber moves
+just enough that its spring pushes back with −F. Tuned to the primary's own frequency it
+cancels the resonance, but the one peak becomes two, one either side, and they are
+further apart the heavier the absorber (mass ratio μ = m<sub>a</sub>/m<sub>1</sub>). It only
+works at one frequency: a machine whose speed drifts, or starts up through the peaks,
+needs damping.</p>
+<p><b>Tuned mass damper.</b> Add a damper c<sub>a</sub> and the peaks come down, but too
+much locks the absorber to m<sub>1</sub> and the old resonance comes back. Every curve of
+|X<sub>1</sub>/F|, whatever c<sub>a</sub>, passes through the same two <i>fixed points</i>.
+Den Hartog's optimum tunes the absorber so the fixed points are equally high, then picks
+the damping that puts the peaks on them:</p>
+<p>&nbsp;&nbsp;f<sub>a</sub>/f<sub>1</sub> = 1/(1 + μ), &nbsp;&nbsp;
+ζ<sub>a</sub> = √(3μ / 8(1 + μ)³), &nbsp;&nbsp; peak |X<sub>1</sub>|k<sub>1</sub>/F =
+√(1 + 2/μ)</p>
+<p>(ζ<sub>a</sub> = c<sub>a</sub> / 2m<sub>a</sub>ω<sub>a</sub>.) With μ = 5% the peak is
+about 6.4 times the static deflection, whatever the primary's own damping was.</p>
+<p><b>On a chain</b>, such as a building, a damper on the roof is tuned to one mode. Near
+that mode the structure behaves like a single mass on a spring whose <i>modal mass</i> at
+the roof is 1/φ<sub>roof</sub>² (φ mass-normalized), so μ and the tuning use that mass
+and the mode's frequency. The other modes are hardly changed.</p>
+<p>Tick <i>Compare with the chain without its last mass</i> on the <i>Frequency
+response</i> tab to see the structure before the absorber was added, dashed.</p>
+
 <h3>Try it</h3>
 <ol>
 <li>Set c<sub>1</sub> = 15 and leave the other dampers at 2. The note switches to
@@ -210,6 +243,14 @@ In the modal view only its own curve moves.</li>
 <li>Raise c<sub>1</sub> to 200. One pair turns into two real eigenvalues (overdamped),
 one slow and one very fast, listed with their time constants. There are still 2N in
 total.</li>
+<li>Load <i>Preset → Vibration absorber (undamped)</i> and apply the force. After the
+start-up transient m1 stands still and only the absorber m2 moves. Plot <i>Element
+forces</i>: spring k2 carries the applied force. Change the drive frequency a little and
+m1 starts moving again.</li>
+<li>Load <i>Tuned mass damper (Den Hartog)</i>. On the <i>Frequency response</i> tab the
+dashed primary alone peaks at 40 times its static deflection, the damped system at under
+6. Set c2 to 0: two sharp peaks. Set it to 5: the damper locks the absorber to m1 and one
+tall peak comes back. Every curve passes through the same two fixed points.</li>
 </ol>
 """
 

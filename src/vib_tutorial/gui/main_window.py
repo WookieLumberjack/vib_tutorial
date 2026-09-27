@@ -21,6 +21,7 @@ from ..core import (
     pluck_shape,
     potential_energy,
 )
+from ..core.presets import Preset, without_absorber
 from .animation import ChainView
 from .background import COUPLING_TIP, make_background_view
 from .energy import EnergyPanel, EnergyState
@@ -132,6 +133,14 @@ MIN_FORCE_SPAN = 1e-4  # N
 THEME_TIP = (
     "<p>Colours of the whole app: plots, animation and controls.</p>"
     "<p><b>System</b> follows the desktop's light or dark setting, and switches with it.</p>"
+)
+COMPARE_TIP = (
+    "<p>Also draws, thin and dashed, the frequency response of the chain with its last mass "
+    "removed. When the last mass is a vibration absorber or tuned mass damper (see "
+    "<i>System parameters → Preset</i>), this is the structure before it was added.</p>"
+    "<p>An undamped absorber puts an antiresonance at its own frequency √(k/m), where the "
+    "mass it hangs on stands still, and splits the old resonance into two peaks. A tuned "
+    "mass damper's damper flattens those two peaks.</p>"
 )
 RELEASE_FIT_TIP = (
     "<p>While <i>Auto-scale animation and plots</i> is on, the plot window is also "
@@ -267,10 +276,18 @@ class MainWindow(QtWidgets.QMainWindow):
         mv.addLayout(row)
 
         self.frf_plot = FrfPlot()
+        self.frf_compare = QtWidgets.QCheckBox("Compare with the chain without its last mass (dashed)")
+        self.frf_compare.setToolTip(COMPARE_TIP)
+        frf_tab = QtWidgets.QWidget()
+        fv = QtWidgets.QVBoxLayout(frf_tab)
+        fv.setContentsMargins(0, 4, 0, 0)
+        fv.addWidget(self.frf_compare)
+        fv.addWidget(self.frf_plot, 1)
         self.background = make_background_view()
         tabs = self.tabs = QtWidgets.QTabWidget()
         tabs.addTab(modal_tab, "Modal analysis")
-        tabs.addTab(self.frf_plot, "Frequency response")
+        self.frf_tab = frf_tab
+        tabs.addTab(frf_tab, "Frequency response")
         tabs.addTab(self.background, "Background")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -307,6 +324,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # --- wiring
         self.params.changed.connect(self._on_system_changed)
+        self.params.preset_chosen.connect(self._on_preset)
+        self.frf_compare.toggled.connect(self._on_force_changed)
         self.force_panel.settings_changed.connect(self._on_force_changed)
         self.controls.run_toggled.connect(self._on_run_toggled)
         self.controls.reset_clicked.connect(self._reset)
@@ -380,6 +399,14 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.chain.set_masses(system.masses)
         self._refresh_modal()
+
+    def _on_preset(self, preset: Preset) -> None:
+        """The preset's system is loaded; set its excitation and start from rest."""
+        self.force_panel.load(preset.force)
+        self._reset()
+        self.frf_compare.setChecked(preset.absorber)
+        if preset.absorber:
+            self.tabs.setCurrentWidget(self.frf_tab)
 
     def _apply_dof(self, n: int) -> None:
         self.history.reset(n)
@@ -505,7 +532,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_force_changed(self) -> None:
         s = self.force.settings
-        self.frf_plot.set_system(self.sim.system, self.modal, s.target, base=s.base)
+        system = self.sim.system
+        self.frf_compare.setEnabled(system.n > 1)
+        reference = without_absorber(system) if self.frf_compare.isChecked() else None
+        self.frf_plot.set_system(system, self.modal, s.target, base=s.base, reference=reference)
         self._set_drive()
         self.time_plot.set_input(s.base)
 
