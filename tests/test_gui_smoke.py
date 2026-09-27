@@ -582,8 +582,11 @@ def test_modal_test_page(app):
 
 
 def test_modal_extraction_on_the_test_page(app):
+    import numpy as np
+    from PySide6 import QtTest
+
     from vib_tutorial.core import Excitation, Window
-    from vib_tutorial.core.identification import Method
+    from vib_tutorial.core.identification import Method, auto_select
     from vib_tutorial.gui.main_window import MainWindow
 
     w = MainWindow()
@@ -602,15 +605,31 @@ def test_modal_extraction_on_the_test_page(app):
     assert p.results.table.rowCount() == 4 and p.results.table.item(3, 7).text() == "1.000"
     assert p.frf_view.fit_curves[0].getData()[0] is not None
 
-    # Clicking a selected pole removes it; clicking it again brings it back.
+    # Clicking a selected pole (through its ring) removes it; clicking it again brings it back.
+    p.tabs.setCurrentWidget(p.stab_plot)
+    app.processEvents()
+
+    def click(order, i):
+        sp = p.stab_plot
+        at = QtCore.QPointF(abs(p.stab.pole(order, i)) / (2 * np.pi), order)
+        pos = sp.mapFromScene(sp.getViewBox().mapViewToScene(at))
+        QtTest.QTest.mouseClick(sp.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=pos)
+        app.processEvents()
+
     order, i = p.poles[1]
-    p.stab_plot.pole_clicked.emit(order, i)
+    click(order, i)
     assert len(p.poles) == 3 and p.results.table.item(1, 2).text() == "missed"
-    p.stab_plot.pole_clicked.emit(order, i)
+    click(order, i)
     assert len(p.poles) == 4
     # A new noise level keeps the hand-picked poles (found again by frequency).
     p.response_noise.setValue(0.5)
     assert len(p.poles) == 4 and p.picked is not None
+    # Clear, then build the model up one pole at a time.
+    p.extract.clear.click()
+    assert p.poles == [] and p.frf_view.fit_curves[0].getData()[0] is None
+    first = auto_select(p.stab)[0]
+    click(*first)
+    assert p.poles == [first] and len(p.ident.modes) == 1
     p.extract.auto.click()
     assert p.picked is None
 
