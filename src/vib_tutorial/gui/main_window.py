@@ -27,6 +27,7 @@ from .background import COUPLING_TIP, make_background_view
 from .energy import EnergyPanel, EnergyState
 from .frf_matrix import FrfMatrixPage
 from .history import History
+from .modal_coupling import ModalCouplingPage
 from .modal_test import ModalTestPage
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
@@ -305,6 +306,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.frf_page = FrfMatrixPage()
         self.pages.addTab(self.frf_page, "FRF matrix")
         self.pages.addTab(self.cms_page, "Substructuring (CMS)")
+        self.coupling_page = ModalCouplingPage()
+        self.pages.addTab(self.coupling_page, "Modal coupling")
         self.test_page = ModalTestPage()
         self.pages.addTab(self.test_page, "Virtual modal test")
         self.theme_combo = QtWidgets.QComboBox()
@@ -342,6 +345,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chain.mass_released.connect(self._on_mass_released)
         self.frf_page.dof_requested.connect(self.params.dof.setValue)
         self.frf_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
+        self.coupling_page.dof_requested.connect(self.params.dof.setValue)
+        self.coupling_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
         self.test_page.dof_requested.connect(self.params.dof.setValue)
         self.test_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
         self.theme_combo.textActivated.connect(self._on_theme_picked)
@@ -385,7 +390,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _restyle(self) -> None:
         theming.restyle(self)
         for w in (self.chain, self.time_plot, self.mode_plot, self.phasor_plot.plot, self.frf_plot,
-                  self.params, self.energy, self.cms_page, self.frf_page, self.test_page):
+                  self.params, self.energy, self.cms_page, self.coupling_page, self.frf_page, self.test_page):
             w.apply_theme()
         self.force_panel.refresh()
         self._refresh_modal_views()  # mode colours: table, shapes, time and FRF curves
@@ -417,6 +422,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _refresh_modal(self) -> None:
         self.modal = modal_analysis(self.sim.system)
         self.cms_page.set_system(self.sim.system, self.modal)
+        self.coupling_page.set_system(self.sim.system, self.modal)
         self.frf_page.set_system(self.sim.system, self.modal)
         self.test_page.set_system(self.sim.system, self.modal)
         self._refresh_modal_views()

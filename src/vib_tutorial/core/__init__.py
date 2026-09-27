@@ -30,6 +30,7 @@ from .modal import (
     receptance,
     transmissibility,
 )
+from .modal_coupling import CoupledModel, compare_coupled, coupled_model, subsystems
 from .model import ChainSystem, assemble_chain, element_forces, pluck_shape, state_space
 from .simulator import Simulator, foh_discretize, foh_quadratic_integrals
 from .substructure import (
@@ -70,6 +71,7 @@ __all__ = [
     "ChainSystem",
     "ComplexMode",
     "ComponentMode",
+    "CoupledModel",
     "CraigBamptonModel",
     "ForceController",
     "ForceKind",
@@ -85,6 +87,8 @@ __all__ = [
     "compare_modes",
     "component_mode_synthesis",
     "component_modes",
+    "compare_coupled",
+    "coupled_model",
     "craig_bampton",
     "damped_poles",
     "foh_discretize",
@@ -104,6 +108,7 @@ __all__ = [
     "receptance",
     "reduced_frf",
     "state_space",
+    "subsystems",
     "stored_energy",
     "substructure_damping",
     "transmissibility",

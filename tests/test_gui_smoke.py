@@ -1001,13 +1001,14 @@ def test_switch_themes_live(app):
             assert w.table.item(0, 0).foreground().color().name() == colors.mode[0]
             assert w.energy.bars.grab().toImage().pixelColor(2, 2).name() == colors.background
             # Every page redraws in it when shown.
-            for page in (w.frf_page, w.cms_page, w.test_page):
+            for page in (w.frf_page, w.cms_page, w.coupling_page, w.test_page):
                 w.pages.setCurrentWidget(page)
                 app.processEvents()
             assert w.frf_page.grid.full[0][0].opts["pen"].color().name() == colors.strong
             assert w.cms_page.plots.frf.getAxis("bottom").textPen().color().name() == colors.foreground
             assert all(s.plot.getAxis("left").pen().color().name() == colors.foreground
                        for s in w.cms_page.basis._slots)
+            assert w.coupling_page.veering.plot.getAxis("left").pen().color().name() == colors.foreground
             while not w.test_page.acq.done:
                 w.test_page._measure_some()
             assert w.test_page.frf_view.measured[0].opts["pen"].color().name() == colors.mass[w.sim.system.n - 1]
@@ -1121,4 +1122,80 @@ def test_substructuring_back_expansion(app):
     w.pages.setCurrentWidget(w.sim_page)
     assert not v._timer.isActive()
     w.set_theme("Light")
+    w.close()
+
+
+def test_modal_coupling_page(app):
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    page = w.coupling_page
+    w.show()
+    w.pages.setCurrentWidget(page)
+    app.processEvents()
+
+    # Four masses: split in the middle, the first modes of A and B coupled.
+    assert page.split == 2 and len(page.split_buttons) == 3 and page.split_buttons[1].isChecked()
+    assert page.model.split == 2 and (page.model.mode_a, page.model.mode_b) == (0, 0)
+    assert page.sub_table.rowCount() == 4 and page.sub_table.item(0, 0).text().startswith("A1")
+    assert page.result_table.rowCount() == 2 and page.result_table.item(0, 3).text() == "mode 1"
+    assert "Rayleigh–Ritz" in page.result_note.text() and "strongly coupled" in page.summary.text()
+    assert page.veering.data is not None and page.veering.data.full.shape[1] == 4
+    # The result table is laid out in full, with no scroll bar.
+    assert page.result_table.height() >= page.result_table.horizontalHeader().height() + 2 * page.result_table.rowHeight(0)
+
+    # The step-by-step matrices follow the model: the tip modal mass is the generalized mass of
+    # the tip-scaled shape, and the influence vector r comes out as ones.
+    text = page.matrices.toPlainText()
+    assert "Participation" in text and "r = [1, 1]" in text and "Notation" in text
+    assert f"{page.model.osc_a.m:.4g} kg" in text and "These are the 2-DOF K and M" in text
+    w.params.rows[0][1].setValue(2.0)  # m1 = 2 kg
+    assert page.matrices.toPlainText() != text
+
+    # Split after m1, couple B's mode 2 by clicking its row.
+    page.split_buttons[0].click()
+    assert page.model.split == 1 and page.sub_table.rowCount() == 4
+    page.sub_table.cellClicked.emit(2, 0)  # rows: A1, B1, B2, B3
+    assert page.model.mode_b == 1 and page.mode_b.currentIndex() == 1
+    page.set_modes(0, 0)
+
+    # A's effective mass instead, and no residual mass: no longer Rayleigh-Ritz.
+    page.a_mass.setCurrentIndex(1)
+    assert page.model.a_mass == "effective" and page.model.rayleigh_ritz  # A is one mass: the same mass
+    assert "A is one mass" in page.result_note.text()
+    page.set_split(2)
+    assert not page.model.rayleigh_ritz and "no longer a Rayleigh" in page.result_note.text()
+    assert "These differ" in page.matrices.toPlainText()
+    page.set_split(1)
+    page.a_mass.setCurrentIndex(0)
+    page.residual.setChecked(False)
+    assert not page.model.residual and "no longer a Rayleigh" in page.result_note.text()
+    page.residual.setChecked(True)
+
+    # Sweep the mass ratio instead of the frequency.
+    page.veering.kind.setCurrentIndex(1)
+    assert page.veering.data.kind == "mass"
+    for tab in range(page.tabs.count()):
+        page.tabs.setCurrentIndex(tab)
+        app.processEvents()
+
+    # N changed on the Simulation page: the split follows, kept where it was.
+    w.params.dof.setValue(8)
+    assert len(page.split_buttons) == 7 and page.split == 1 and page.model.B.dofs.size == 7
+    page.set_split(6)
+    page.set_modes(1, 0)
+    assert page.model.split == 6 and page.model.mode_a == 1
+    assert page.result_table.item(0, 3).text() != "mode 1"  # paired by shape with a higher mode
+
+    # A parameter edit on the Simulation page reaches this page.
+    k_before = page.model.osc_b.k
+    w.params.rows[6][2].setValue(800.0)
+    assert page.model.osc_b.k != k_before
+
+    # One mass cannot be split.
+    w.params.dof.setValue(1)
+    assert page.model is None and "at least 2 masses" in page.summary.text()
+    w.params.dof.setValue(4)
+    assert page.model is not None
+    w.pages.setCurrentWidget(w.sim_page)
     w.close()
