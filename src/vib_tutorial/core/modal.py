@@ -113,6 +113,9 @@ def modal_analysis(system: ChainSystem) -> ModalResult:
 
     # --- Undamped normal modes. eigh(K, M) returns M-orthonormal eigenvectors.
     w2, Phi = scipy.linalg.eigh(K, M)
+    # Their signs depend on the LAPACK build (Accelerate on macOS differs from OpenBLAS):
+    # fix each so its largest entry is positive, like the peak-normalized shape.
+    Phi *= np.sign(Phi[np.argmax(np.abs(Phi), axis=0), np.arange(Phi.shape[1])])
     omegas = np.sqrt(np.clip(w2, 0.0, None))
     Cm = Phi.T @ C @ Phi
     d = np.sqrt(np.abs(np.outer(np.diag(Cm), np.diag(Cm))))
