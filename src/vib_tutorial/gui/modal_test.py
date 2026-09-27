@@ -4,7 +4,8 @@ Left: the test (excitation, acquisition, noise, processing). Centre: the
 latest recorded block and force spectrum above the estimated FRF and its
 coherence. Right: a check of the settings against the chain's modes, and
 theory. The data are measured a few blocks per frame, so the average can be
-watched settling; changing only noise or processing reuses the same data.
+watched settling, or at a playback speed that draws each record as it is
+recorded; changing only noise or processing reuses the same data.
 """
 
 from __future__ import annotations
@@ -53,6 +54,9 @@ from .theming import mute
 
 FRAME_MS = 30
 STEP_BUDGET_MS = 25  # measuring per frame, so the page stays responsive
+# Playback: how fast each record is drawn, as a multiple of real time (None: all at once).
+SPEEDS = [("Instant", None), ("100× real time", 100.0), ("30× real time", 30.0), ("10× real time", 10.0),
+          ("3× real time", 3.0), ("Real time", 1.0)]
 BLOCK_SIZES = [256, 512, 1024, 2048, 4096, 8192]
 OVERLAPS = [0.0, 0.5, 0.75]
 
@@ -153,19 +157,36 @@ class SignalView(pg.GraphicsLayoutWidget):
         self.s_tip.setPen(pg.mkPen(colors.strong, width=1, style=dash))
         self.band.setBrush(pg.mkBrush(*colors.band_shade))
 
+    def clear_measurement(self) -> None:
+        for curve in (self.f_curve, self.f_window, self.f_fit, self.x_curve, self.x_window, self.x_fit, self.s_curve):
+            curve.clear()
+
     def set_data(self, est: Estimate, j: int, settings: MeasurementSettings, stepped: bool) -> None:
+        self.set_time(est, j, stepped)
+        self.set_spectrum(est, settings, stepped)
+
+    def set_time(self, est: Estimate, j: int, stepped: bool, shown: float | None = None) -> None:
+        """The latest record against time; while it is being recorded, only its first `shown` s."""
+        n = est.t.size if shown is None else int(np.searchsorted(est.t, shown, side="right"))
         # Block excitations: the samples joined by lines. Stepped sine: the samples as dots
         # (as few as 2.5 per cycle at the band edge) and the fitted sine through them.
-        for curve, fit, y, y_fit, color in (
-            (self.f_curve, self.f_fit, est.f, None if est.fit is None else est.fit[1], colors.force),
-            (self.x_curve, self.x_fit, est.x[:, j], None if est.fit is None else est.fit[2][:, j], colors.mass[j]),
+        for plot, curve, fit, y, y_fit, color in (
+            (self.force, self.f_curve, self.f_fit, est.f, None if est.fit is None else est.fit[1], colors.force),
+            (self.response, self.x_curve, self.x_fit, est.x[:, j], None if est.fit is None else est.fit[2][:, j],
+             colors.mass[j]),
         ):
             if y_fit is None:
-                curve.setData(est.t, y, pen=pg.mkPen(color, width=1), symbol=None)
+                curve.setData(est.t[:n], y[:n], pen=pg.mkPen(color, width=1), symbol=None)
                 fit.setData([], [])
             else:
-                curve.setData(est.t, y, pen=None, symbol="o", symbolSize=4, symbolPen=None, symbolBrush=color)
-                fit.setData(est.fit[0], y_fit)
+                curve.setData(est.t[:n], y[:n], pen=None, symbol="o", symbolSize=4, symbolPen=None, symbolBrush=color)
+                m = est.fit[0].size if shown is None else int(np.searchsorted(est.fit[0], shown, side="right"))
+                fit.setData(est.fit[0][:m], y_fit[:m])
+            if shown is None:
+                plot.enableAutoRange()
+            else:  # the whole record's range, so the axes hold still while it is drawn
+                lo, hi = float(np.min(y)), float(np.max(y))
+                plot.setRange(xRange=(0.0, float(est.t[-1])), yRange=(lo, hi))
         self.x_fit.setPen(pg.mkPen(colors.mass[j], width=1))
         self.response.setLabel("left", f"x{j + 1}", units="m")
         for curve, window, signal in ((self.f_window, est.force_window, est.f), (self.x_window, est.response_window, est.x[:, j])):
@@ -173,8 +194,11 @@ class SignalView(pg.GraphicsLayoutWidget):
                 curve.setData([], [])
             else:
                 curve.setData(est.t, window * float(np.abs(signal).max() or 1.0))
-        self.force.setTitle(f"{est.freqs[-1]:.3g} Hz: dots as measured · line: fitted sine" if stepped else
-                            f"Block {est.count}: signals as measured · dashed: window (scaled)", size="9pt")
+        what = (f"{est.freqs[-1]:.3g} Hz" if stepped else f"Block {est.count}") + (" (recording…)" if shown is not None else "")
+        self.force.setTitle(what + (": dots as measured · line: fitted sine" if stepped else
+                                    ": signals as measured · dashed: window (scaled)"), size="9pt")
+
+    def set_spectrum(self, est: Estimate, settings: MeasurementSettings, stepped: bool) -> None:
         spec = est.force_spectrum
         with np.errstate(divide="ignore"):
             db = 10.0 * np.log10(spec / spec.max()) if spec.size and spec.max() > 0 else spec
@@ -249,6 +273,11 @@ class FrfView(pg.GraphicsLayoutWidget):
         self.fit_region.blockSignals(True)
         self.fit_region.setRegion((lo, hi))
         self.fit_region.blockSignals(False)
+
+    def clear_measurement(self) -> None:
+        """Hide the measurement (a new one has started); the exact curves stay."""
+        for curve in self.measured:
+            curve.clear()
 
     def set_fit(self, freqs: np.ndarray | None, h: np.ndarray | None) -> None:
         """The FRF rebuilt from the identified modes (None: hide it)."""
@@ -384,6 +413,10 @@ class ModalTestPage(QtWidgets.QWidget):
         self._timer.setInterval(FRAME_MS)
         self._timer.timeout.connect(self._measure_some)
         self._clock = QtCore.QElapsedTimer()
+        # Paced playback: the record being drawn, and how much of it (s) is shown so far.
+        self._live: Estimate | None = None
+        self._shown: float | None = None
+        self._frame = QtCore.QElapsedTimer()
 
         # --- test setup
         setup = QtWidgets.QGroupBox("Test")
@@ -527,15 +560,29 @@ class ModalTestPage(QtWidgets.QWidget):
         self.again = QtWidgets.QPushButton("Measure again")
         self.again.setToolTip("Repeat the test with new random signals and noise.")
         self.again.clicked.connect(self.restart)
+        self.speed = QtWidgets.QComboBox()
+        for label, speed in SPEEDS:
+            self.speed.addItem(label, speed)
+        self.speed.setToolTip(
+            "<p>How fast the test plays. <b>Instant</b> measures it all at once. The others draw "
+            "each block (or stepped-sine frequency) as it is recorded, at that multiple of real "
+            "time, and update the spectrum and FRF when it is complete, as an analyzer does.</p>"
+            "<p>The waits for steady state, and for a hit to die away, are skipped.</p>"
+        )
         self.progress = QtWidgets.QLabel()
+        self.progress.setWordWrap(True)
         run_row.addWidget(self.again)
         run_row.addWidget(self.progress, 1)
+        speed_row = QtWidgets.QHBoxLayout()
+        speed_row.addWidget(QtWidgets.QLabel("Playback:"))
+        speed_row.addWidget(self.speed, 1)
 
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
         self.extract = ExtractionControls()
         for w in (setup, daq, noise, proc):
             lv.addWidget(w)
+        lv.addLayout(speed_row)
         lv.addLayout(run_row)
         lv.addWidget(self.extract)
         lv.addStretch(1)
@@ -596,6 +643,7 @@ class ModalTestPage(QtWidgets.QWidget):
         self.anti_alias.toggled.connect(self.restart)
         self.fs_auto.toggled.connect(self._on_fs_auto)
         self.averages.valueChanged.connect(self._on_averages)
+        self.speed.currentIndexChanged.connect(self._on_speed)
         for w in (self.window, self.estimator_combo):
             w.currentIndexChanged.connect(self._reprocess)
         for w in (self.exp_end, self.force_noise, self.response_noise):
@@ -629,8 +677,14 @@ class ModalTestPage(QtWidgets.QWidget):
         super().showEvent(event)
         if self._dirty:
             self.restart()
-        elif self.acq is not None and not self.acq.done:
+        elif self.running:
+            self._frame.start()  # resume the record where it was, not after the time hidden
             self._timer.start()
+
+    @property
+    def running(self) -> bool:
+        """Still measuring, or still drawing the last record."""
+        return self.acq is not None and (not self.acq.done or self._shown is not None)
 
     def hideEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().hideEvent(event)
@@ -697,13 +751,23 @@ class ModalTestPage(QtWidgets.QWidget):
             return
         self.acq.settings.averages = self.averages.value()
         self.redraw()
-        if not self.acq.done and self.isVisible():
+        if self.running and self.isVisible():
+            self._timer.start()
+
+    def _on_speed(self) -> None:
+        if self.speed.currentData() is None and self._shown is not None:  # finish the record now
+            self._shown = None
+            self.redraw()
+        if self.running and self.isVisible():
+            self._frame.start()
             self._timer.start()
 
     def _reprocess(self) -> None:
         self._show_rows()
         if self.acq is not None:
             self.estimator = FrfEstimator(self.acq, self.processing())
+            if self._shown is not None:  # the record being drawn, with the new noise
+                self._live = self.estimator.estimate()
         self.redraw()
 
     # ----------------------------------------------------------- measure
@@ -737,14 +801,22 @@ class ModalTestPage(QtWidgets.QWidget):
         self.extract.set_band(0.0, s.band, top=s.fs / 2)
         self.frf_view.set_fit_band(0.0, s.band)
         self.picked = None
+        self._live, self._shown = None, None
+        self.signals.clear_measurement()
+        self.frf_view.clear_measurement()
+        self.identify()
         self._update_info()
         self.check.setHtml(self._setup_check())
         self._measure_some()
-        if not self.acq.done and self.isVisible():
+        if self.running and self.isVisible():
             self._timer.start()
 
     def _measure_some(self) -> None:
         if self.acq is None:
+            return
+        speed = self.speed.currentData()
+        if speed is not None:
+            self._play(speed)
             return
         self._clock.start()
         while not self.acq.done and self._clock.elapsed() < STEP_BUDGET_MS:
@@ -753,12 +825,42 @@ class ModalTestPage(QtWidgets.QWidget):
             self._timer.stop()
         self.redraw()
 
+    def _play(self, speed: float) -> None:
+        """Paced playback: measure one record, then draw it over its duration / speed."""
+        if self._shown is None:
+            if self.acq.done:
+                self._timer.stop()
+                return
+            first = self.acq.progress[0] == 0
+            self.acq.step()
+            self._live = self.estimator.estimate()
+            s = self.acq.settings
+            # Continuous random: the part a block shares with the one before was drawn already.
+            overlap = s.block - self.acq.hop if s.excitation is Excitation.RANDOM and not first else 0
+            self._shown = overlap / s.fs
+            self._frame.start()
+        else:
+            self._shown += self._frame.restart() * 1e-3 * speed
+        est = self._live
+        if self._shown >= est.t[-1]:
+            self._shown = None
+            self.redraw()
+            if self.acq.done:
+                self._timer.stop()
+            return
+        self.signals.set_time(est, max(0, self.output.currentIndex()), self.acq.stepped, shown=self._shown)
+        done, wanted = self.acq.progress
+        self.progress.setText(f"{done - 1} / {wanted} {self._noun} · recording {done} …")
+
+    @property
+    def _noun(self) -> str:
+        return "frequencies" if self.acq.stepped else "averages"
+
     def redraw(self) -> None:
         if self.acq is None or self.estimator is None:
             return
         done, wanted = self.acq.progress
-        noun = "frequencies" if self.acq.stepped else "averages"
-        self.progress.setText(f"{done} / {wanted} {noun}" + ("" if done >= wanted else " …"))
+        self.progress.setText(f"{done} / {wanted} {self._noun}" + ("" if done >= wanted else " …"))
         est = self.estimator.estimate()
         if est is None:
             return
