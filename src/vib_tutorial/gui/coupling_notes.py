@@ -30,35 +30,81 @@ its mass m is chosen,</p>
 <p>&nbsp;&nbsp;k = m ω²,&nbsp;&nbsp; c = m φ<sup>T</sup>Cφ = 2ζωm&nbsp;&nbsp;
 (φ mass-normalized, φ<sup>T</sup>Mφ = 1).</p>
 <p>The mass is the question: a mode has no one mass. It has as many as there are ways to
-push on it, and the right one is the mass the <i>joint</i> feels.</p>
+push on it, and the right one is the mass the <i>joint</i> feels (<a href="#masses">below</a>).</p>
 
-<h3>B: its effective mass</h3>
-<p>B is joined to A at its base. When its base moves by u, every mass of B moves with it:
-the influence vector is <b>1</b>. The base motion drives mode r with the <b>participation
-factor</b></p>
-<p>&nbsp;&nbsp;Γ<sub>r</sub> = φ<sub>r</sub><sup>T</sup>M<b>1</b>,</p>
-<p>and the force the mode puts back on the base is that of a mass of</p>
-<p>&nbsp;&nbsp;m<sub>eff,r</sub> = Γ<sub>r</sub>²&nbsp;&nbsp;(the <b>effective mass</b>
-along x)</p>
-<p>on a spring of frequency ω<sub>r</sub>. The effective masses of all the modes add up
-to B's total mass. The lowest mode of a chain usually carries most of it; the table
-lists each mode's share.</p>
-<p>The rest of B's mass, m<sub>B</sub> − m<sub>eff</sub>, belongs to B's other modes. Well
-below their frequencies they are stiff, so that mass just moves with the base: it is the
-<b>residual mass</b>, and it rides on A's tip. <i>Add B's residual mass to A</i> puts it
-there.</p>
+<h3><a name="masses"></a>Which mass? The mass the joint feels</h3>
+<p>Both oscillator masses are "the mass of one mode", but measured at different places, so
+the formula and the value differ. A and B touch the joint in different ways:</p>
+<ul>
+<li>A's mode <b>moves</b> the interface, so its oscillator mass comes from how far the
+interface moves in the mode: 1/φ<sub>tip</sub>².</li>
+<li>B's mode <b>holds</b> the interface still and pushes on it, so its oscillator mass
+comes from how hard it pushes back when the interface moves: Γ².</li>
+</ul>
 
 <h3>A: its modal mass at the interface</h3>
-<p>A is joined to B at its tip, not at its base, so what matters is the mass of A's mode
-as its tip feels it. Scale the mode so the tip moves 1, φ/φ<sub>tip</sub>: its kinetic
-energy is then ½ (1/φ<sub>tip</sub>²) u̇² for a tip velocity u̇, so</p>
+<p>A is grounded on the left, and B is joined to its <b>free tip</b>. In A's mode the tip
+moves, so the natural coordinate for A's oscillator is the tip displacement u<sub>a</sub>.
+Take the mass-normalized mode φ (φ<sup>T</sup>Mφ = 1) and scale it so the tip moves exactly
+1: x = (φ/φ<sub>tip</sub>) u<sub>a</sub>. Then</p>
+<p>&nbsp;&nbsp;kinetic energy&nbsp; ½ (φ/φ<sub>tip</sub>)<sup>T</sup>M(φ/φ<sub>tip</sub>)
+u̇<sub>a</sub>² = ½ (1/φ<sub>tip</sub>²) u̇<sub>a</sub>²,<br>
+&nbsp;&nbsp;strain energy&nbsp; ½ (ω²/φ<sub>tip</sub>²) u<sub>a</sub>².</p>
+<p>An oscillator with the same energies at the same tip displacement has</p>
 <p>&nbsp;&nbsp;m<sub>a</sub> = 1/φ<sub>tip</sub>²&nbsp;&nbsp;(the <b>modal mass at the
-interface</b>).</p>
-<p>This is the same modal mass the vibration absorber presets use for their primary. A's
-effective mass Γ² would be right if B were joined at A's base; <i>Mass of A's
-oscillator</i> can be switched to it to see how much worse that is. For a uniform chain
-the effective mass of mode 1 is well above its tip modal mass: the tip moves most, so
-per unit of tip motion the mode looks light.</p>
+interface</b>),&nbsp;&nbsp; k<sub>a</sub> = ω²m<sub>a</sub>.</p>
+<p>The driving-point FRF says the same thing: near resonance the tip receptance is
+H<sub>tip,tip</sub> ≈ φ<sub>tip</sub>²/(ω<sub>r</sub>² − ω²) = 1/[m<sub>a</sub>(ω<sub>r</sub>² −
+ω²)], so to a force at its tip A responds like an oscillator of mass 1/φ<sub>tip</sub>².
+The tip moves more than the rest of A, so per unit of tip motion the mode looks light:
+m<sub>a</sub> is less than A's total mass. This is the same modal mass the vibration
+absorber presets use for their primary.</p>
+
+<h3>B: its effective mass</h3>
+<p>B's own modes are computed with its base held (its first spring and damper tied to
+ground). In them <b>the interface does not move</b>: φ<sub>base</sub> = 0, so a
+"1/φ<sub>base</sub>²" would be infinite. B cannot couple to the joint through its mode's
+displacement there. It couples through <b>the force its mode puts on the base when the base
+moves</b>.</p>
+<p>When the base moves by u, every mass of B moves with it (the influence vector is
+<b>1</b>), plus the mode's motion relative to the base, φq. Then</p>
+<p>&nbsp;&nbsp;q̈ + ω²q = −Γ ü,&nbsp;&nbsp; with the <b>participation factor</b>
+Γ = φ<sup>T</sup>M<b>1</b>,<br>
+&nbsp;&nbsp;force on the base&nbsp; F = m<sub>B</sub> ü + Γ q̈.</p>
+<p>With y = q/Γ the base sees exactly two things:</p>
+<ul>
+<li>a mass <b>Γ²</b> on a spring of frequency ω, moving relative to it: the oscillator,
+m<sub>b</sub> = Γ² (the <b>effective mass</b> along x), k<sub>b</sub> = ω²m<sub>b</sub>;</li>
+<li>the remaining <b>m<sub>B</sub> − Γ²</b> moving rigidly with the base: the <b>residual
+mass</b>. It belongs to B's other modes, which are stiff well below their frequencies. B's
+base is A's tip, so it rides on A's oscillator: <i>Add B's residual mass to A</i> puts it
+there.</li>
+</ul>
+<p>The effective masses of all of B's modes add up to B's total mass. The lowest mode of a
+chain usually carries most of it; the table lists each mode's share.</p>
+
+<h3>Side by side</h3>
+<table border="1" cellspacing="0" cellpadding="4">
+<tr><th></th><th>A: modal mass at the interface</th><th>B: effective mass</th></tr>
+<tr><td>Joined</td><td>at its free tip</td><td>at its base</td></tr>
+<tr><td>Its modes</td><td>interface free: it moves</td><td>interface held: it does not move</td></tr>
+<tr><td>Couples through</td><td>the displacement at the interface</td><td>the force on the base (inertia)</td></tr>
+<tr><td>Formula</td><td>1/φ<sub>tip</sub>²</td><td>(φ<sup>T</sup>M<b>1</b>)²</td></tr>
+<tr><td>Answers</td><td>"a force at the tip: how heavy does the mode feel?"</td>
+<td>"the base shakes: how much mass swings on the spring?"</td></tr>
+</table>
+<p><b>Example.</b> A = m1, m2 (1 kg each, k = 400 N/m each), mode 1 at 1.967 Hz. The
+mass-normalized φ = [0.526, 0.851], so</p>
+<p>&nbsp;&nbsp;1/φ<sub>tip</sub>² = 1/0.851² = <b>1.38 kg</b>,&nbsp;&nbsp;
+Γ = 0.526 + 0.851 = 1.376,&nbsp; Γ² = <b>1.89 kg</b>.</p>
+
+<h3>Why not A's effective mass?</h3>
+<p>Γ<sub>A</sub>² answers the base question for A: how hard shaking A's <i>ground</i> would
+drive its mode. But A's ground does not move here, and B pushes on A's tip. For a uniform
+chain Γ² is well above 1/φ<sub>tip</sub>² (1.89 against 1.38 kg above), because the tip
+moves more than the average mass. Switch <i>Mass of A's oscillator</i> to the effective
+mass to see it: the errors grow (in the tuned example of <i>Try it</i> from about 0.2% to
+about 3%), and the model is no longer Rayleigh–Ritz, so its errors can have either sign.</p>
 
 <h3>Why this works: it is a Rayleigh–Ritz model</h3>
 <p>With both choices above, the 2-DOF model is exactly the chain restricted to two shapes:</p>
