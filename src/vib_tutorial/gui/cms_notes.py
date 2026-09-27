@@ -337,6 +337,57 @@ Craig–Bampton for the higher ones: the residual flexibility is a <i>static</i>
 helps most well below the discarded frequencies. Also, B's first kept free mode is its rigid-body
 mode, which Craig–Bampton gets for free inside its constraint modes.</p>
 
+<h3><a name="recovery"></a>Back expansion (data recovery)</h3>
+<h4>The coupled model does not contain the interior</h4>
+<p>In practice a substructure is reduced once, often by someone else (a supplier, another team),
+and delivered as its reduced matrices M̂, Ĉ, K̂. The system-level analysis couples it with other
+models on the boundary DOFs and solves for the reduced coordinates r = [q, x<sub>b</sub>] only.
+But the questions asked afterwards are usually about the <i>inside</i> of the substructure: how
+far does this interior point move, how hard is this spring or bolt loaded? Answering them means
+going back from r to the interior DOFs: <b>back expansion</b>, or <b>data recovery</b>.</p>
+<h4>Recovery from the coupled solution</h4>
+<p>Each substructure recovers its own interior from its rows of T, using only its own q and its
+own boundary DOFs:
+<br>&nbsp;&nbsp;Craig–Bampton: x<sub>i</sub> = Ψ x<sub>b</sub> + Φ<sub>k</sub> q
+<br>&nbsp;&nbsp;Rubin, MacNeal: x<sub>i</sub> = R x<sub>b</sub> + (Φ<sub>ik</sub> − RΦ<sub>bk</sub>) q
+<br>For Craig–Bampton the two parts have a clear meaning: Ψx<sub>b</sub> is the static shape the
+boundary drags the interior into, and Φ<sub>k</sub>q is the interior's own vibration relative to
+it. The matrix [Φ<sub>k</sub> Ψ] is what a supplier delivers with the reduced model as an
+<i>output transformation matrix</i> (OTM), so the system analyst can recover the interior without
+the full model. Recovered spring forces come the same way: a spring's force is a fixed
+combination of displacements, k<sub>e</sub>(x<sub>e</sub> − x<sub>e−1</sub>), so it too is a
+matrix times r (a displacement-based <i>loads transformation matrix</i>).</p>
+<p>The recovery can be no better than the reduced model, and it inherits the truncation: the
+discarded modes are not in q, so their motion is missing from x<sub>i</sub>. Forces are
+differences of displacements, which weight the higher, shorter-wavelength modes more, so a
+recovered force is usually less accurate than the displacements it comes from.</p>
+<h4>Boundary only (static recovery)</h4>
+<p>If only x<sub>b</sub> is kept from the system run (or the substructure was Guyan-reduced),
+the best static guess is x<sub>i</sub> = −K<sub>ii</sub><sup>−1</sup>K<sub>ib</sub>x<sub>b</sub>.
+For Craig–Bampton that is exactly the Ψx<sub>b</sub> part: comparing the two shows what the modal
+coordinates q contribute. It is right for slow loading and misses every resonance of the
+interior.</p>
+<h4>Enhanced recovery</h4>
+<p>Knowing x<sub>b</sub>(t), the substructure can be solved again on its own, with its boundary
+motion imposed as a base excitation and with <i>all</i> its interior DOFs:
+<br>&nbsp;&nbsp;M<sub>ii</sub>ẍ<sub>i</sub> + C<sub>ii</sub>ẋ<sub>i</sub> + K<sub>ii</sub>x<sub>i</sub>
+= −K<sub>ib</sub>x<sub>b</sub> − C<sub>ib</sub>ẋ<sub>b</sub> − M<sub>ib</sub>ẍ<sub>b</sub>
+<br>(M<sub>ib</sub> = 0 here: the masses are lumped). This puts back the dynamics of the modes that
+were truncated, driven by the boundary motion the coupled model predicted. Its only remaining error
+is the error in x<sub>b</sub> itself, so it is exact whenever x<sub>b</sub> is, whatever was
+truncated inside. It costs a second, local analysis per substructure, which is cheap next to the
+system run.</p>
+<p>It is not always better, though. The interior now responds to x<sub>b</sub> with its own
+fixed-interface resonances, so near one of them a small error in x<sub>b</sub> is amplified by the
+resonance, and the enhanced recovery can be worse than the coupled one. Try a light interior: 8
+masses, m<sub>1</sub> to m<sub>3</sub> set to 0.05 kg, the interface at m4, no modes in A and 1 in
+B, driven at A's first fixed-interface frequency (10.9 Hz). In A the enhanced recovery of x1 is
+about 27% off against 6% for the coupled one; in B, where nothing resonates, it is within 1%
+against 7%.</p>
+<p>The <i>Back expansion</i> tab steps the full chain, the coupled reduced model and the enhanced
+recovery together in one exact update, and compares all three recoveries of one interior mass and
+one spring with the truth.</p>
+
 <h3>Properties worth knowing</h3>
 <ul>
 <li><b>No modes kept = Guyan reduction.</b> Only the constraint modes remain, so the model
@@ -460,6 +511,29 @@ Craig–Bampton fails (m1 and m2 float when the boundary is held), but the free-
 simply find more rigid-body modes in A.</li>
 </ol>
 
+<p><b>Back expansion</b> (8 masses, the interface at m4, Craig–Bampton, 1 mode each; on the
+<i>Back expansion</i> tab choose m2 and spring k2; the percentages are RMS errors over the plot
+window and move a little as it runs):</p>
+<ol>
+<li>Apply the step force. The lower chain's hollow masses are recovered, the solid ones come
+straight from the coupled solve. Once the ringing has died away all three recoveries agree with the
+truth: the constraint modes are exact static shapes. While it rings, x2 is about 2% off from the
+coupled solution and 4% from the boundary alone: the gap is the q part (the dash-dot curve).</li>
+<li>Click <i>Guyan (0 modes)</i>. With no q, the coupled recovery <i>is</i> the boundary-only
+one (the two error curves lie on top of each other), and both are about 28% off.</li>
+<li>Back to 1 mode each; <i>Harmonic</i>, <i>Tune to → Mode 1 true</i>. Every recovery except the
+boundary-only one is within 1%: at mode 1 the interior moves nearly in its static shape plus the
+first fixed-interface mode, and that is exactly what 1 mode keeps.</li>
+<li><i>Tune to → Mode 4 true</i>. Now the boundary motion itself is 50–60% wrong (the reduced model
+resonates at the wrong frequency), and no recovery can do better than the boundary it starts
+from.</li>
+<li>Keep 2 modes in each. x<sub>b</sub> is within about 9%, the coupled recovery of x2 within
+15%, but its force in k2 is off by nearly 40%: a force is a difference of displacements, which
+brings out the truncated higher modes. The enhanced recovery puts them back and brings the force
+error down to about 12%. Keep 3 (all) modes and every recovery but the boundary-only one is
+exact.</li>
+</ol>
+
 <h3><a name="notation"></a>Notation</h3>
 <table border="1" cellspacing="0" cellpadding="4">
 <tr><th>Symbol</th><th>Meaning</th><th>Units</th></tr>
@@ -498,6 +572,8 @@ simply find more rigid-body modes in A.</li>
 <tr><td>R</td><td>residual attachment modes G<sub>ib</sub>G<sub>bb</sub><sup>−1</sup>: interior shape for a unit displacement of each boundary DOF (free-interface methods)</td><td>m/m</td></tr>
 <tr><td>E<sub>b</sub></td><td>Boolean matrix picking the boundary columns</td><td>—</td></tr>
 <tr><td>CB</td><td>Craig–Bampton (the reduced model); "true" = the full N-DOF model</td><td>—</td></tr>
+<tr><td>r</td><td>reduced coordinates [q, x<sub>b</sub>]: all the coupled (system-level) solve gives</td><td>mixed</td></tr>
+<tr><td>OTM, LTM</td><td>output and loads transformation matrices: interior displacements and spring forces as a matrix times r</td><td>m/m, N/m</td></tr>
 </table>
 """
 
@@ -797,7 +873,7 @@ def _free_steps(model: CMSModel) -> list[str]:
 
 
 def _assembly_steps(model: CMSModel, full: ModalResult | None) -> list[str]:
-    """Steps 7 to 9, the same for every method: assemble, solve and recover, damping."""
+    """Steps 7 to 10, the same for every method: assemble, solve and recover, damping, back expansion."""
     system = model.system
     n = system.n
     subs = model.substructures
@@ -858,7 +934,53 @@ def _assembly_steps(model: CMSModel, full: ModalResult | None) -> list[str]:
     freqs = ", ".join(f"{f:.4g}" for f in model.fn_hz)
     parts.append(f"<p>Reduced-model natural frequencies: {freqs} Hz.</p>")
     parts.append(_damped_comparison(model, full))
+    parts.append(_recovery_step(model))
     return parts
+
+
+def _recovery_step(model: CMSModel) -> str:
+    """Step 10: each substructure's output (OTM) and loads (LTM) transformation matrices."""
+    out = ["<h3>10. Back expansion (data recovery)</h3>",
+           "<p>The coupled solve gives r = [q, x<sub>b</sub>] only. Each substructure recovers its "
+           "interior from its own q and boundary DOFs with its rows of T (the output transformation "
+           "matrix, OTM), and its spring forces k<sub>e</sub>(x<sub>e</sub> − x<sub>e−1</sub>) with "
+           "the loads transformation matrix (LTM). The <i>Back expansion</i> tab applies them in "
+           "time.</p>"]
+    K = model.system.matrices()[2]
+    k = model.system.stiffness
+    for sub in model.substructures:
+        if not sub.ni:
+            out.append(f"<p><b>{sub.name}</b> has no interior masses: nothing to recover.</p>")
+            continue
+        cols, cgroups = _reduced_labels(sub)
+        rows = _dof_labels(sub.interior)
+        otm = sub.T[: sub.ni]
+        tables = [matrix_html(otm, rows, cols, ["i"] * sub.ni, cgroups, f"OTM<sup>({sub.name})</sup>")]
+        # Spring e joins node e-1 (or the ground) to node e; both are DOFs of this substructure.
+        local = {int(d): j for j, d in enumerate(sub.dofs)}
+        ltm = np.zeros((sub.elements.size, sub.T.shape[1]))
+        for r, e in enumerate(sub.elements):
+            ltm[r] = k[e] * (sub.T[local[int(e)]] - (sub.T[local[int(e) - 1]] if e > 0 else 0.0))
+        springs = [f"k<sub>{e + 1}</sub>" for e in sub.elements]
+        tables.append(matrix_html(ltm, springs, cols, ["i"] * len(springs), cgroups,
+                                  f"LTM<sup>({sub.name})</sup> [N]"))
+        text = (f"<p><b>{sub.name}</b>: x<sub>i</sub> = OTM [q; x<sub>b</sub>], "
+                + ("Φ<sub>k</sub> in the q columns and Ψ in the boundary columns. "
+                   "Boundary only (static) keeps just the Ψ columns."
+                   if not sub.free else
+                   "Φ<sub>ik</sub> − RΦ<sub>bk</sub> in the q columns and R in the boundary columns. "
+                   "Boundary only (static) uses −K<sub>ii</sub><sup>−1</sup>K<sub>ib</sub> instead, "
+                   "the exact static shape, shown on the right."))
+        i, b = sub.interior, sub.boundary
+        Kii = K[np.ix_(i, i)]
+        if sub.free and np.linalg.cond(Kii) < 1e12:
+            guyan = -np.linalg.solve(Kii, K[np.ix_(i, b)])
+            bl = _dof_labels(b)
+            tables.append(matrix_html(guyan, rows, bl, ["i"] * sub.ni, ["b"] * sub.nb,
+                                      "−K<sub>ii</sub><sup>−1</sup>K<sub>ib</sub>"))
+        out.append(text + "</p>")
+        out.append(_side_by_side(*tables))
+    return "".join(out)
 
 
 def _damping_note(sub: Substructure) -> str:

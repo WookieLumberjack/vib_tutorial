@@ -97,6 +97,7 @@ class ChainView(pg.PlotWidget):
         self._masses: np.ndarray = np.ones(1)
         self._centers = np.zeros(0)  # drawn mass centers (display units)
         self.held: int | None = None  # mass being dragged
+        self._recovered: set[int] = set()  # masses drawn as recovered (back-expanded), not solved for
 
         # Ground wall with hatching; it moves with base excitation.
         self._wall = [pg.PlotDataItem([0, 0], [-0.45, 0.45])]
@@ -141,9 +142,17 @@ class ChainView(pg.PlotWidget):
         for item in self._rest_marks:
             item.setPen(pg.mkPen(colors.grey, width=1))
         for i, (rect, label) in enumerate(zip(self._rects, self._labels)):
-            rect.setBrush(pg.mkBrush(colors.mass[i]))
-            rect.setPen(pg.mkPen(colors.structure, width=1.5))
-            label.setColor(text_on(colors.mass[i]))
+            if i in self._recovered:
+                # Hollow, with a dashed outline in the mass's colour: a derived result.
+                fill = pg.mkColor(colors.mass[i])
+                fill.setAlpha(60)
+                rect.setBrush(pg.mkBrush(fill))
+                rect.setPen(pg.mkPen(colors.mass[i], width=2.5, style=QtCore.Qt.PenStyle.DashLine))
+                label.setColor(colors.foreground)
+            else:
+                rect.setBrush(pg.mkBrush(colors.mass[i]))
+                rect.setPen(pg.mkPen(colors.structure, width=1.5))
+                label.setColor(text_on(colors.mass[i]))
 
     # ------------------------------------------------------------- structure
     def set_masses(self, masses: np.ndarray) -> None:
@@ -177,6 +186,11 @@ class ChainView(pg.PlotWidget):
             )
             self._scale_bar.setData([0.05, 0.05 + MAX_SWING], [-0.55, -0.55])
             self._scale_text.setPos(0.1 + MAX_SWING, -0.55)
+
+    def set_recovered(self, dofs) -> None:
+        """Draw these masses hollow with a dashed outline: recovered afterwards, not solved for."""
+        self._recovered = {int(i) for i in dofs}
+        self.apply_theme()
 
     def _add(self, item):
         self.addItem(item)

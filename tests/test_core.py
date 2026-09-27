@@ -810,3 +810,75 @@ def test_one_substructure_without_a_cut():
     assert abs(errors[0]) < 1e-9 and abs(errors[1]) < 1e-9 and errors[2] > 0.01
     assert kept_ranges(s, [], "macneal") == [(1, 5)]  # else no mass at all
     assert kept_ranges(s, [], "craig-bampton") == [(0, 5)]
+
+
+def test_back_expansion_is_exact_when_nothing_is_truncated():
+    from vib_tutorial.core import component_mode_synthesis
+    from vib_tutorial.core.back_expansion import RecoveryResponse
+
+    s = ChainSystem([1.0, 2.0, 1.5, 1.0, 0.5, 1.2], [400.0, 300.0, 500.0, 200.0, 350.0, 250.0],
+                    [2.0, 8.0, 1.0, 0.5, 3.0, 1.0])
+    for method in ("craig-bampton", "rubin"):
+        for dof in (None, 1):  # the tip, and an interior mass
+            model = component_mode_synthesis(s, [2], [2, 2], method)
+            force = ForceController(ForceSettings(kind=ForceKind.HARMONIC, freq_hz=2.0))
+            resp = RecoveryResponse(model, force, dof)
+            force.switch_on()
+            smp = resp.record(2.0)
+            rec = resp.recovery
+            tol = 1e-9 * np.abs(smp.x_full).max()
+            np.testing.assert_allclose(rec.coupled(smp.r), smp.x_full, atol=tol)
+            np.testing.assert_allclose(smp.x_enhanced, smp.x_full, atol=tol)
+            np.testing.assert_allclose(rec.from_boundary(smp.r) + rec.from_modes(smp.r), rec.coupled(smp.r), atol=tol)
+            assert np.abs(rec.from_modes(smp.r)[:, rec.boundary]).max() == 0.0
+            np.testing.assert_allclose(resp.r, smp.r[-1])
+            np.testing.assert_allclose(resp.x_enhanced, smp.x_enhanced[-1])
+            # The boundary-only (static) recovery misses the interior's own vibration.
+            assert np.abs(rec.boundary_only(smp.r) - smp.x_full).max() > 0.01 * np.abs(smp.x_full).max()
+
+
+def test_back_expansion_of_a_reduced_model():
+    from vib_tutorial.core import component_mode_synthesis
+    from vib_tutorial.core.back_expansion import Recovery, RecoveryResponse
+
+    s = ChainSystem.uniform(8)
+    # Guyan: no q, so the coupled recovery is the boundary-only one.
+    guyan = component_mode_synthesis(s, [3], [0, 0])
+    rec = Recovery(guyan)
+    r = np.random.default_rng(0).normal(size=(5, guyan.n_red))
+    np.testing.assert_allclose(rec.coupled(r), rec.boundary_only(r), atol=1e-12)
+    np.testing.assert_array_equal(rec.interior, [0, 1, 2, 4, 5, 6])
+    assert [rec.owner(d) for d in (0, 3, 5, 7)] == [0, None, 1, None]
+
+    # Driven at mode 4 with 2 modes kept: the coupled recovery of a spring force is poor, and
+    # re-solving the interior with the coupled boundary motion recovers most of it.
+    model = component_mode_synthesis(s, [3], [2, 2])
+    fn = modal_analysis(s).modes[3].fn_hz
+    force = ForceController(ForceSettings(kind=ForceKind.HARMONIC, freq_hz=fn, amplitude=10.0))
+    resp = RecoveryResponse(model, force)
+    force.switch_on()
+    for _ in range(3):
+        smp = resp.record(4.0)
+    rec = resp.recovery
+    true_f = rec.spring_forces(smp.x_full)[:, 1]
+
+    def err(x):
+        return np.sqrt(np.mean((rec.spring_forces(x)[:, 1] - true_f) ** 2) / np.mean(true_f**2))
+
+    assert err(smp.x_enhanced) < 0.5 * err(rec.coupled(smp.r))
+
+    # A step, heavily damped: every recovery ends at the static solution (for a tip load the
+    # boundary-only shape is exact), for every method, including MacNeal's massless boundary.
+    s = ChainSystem.uniform(6, damping=20.0)
+    static = np.linalg.solve(s.matrices()[2], 10.0 * np.eye(6)[5])
+    for method in ("craig-bampton", "rubin", "macneal"):
+        model = component_mode_synthesis(s, [2], [1, 1], method)
+        force = ForceController(ForceSettings(kind=ForceKind.STEP, amplitude=10.0))
+        resp = RecoveryResponse(model, force)
+        force.switch_on()
+        for _ in range(4):
+            smp = resp.record(10.0)
+        rec = resp.recovery
+        np.testing.assert_allclose(smp.x_full[-1], static, rtol=1e-6)
+        np.testing.assert_allclose(rec.boundary_only(smp.r)[-1], static, rtol=1e-6)
+        np.testing.assert_allclose(smp.x_enhanced[-1], rec.boundary_only(smp.r)[-1], rtol=1e-6)

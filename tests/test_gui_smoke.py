@@ -21,6 +21,21 @@ def app():
     return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def _close_graphics(app):
+    """Tear down each test's plots now. Signal closures keep the windows alive until interpreter
+    exit, where PySide deleting pyqtgraph items still in a scene can segfault."""
+    from shiboken6 import isValid
+
+    from vib_tutorial.gui import close_graphics
+
+    before = set(QtWidgets.QApplication.topLevelWidgets())
+    yield
+    for w in QtWidgets.QApplication.topLevelWidgets():
+        if w not in before and isValid(w):
+            close_graphics(w)
+
+
 def test_window_interactions(app):
     from vib_tutorial.gui.main_window import MainWindow
 
@@ -1036,3 +1051,70 @@ def test_load_presets(app):
     w.params.preset.activated.emit(names.index("Uniform chain (4 masses)"))
     assert w.sim.system.n == 4 and not w.force.settings.base and not w.frf_compare.isChecked()
     assert len(w.frf_plot.mag_curves) == 4
+
+
+def test_substructuring_back_expansion(app):
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    page = w.cms_page
+    w.show()
+    w.pages.setCurrentWidget(page)
+    page.dof.setValue(6)
+    page.set_interfaces([2])
+    page.tabs.setCurrentWidget(page.recovery)
+    app.processEvents()
+    v = page.recovery
+    assert v._timer.isActive() and not page.time._timer.isActive()  # only the tab on show runs
+    assert [v.mass_box.itemData(i) for i in range(v.mass_box.count())] == [0, 1, 3, 4]
+    assert v.rec_view._recovered == {0, 1, 3, 4}
+    assert "4 interior masses" in v.header.text()
+
+    # Choosing a mass picks the spring on its left, among its substructure's springs.
+    v.select(1)
+    assert v.spring == 1 and v.spring_box.count() == 3  # A: k1, k2, k3
+    v.select(4)
+    assert v.spring == 4 and v.spring_box.count() == 3  # B: k4, k5, k6
+    v.select(1, 2)
+    assert v.spring == 2
+
+    v.button.click()
+    for _ in range(5):
+        v.step(0.2)
+    assert v.sim.t >= 0.99
+    x_true = v.x_curves["true"].yData
+    assert x_true.size and np.abs(x_true).max() > 1e-3
+    for curve in (*v.e_curves.values(), *v.f_curves.values()):
+        assert curve.yData.size == x_true.size
+    np.testing.assert_allclose(v.x_curves["from_boundary"].yData + v.x_curves["from_modes"].yData,
+                               v.x_curves["coupled"].yData, atol=1e-12)
+    assert "RMS error" in v.error_note.text() and "enhanced" in v.error_note.text()
+    for i in range(v.chain_box.count()):
+        v.chain_box.setCurrentIndex(i)
+    assert "enhanced" in v.rec_view.plotItem.titleLabel.text
+
+    # A theme change keeps the motion; Guyan restarts, and then the coupled recovery is the
+    # boundary-only one.
+    before = v.sim.t
+    w.set_theme("Dark")
+    assert v.sim.t == before
+    page.guyan_button.click()
+    assert v.sim.t == 0.0 and v.force.on and v.mass_dof == 1 and v.spring == 2
+    for _ in range(3):
+        v.step(0.2)
+    np.testing.assert_allclose(v.e_curves["coupled"].yData, v.e_curves["boundary"].yData, atol=1e-12)
+    assert not np.any(v.x_curves["from_modes"].yData)
+
+    # Every mass a boundary DOF: nothing to recover.
+    page.set_interfaces([0, 1, 2, 3, 4])
+    assert v.mass_box.count() == 0 and "no interior" in v.header.text()
+    v.step(0.2)
+    # No model at all: the tab says why.
+    page.set_interfaces([2])
+    w.params.rows[0][2].setValue(0.0)
+    w.params.rows[1][2].setValue(0.0)
+    assert v.sim is None and "K_ii" in v.header.text()
+    w.pages.setCurrentWidget(w.sim_page)
+    assert not v._timer.isActive()
+    w.set_theme("Light")
+    w.close()

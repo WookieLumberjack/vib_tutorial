@@ -284,16 +284,26 @@ Everything on the page follows the selector:
   and of their difference. All three methods are exact statically, so the error is in the
   vibration: small after a step, large when driven at a mode the reduced model has shifted
   (below). *Tune to…* offers the true and the reduced natural frequencies.
+- **Back expansion**: the coupled (reduced) model solves only for [q, x<sub>b</sub>]; this tab
+  recovers the interior masses from them afterwards, as a system analyst does with a
+  substructure delivered as reduced matrices. Three recoveries of one interior mass and one
+  spring force are compared with the truth: from the coupled solution with the reduced
+  model's own T (split into the part the boundary drags along and the part the kept modes
+  add), from the boundary motion alone (static), and *enhanced*, by re-solving the
+  substructure's interior with the coupled model's boundary motion imposed. The lower chain
+  draws the recovered masses hollow.
 - **Compare methods**: the same cut reduced by all three methods, with the frequency error of
   every mode, and how the selected mode's error falls as modes are added, one at a time.
 - **Matrices (step by step)**: every stage with the current numbers: the full K and M,
   each substructure's partitioned matrices, its component modes (kept and discarded), the
   constraint modes Ψ or the residual flexibility G<sub>d</sub>, the transformation T, the
-  reduced matrices, and the assembled reduced model.
+  reduced matrices, the assembled reduced model, and each substructure's recovery (OTM) and
+  loads (LTM) transformation matrices.
 - **Theory**: what a basis is (with a 2-mass worked example) and why Craig–Bampton chooses
   its shapes, original vs substructured formulation side by side, Hurty vs Craig–Bampton,
   Guyan reduction as the zero-mode case, why free-interface modes need residual flexibility,
-  MacNeal vs Rubin, the three methods side by side, a "Try it" walkthrough, and a notation
+  MacNeal vs Rubin, the three methods side by side, back expansion (data recovery), a "Try it"
+  walkthrough, and a notation
   table.
 - **Presets**: *Guyan (0 modes)* (*Fewest modes* for the free-interface methods) and *All
   modes*.
@@ -325,6 +335,13 @@ Rubin's method projects with it, $\hat M = T^TMT$; MacNeal's drops the residual 
 $\hat M = \mathrm{diag}(I, 0)$. Both have $\hat K = T^TKT$, which now couples $q$ to $x_b$.
 
 ![Time response: driven at the true mode 4 (3.84 Hz), the Craig–Bampton model with 1 mode per substructure resonates at 4.11 Hz instead; its tip moves less and lags](docs/images/substructuring_time.png)
+
+After the coupled solve each substructure recovers its interior from its own rows of T,
+$x_i = \Psi x_b + \Phi_k q$ (Craig–Bampton). The *enhanced* recovery instead solves
+$M_{ii}\ddot x_i + C_{ii}\dot x_i + K_{ii}x_i = -K_{ib}x_b - C_{ib}\dot x_b$ with the coupled
+model's $x_b(t)$, so it keeps every interior mode and its only error is the error in $x_b$:
+
+![Back expansion: driven at mode 4 with 2 modes kept per substructure, the coupled recovery of the force in k2 is off by nearly 40%; the enhanced recovery brings it to about 12%](docs/images/substructuring_recovery.png)
 
 ![Compare methods: the same cut reduced three ways; Craig–Bampton and Rubin converge to the exact mode 3, MacNeal does not](docs/images/substructuring_compare.png)
 
@@ -484,6 +501,9 @@ $w_k^T W w_k$, so the energy balance closes to rounding error.
   comparison (frequency error, MAC) and the reduced-model FRF.
 - `core/cms_response.py`: the full chain and a reduced model stepped side by side under the
   same force (MacNeal's massless boundary condensed statically).
+- `core/back_expansion.py`: recovery of the interior DOFs from the coupled solution (by T,
+  from the boundary alone, and by re-solving each interior with the boundary motion imposed,
+  stepped in the same exact update) and of the spring forces.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and

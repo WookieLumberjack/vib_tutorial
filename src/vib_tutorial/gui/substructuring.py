@@ -4,8 +4,9 @@ The chain from the Simulation page is cut at interface masses into
 substructures A, B, C, ... (or left whole, as one substructure). The boundary (master) DOFs are the interfaces and
 the tip, where the force is applied. The page reduces the chain by Craig-Bampton
 (fixed interface), Rubin or MacNeal (free interface), compares the reduced
-model's modes and tip FRF with the full model's, compares the three methods,
-and walks through the matrices.
+model's modes and tip FRF with the full model's, runs both in time, recovers
+the interior DOFs from the coupled solve (back expansion), compares the three
+methods, and walks through the matrices.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from ..core import (
 from ..core.substructure import METHOD_SHORT, SUBSTRUCTURE_NAMES
 from .animation import MASS_WIDTH, spring_path
 from .cms_notes import THEORY_HTML, matrices_html
+from .cms_recovery import BackExpansionView
 from .cms_time import CMSTimeView
 from .style import MAX_DOF, colors, current, text_on
 from .theming import mute, restyle_plot_item
@@ -854,8 +856,10 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.basis = BasisPlots()
         self.compare = MethodComparison()
         self.time = CMSTimeView()
+        self.recovery = BackExpansionView()
         self.tabs.addTab(self.plots, "Modes && FRF")
         self.tabs.addTab(self.time, "Time response")
+        self.tabs.addTab(self.recovery, "Back expansion")
         self.tabs.addTab(self.compare, "Compare methods")
         self.tabs.addTab(self.basis, "Basis (T)")
         self.tabs.addTab(self.matrices, "Matrices (step by step)")
@@ -877,6 +881,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.plots.apply_theme()
         self.basis.apply_theme()
         self.time.apply_theme()
+        self.recovery.apply_theme()
         scroll = self.theory.verticalScrollBar().value()
         self.theory.setHtml(THEORY_HTML)  # its links, in the new link colour
         self.theory.verticalScrollBar().setValue(scroll)
@@ -1090,6 +1095,7 @@ class SubstructuringPage(QtWidgets.QWidget):
             self.plots.set_frf(system, full, None)
             self.basis.set_model(None)
             self.time.set_model(None, full, reason)
+            self.recovery.set_model(None, full, reason)
             self.compare.set_mode(0)  # the other methods may still work
             return
 
@@ -1105,6 +1111,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.plots.set_frf(system, full, model)
         self.basis.set_model(model)
         self.time.set_model(model, full)
+        self.recovery.set_model(model, full)
         scroll = self.matrices.verticalScrollBar().value()
         self.matrices.setHtml(matrices_html(model, full))
         self.matrices.verticalScrollBar().setValue(scroll)

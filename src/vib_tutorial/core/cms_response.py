@@ -46,26 +46,32 @@ def second_order_state_space(M: np.ndarray, C: np.ndarray, K: np.ndarray) -> tup
     return A, Minv
 
 
+def condensation(model: CMSModel, dof: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(S, d, g): the reduced coordinates are r = S m + d F, with g = T^T e_dof the force vector."""
+    e = np.zeros(model.system.n)
+    e[dof] = 1.0
+    g = model.T.T @ e
+    M, K = model.M, model.K
+    n_red = M.shape[0]
+    z = np.all(M == 0.0, axis=1)
+    m = ~z
+    S = np.zeros((n_red, int(m.sum())))
+    S[m] = np.eye(int(m.sum()))
+    d = np.zeros(n_red)
+    if z.any():
+        S[z] = -np.linalg.solve(K[np.ix_(z, z)], K[np.ix_(z, m)])
+        d[z] = np.linalg.solve(K[np.ix_(z, z)], g[z])
+    return S, d, g
+
+
 def condensed(model: CMSModel, dof: int) -> tuple[np.ndarray, ...]:
     """(M, C, K, g, g_du, X, x_f) of the reduced model with massless coordinates condensed out.
 
     It obeys M m'' + C m' + K m = g F + g_du F', and the physical displacements
     are x = X m + x_f F.
     """
-    e = np.zeros(model.system.n)
-    e[dof] = 1.0
-    g = model.T.T @ e
+    S, d, g = condensation(model, dof)
     M, C, K = model.M, model.C, model.K
-    z = np.all(M == 0.0, axis=1)
-    if not z.any():
-        return M, C, K, g, np.zeros_like(g), model.T, np.zeros(model.system.n)
-    m = ~z
-    n_red = M.shape[0]
-    S = np.zeros((n_red, int(m.sum())))
-    S[m] = np.eye(int(m.sum()))
-    S[z] = -np.linalg.solve(K[np.ix_(z, z)], K[np.ix_(z, m)])
-    d = np.zeros(n_red)
-    d[z] = np.linalg.solve(K[np.ix_(z, z)], g[z])
     return (S.T @ M @ S, S.T @ C @ S, S.T @ K @ S, S.T @ g, -S.T @ C @ d, model.T @ S, model.T @ d)
 
 
@@ -131,14 +137,20 @@ class CMSResponse:
 
     def advance(self, duration: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Advance by about `duration` s; per-step samples (t, x_full, x_reduced, F), shapes (k,), (k, n), (k, n), (k,)."""
+        ts, fs, zf, zr = self._run(duration)
+        n = self.model.system.n
+        nm = self._X.shape[1]
+        return ts, zf[:, :n], zr[:, :nm] @ self._X.T + np.outer(fs, self._xf), fs
+
+    def _run(self, duration: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Step both models; per-step (t, F, full state, reduced state)."""
         h = self.step_size()
         steps = min(MAX_STEPS_PER_ADVANCE, max(0, int(round(duration / h))))
-        n = self.model.system.n
         ts, fs = np.empty(steps), np.empty(steps)
         zf = np.empty((steps, self._full.z.size))
         zr = np.empty((steps, self._red.z.size))
         if steps == 0:
-            return ts, np.empty((0, n)), np.empty((0, n)), fs
+            return ts, fs, zf, zr
         Pf, f0f, f1f = self._full.discrete(h)
         Pr, f0r, f1r = self._red.discrete(h)
         a, b = self._full.z, self._red.z
@@ -152,5 +164,4 @@ class CMSResponse:
             ts[k], fs[k], zf[k], zr[k] = self.t, u1, a, b
             u0 = u1
         self._full.z, self._red.z, self._u = a, b, u0
-        nm = self._X.shape[1]
-        return ts, zf[:, :n], zr[:, :nm] @ self._X.T + np.outer(fs, self._xf), fs
+        return ts, fs, zf, zr
