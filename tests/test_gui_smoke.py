@@ -390,6 +390,36 @@ def test_modal_coordinates_view(app):
     w.close()
 
 
+def test_energy_time_history(app):
+    import numpy as np
+
+    from vib_tutorial.gui.main_window import ENERGY_CURVES, MainWindow
+
+    w = MainWindow()
+    w.coords_combo.setCurrentIndex(2)
+    assert w.energy_view and not w.modal_view
+    assert [c.name() for c in w.time_plot.x_curves] == [name for name, _ in ENERGY_CURVES]
+    w.table.selectRow(0)
+    w._release_mode()
+    for _ in range(5):
+        w._sim_target = w.sim.t + 0.2
+        w._tick()
+    T, V, stored, added, work, dissipated = (c.getData()[1] for c in w.time_plot.x_curves)
+    assert added.max() > 0 and np.abs(work).max() == 0.0 and dissipated[-1] > 0
+    np.testing.assert_allclose(added + work, stored + dissipated, rtol=0, atol=1e-12)
+    # The balance still closes across a parameter edit (T, V use the parameters of the time).
+    w.params.rows[0][2].setValue(800.0)
+    w._sim_target = w.sim.t + 0.2
+    w._tick()
+    T, V, stored, added, work, dissipated = (c.getData()[1] for c in w.time_plot.x_curves)
+    np.testing.assert_allclose(added + work, stored + dissipated, rtol=0, atol=1e-12)
+    # Changing the number of masses keeps the energy curves.
+    w.params.dof.setValue(6)
+    w._tick()
+    assert len(w.time_plot.x_curves) == len(ENERGY_CURVES)
+    w.close()
+
+
 def test_energy_bars(app):
     import pytest
 

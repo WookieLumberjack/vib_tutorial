@@ -26,7 +26,7 @@ uv run pytest         # run the tests
 | Area | What it holds |
 |---|---|
 | **Left** | System parameters (m, k, c for each element, 1 to 8 masses), the applied force, and simulation controls (run/pause, speed, plot window, auto-scale) |
-| **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion, in physical or modal coordinates |
+| **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates) or of the energy |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
 Three more pages work on the same chain: **FRF matrix** shows every term of the receptance
@@ -52,7 +52,7 @@ measures the FRF from simulated force and response signals, as in a lab (all bel
   histories): one curve per mode instead of one per mass (below).
 - **Watch the energy** in the bars beside the animation: kinetic and potential, an exact
   balance of energy in (release, force) against energy out (stored, dissipated), and each
-  mode's share (below).
+  mode's share. *Plot coordinates → Energy* draws the same quantities against time (below).
 - **Slow motion** (0.05× to 2×) for the higher modes, and auto-scaled animation and plots
   so small motions stay visible.
 
@@ -110,6 +110,15 @@ The panel beside the animation has two views:
   `c1` = 15 and within a second most of the energy left is in mode 1.
 
 ![Energy by mode after releasing mode 3 with c1 = 15: 75% of what is left is in mode 1](docs/images/energy_by_mode.png)
+
+*Plot coordinates → Energy* draws the ledger as time histories: T, V and T + V, the energy
+given by releases and edits E<sub>0</sub>, the work done by the force W, and the energy
+dissipated D. At every sample E<sub>0</sub> + W = T + V + D. Release a mode and T and V
+swap twice per cycle while T + V decays and D rises towards E<sub>0</sub>. Drive the
+chain just below a natural frequency and the stored energy beats. W falls whenever the
+force pushes against the motion, and D keeps rising.
+
+![Energy time histories: a 1 Hz force near mode 1 (1.1 Hz); the stored energy beats and the work done falls while the force opposes the motion](docs/images/energy_history.png)
 
 ### Frequency response
 
@@ -378,6 +387,7 @@ from vib_tutorial.core import modal_energies
 
 E = modal_energies(chain, res, x, v)                           # (steps, N), J; rows sum to T + V
 sim.energy_added + sim.work - sim.dissipated - sim.stored_energy  # ~1e-15 J: exact balance
+added, work, dissipated = sim.ledger.T                          # the same ledger at each step of the last advance
 
 from vib_tutorial.core import compare_modes, craig_bampton
 
@@ -412,8 +422,6 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 
 - Drag a mass with the mouse and let go (an initial-condition "pluck")
 - Frequency sweep (chirp) forcing, and base excitation instead of an applied force
-- Energy time histories (T, V, work and dissipation against time) as a third *Plot
-  coordinates* option
 - Tuned mass damper and vibration absorber presets
 - Save and load parameter presets for classroom exercises
 - Substructuring: time-simulate the Craig–Bampton reduced model alongside the full one

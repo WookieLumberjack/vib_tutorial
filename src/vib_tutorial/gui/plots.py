@@ -12,9 +12,12 @@ from ..core import ChainSystem, ModalResult, frf
 from .modes import Method, ModeEntry, time_constant_text
 from .style import FORCE_COLOR, MASS_COLORS, MODE_COLORS
 
+MAX_POINTS = 3000
+MIN_Y_SPAN = 1e-6  # m
+
 
 class TimeHistoryPlot(pg.GraphicsLayoutWidget):
-    """Displacements (of every mass, or of every mode) and the applied force vs. time."""
+    """Displacements (of every mass or mode), or energies, and the applied force vs. time."""
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -35,17 +38,24 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
             p.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#bbb", width=1)))
         self.f_curve = self.f_plot.plot(pen=pg.mkPen(FORCE_COLOR, width=1))
         self.auto_range = True
+        self.min_span = MIN_Y_SPAN
         self.x_curves: list[pg.PlotDataItem] = []
 
     def set_dof(self, n: int) -> None:
         """One curve per mass displacement."""
         self.set_curves("Displacement", [(f"x{i + 1}", MASS_COLORS[i]) for i in range(n)])
 
-    def set_curves(self, label: str, curves: list[tuple[str, str]]) -> None:
-        """Replace the upper plot's curves with one per (legend name, color)."""
+    def set_curves(
+        self, label: str, curves: list[tuple[str, str]], units: str = "m", min_span: float = MIN_Y_SPAN
+    ) -> None:
+        """Replace the upper plot's curves with one per (legend name, color).
+
+        Auto-ranging never zooms in below +/-min_span (in `units`).
+        """
         for c in self.x_curves:
             self.x_plot.removeItem(c)
-        self.x_plot.setLabel("left", label, units="m")
+        self.x_plot.setLabel("left", label, units=units)
+        self.min_span = min_span
         self.x_curves = [self.x_plot.plot(pen=pg.mkPen(color, width=1), name=name) for name, color in curves]
 
     def set_auto_range(self, on: bool) -> None:
@@ -68,17 +78,13 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
         t_end = t[-1] if t.size else 0.0
         self.x_plot.setXRange(max(0.0, t_end - window), max(window, t_end), padding=0)
         if self.auto_range:
-            # Auto-fit, but never zoom in below +/-MIN_Y_SPAN (same reason as
+            # Auto-fit, but never zoom in below +/-min_span (same reason as
             # MIN_AUTO_PEAK in the animation: decaying motion -> float noise).
             peak = float(np.abs(x).max()) if x.size else 0.0
-            if peak < MIN_Y_SPAN:
-                self.x_plot.setYRange(-MIN_Y_SPAN, MIN_Y_SPAN, padding=0.05)
+            if peak < self.min_span:
+                self.x_plot.setYRange(-self.min_span, self.min_span, padding=0.05)
             else:
                 self.x_plot.enableAutoRange(axis="y")
-
-
-MAX_POINTS = 3000
-MIN_Y_SPAN = 1e-6  # m
 
 
 def decimation_index(y: np.ndarray, max_points: int) -> np.ndarray:
