@@ -47,6 +47,7 @@ from ..core.identification import (
     peak_picking,
 )
 from ..core.measurement import AA_CUTOFF
+from .axes import log_axes
 from .modal_extraction import EXTRACTION_THEORY_HTML, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
 from .style import MAX_DOF, colors
@@ -237,10 +238,9 @@ class FrfView(pg.GraphicsLayoutWidget):
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
-        self.mag = self.addPlot(row=0, col=0)
+        self.mag = self.addPlot(row=0, col=0, axisItems=log_axes())
         self.mag.setLogMode(x=False, y=True)
         self.mag.setLabel("left", "|H|  [m/N]")
-        self.mag.getAxis("left").enableAutoSIPrefix(False)
         self.mag.addLegend(offset=(-5, 5))
         self.phase = self.addPlot(row=1, col=0)
         self.phase.setLabel("left", "Phase", units="deg")

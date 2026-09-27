@@ -35,8 +35,8 @@ from ..core.modal_coupling import (
     sweep,
 )
 from .animation import MASS_WIDTH, spring_path
+from .axes import log_axes
 from .coupling_notes import THEORY_HTML, matrices_html
-from .frf_matrix import log_ticks
 from .style import MAX_DOF, colors, text_on
 from .substructuring import error_color, zeta_text
 from .theming import mute
@@ -289,7 +289,7 @@ class VeeringPlot(QtWidgets.QWidget):
         top.addWidget(label)
         top.addWidget(self.kind)
         top.addStretch(1)
-        self.plot = pg.PlotWidget()
+        self.plot = pg.PlotWidget(axisItems=log_axes())
         self.plot.setLogMode(x=True, y=True)
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.plot.setLabel("left", "Natural frequency", units="Hz")
@@ -345,7 +345,6 @@ class VeeringPlot(QtWidgets.QWidget):
         bottom = max(min(s.two_dof.min(), s.f_a.min()), 1e-9) / 1.4
         self.plot.setYRange(math.log10(bottom), math.log10(top), padding=0)
         self.plot.setXRange(math.log10(s.x[0]), math.log10(s.x[-1]), padding=0)
-        self.plot.getAxis("bottom").setTicks(log_ticks(s.x[0], s.x[-1], (1, 2, 5)))
         if kind == "frequency":
             self.plot.setLabel("bottom", "f_B / f_A (B's springs scaled)")
             self.plot.setTitle(f"μ = {model.mass_ratio:.3g} fixed", size="10pt")
@@ -457,7 +456,7 @@ class DrivePointFrf(QtWidgets.QWidget):
         top.addWidget(label)
         top.addWidget(self.point)
         top.addStretch(1)
-        self.plot = pg.PlotWidget()
+        self.plot = pg.PlotWidget(axisItems=log_axes())
         self.plot.setLogMode(x=True, y=True)
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.plot.setLabel("left", "|X / F|  [m/N]")
