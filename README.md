@@ -506,6 +506,7 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 - Substructuring: more than one interface (three or more substructures); the core
   (`craig_bampton`) already accepts several cuts, so only the controls and schematic need
   extending
-- Dark theme: the window follows the desktop's colour scheme, but the plots, the animation
-  and the energy bars are drawn in fixed light colours (white backgrounds, dark text and
-  structure). Give them light and dark palettes that switch with the scheme
+- Dark theme: the plots, the animation and the energy bars are drawn in fixed light colours
+  (white backgrounds, dark text and structure), so `gui.make_app()` forces Qt's light colour
+  scheme even on a dark desktop. Give them light and dark palettes that follow the desktop's
+  scheme, and drop the override

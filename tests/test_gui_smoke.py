@@ -722,3 +722,15 @@ def test_base_excitation_and_chirp(app):
     assert w.sim.ground == 0.0 and w.frf_plot.mag.titleLabel.text.startswith("Force at")
     assert np.isclose(w.sim.energy_added + w.sim.work, w.sim.stored_energy + w.sim.dissipated)
     w.close()
+
+
+def test_make_app_sets_up_light_colours(app):
+    import pyqtgraph as pg
+
+    from vib_tutorial.gui import make_app
+
+    # The offscreen platform has no colour scheme to override, so this checks the
+    # result (a light palette and white plots), not the switch from a dark desktop.
+    assert make_app() is app
+    assert app.palette().window().color().lightness() > 200
+    assert pg.getConfigOption("background") == "w"
