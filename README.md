@@ -247,9 +247,10 @@ plots (row: response, column: force), on shared axes so their sizes compare dire
 
 ### Substructuring (component mode synthesis)
 
-The *Substructuring* page cuts the chain at one or more *interface* masses (*Interfaces at*:
-click a mass to add or remove a cut) into substructures A (grounded), B, C, ... up to the
-free end. The boundary (master) DOFs are the interfaces and the last mass, which is where
+The *Substructuring* page cuts the chain at *interface* masses (*Interfaces at*: click a
+mass to add or remove a cut) into substructures A (grounded), B, C, ... up to the free end.
+With no cut the whole chain is one substructure, whose only boundary DOF is the tip: Guyan
+then reduces it to that one DOF, the largest error the page can show. The boundary (master) DOFs are the interfaces and the last mass, which is where
 the force is applied, so the loaded DOF stays physical. Each substructure keeps its own
 chosen number of modes plus one static shape per boundary DOF, and the reduced
 substructures are assembled on the shared interface DOFs. The

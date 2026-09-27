@@ -1,6 +1,7 @@
 """Component mode synthesis of the chain: Craig-Bampton, Rubin and MacNeal.
 
-The chain is cut at one or more *interface* masses into substructures::
+The chain is cut at *interface* masses into substructures (no cut at all makes
+the whole chain one substructure, whose only boundary DOF is the tip)::
 
     ground --k1-- m1 --k2-- m2 --k3-- m3 --k4-- m4 --k5-- m5
     |--------- A ---------|
@@ -161,7 +162,8 @@ def kept_ranges(system: ChainSystem, interfaces: list[int], method: str) -> list
 
     The most is the number of interior DOFs for every method (then Craig-Bampton
     and Rubin are exact). The fewest is 0 for Craig-Bampton, and the number of
-    rigid-body modes for the free-interface methods, which must always be kept.
+    rigid-body modes for the free-interface methods, which must always be kept
+    (and at least one mode in all for MacNeal, whose boundary DOFs have no mass).
     """
     elements, interiors, boundaries = _partition(system.n, interfaces)
     out = []
@@ -171,14 +173,20 @@ def kept_ranges(system: ChainSystem, interfaces: list[int], method: str) -> list
             M, _, K = _substructure_matrices(system, el, inner, bnd, interfaces, split=True)
             lo = min(_rigid_count(scipy.linalg.eigh(K, M, eigvals_only=True)), inner.size)
         out.append((lo, inner.size))
+    if method == "macneal" and not any(lo for lo, _ in out):
+        # MacNeal's boundary DOFs are massless, so with no mode kept the model would have no mass at
+        # all (e.g. one grounded substructure): the first substructure with an interior keeps one.
+        s = next((s for s, (_, hi) in enumerate(out) if hi), None)
+        if s is not None:
+            out[s] = (1, out[s][1])
     return out
 
 
 def _partition(n: int, interfaces: list[int]):
     """Per substructure: element indices, interior DOFs, boundary DOFs."""
     cuts = sorted({int(j) for j in interfaces})
-    if not cuts or cuts[0] < 0 or cuts[-1] >= n - 1:
-        raise ValueError("need at least one interface, each between the first and the last mass")
+    if cuts and (cuts[0] < 0 or cuts[-1] >= n - 1):
+        raise ValueError("each interface must be between the first and the last mass")
     lefts = [None] + cuts  # interface node on the left of each substructure (None = ground)
     rights = cuts + [n - 1]
     elements, interiors, boundaries = [], [], []
@@ -222,7 +230,7 @@ def component_mode_synthesis(system: ChainSystem, interfaces: list[int], n_kept:
                              method: str = "craig-bampton") -> CMSModel:
     """Reduce the chain with substructures cut at `interfaces`, by any of METHODS.
 
-    interfaces: 0-based interface masses (each in 0 .. n-2); n_kept: the number
+    interfaces: 0-based interface masses (each in 0 .. n-2; none = one substructure); n_kept: the number
     of component modes kept in each substructure (clipped to kept_ranges).
     """
     if method not in METHODS:

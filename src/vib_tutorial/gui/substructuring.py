@@ -1,7 +1,7 @@
 """Substructuring page: component mode synthesis of the chain.
 
-The chain from the Simulation page is cut at one or more interface masses into
-substructures A, B, C, ... The boundary (master) DOFs are the interfaces and
+The chain from the Simulation page is cut at interface masses into
+substructures A, B, C, ... (or left whole, as one substructure). The boundary (master) DOFs are the interfaces and
 the tip, where the force is applied. The page reduces the chain by Craig-Bampton
 (fixed interface), Rubin or MacNeal (free interface), compares the reduced
 model's modes and tip FRF with the full model's, compares the three methods,
@@ -41,10 +41,11 @@ from .theming import mute, restyle_plot_item
 
 SUB_NAMES = SUBSTRUCTURE_NAMES
 INTERFACE_TIP = (
-    "<p>Cut the chain at these masses: click a mass to add or remove a cut (there is always at "
-    "least one). Each interface becomes a boundary (master) DOF shared by the substructures on "
+    "<p>Cut the chain at these masses: click a mass to add or remove a cut. Each interface becomes a boundary (master) DOF shared by the substructures on "
     "either side, A from the ground, then B, C, ... The tip, where the force acts, is always a "
     "boundary DOF too.</p>"
+    "<p>With no cut the whole chain is one substructure and the tip is its only boundary DOF: "
+    "the smallest model, and the largest error.</p>"
     "<p>More cuts make smaller substructures, each with fewer modes to keep, but every interface "
     "stays in the reduced model as a physical DOF.</p>"
 )
@@ -983,10 +984,10 @@ class SubstructuringPage(QtWidgets.QWidget):
         return [i for i, b in enumerate(self.cut_buttons) if b.isChecked()]
 
     def set_interfaces(self, interfaces: list[int]) -> None:
-        """Cut the chain at these masses (0-based, each below the tip; at least one)."""
+        """Cut the chain at these masses (0-based, each below the tip; none = one substructure)."""
         wanted = set(interfaces)
-        if not wanted or not wanted <= set(range(len(self.cut_buttons))):
-            raise ValueError("need at least one interface, each between the first and the last mass")
+        if not wanted <= set(range(len(self.cut_buttons))):
+            raise ValueError("each interface must be between the first and the last mass")
         for i, b in enumerate(self.cut_buttons):
             b.blockSignals(True)
             b.setChecked(i in wanted)
@@ -996,12 +997,6 @@ class SubstructuringPage(QtWidgets.QWidget):
             self.refresh()
 
     def _on_cut(self, i: int, on: bool) -> None:
-        if not self.interfaces:  # there is always at least one cut
-            b = self.cut_buttons[i]
-            b.blockSignals(True)
-            b.setChecked(True)
-            b.blockSignals(False)
-            return
         self._style_cut_buttons()
         if self.system is not None:
             self.refresh()
@@ -1072,16 +1067,13 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.full = full
 
         model, error = None, None
-        if n >= 2:
-            cuts = self.interfaces
-            kept = [s.value() for s in self.kept]
-            try:
-                model = component_mode_synthesis(system, cuts, kept, self.method_key)
-            except ValueError as exc:
-                error = str(exc)
-            self.compare.set_system(system, full, cuts, kept)
-        else:
-            self.compare.clear("Substructuring needs at least 2 masses (an interface and a tip).")
+        cuts = self.interfaces
+        kept = [s.value() for s in self.kept]
+        try:
+            model = component_mode_synthesis(system, cuts, kept, self.method_key)
+        except ValueError as exc:
+            error = str(exc)
+        self.compare.set_system(system, full, cuts, kept)
         self.model = model
         self.comparisons = compare_modes(model, full) if model is not None else []
 
@@ -1089,7 +1081,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         for s, info in enumerate(self.kept_info):
             info.setText(self._fixed_text(model.substructures[s]) if model else "")
         if model is None:
-            reason = error or "Substructuring needs at least 2 masses (an interface and a tip)."
+            reason = error
             self.summary.setText(f"<b style='color:{colors.poor}'>{reason}</b>")
             self.table.setRowCount(0)
             self.component_table.setRowCount(0)
@@ -1122,10 +1114,6 @@ class SubstructuringPage(QtWidgets.QWidget):
         """Fit the interface choices and kept-mode ranges to the current N."""
         if len(self.cut_buttons) != n - 1:  # N changed: start again from one cut in the middle
             self._build_cut_buttons(n)
-        for spin in self.kept:
-            spin.setEnabled(n >= 2)
-        if n < 2:
-            return
         ranges = kept_ranges(self.system, self.interfaces, self.method_key)
         self._build_kept_rows(len(ranges))
         for spin, (lo, hi), wanted in zip(self.kept, ranges, self._kept_wanted):
@@ -1144,7 +1132,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         kept = ", ".join(freqs[: sub.n_kept]) or "none"
         rigid = f", {sub.n_rigid} rigid" if sub.n_rigid else ""
         nxt = f"  (next: {freqs[sub.n_kept]} Hz)" if sub.n_kept < sub.omegas.size else ""
-        return f"kept: {kept} Hz{rigid}{nxt}"
+        return f"kept: {kept}{' Hz' if sub.n_kept else ''}{rigid}{nxt}"
 
     @staticmethod
     def _component_note(model: CMSModel, components: list[ComponentMode]) -> str:
@@ -1182,8 +1170,8 @@ class SubstructuringPage(QtWidgets.QWidget):
                     else "All fixed-interface modes kept: no reduction, so the result is exact."
                     if model.n_red == n else "")
         elif model.method == "rubin":
-            kind = ("Fewest modes: only rigid-body modes kept; the residual flexibility stands in for "
-                    "the rest." if fewest
+            kind = (("Fewest modes: only rigid-body modes kept" if model.n_modal else "No modes kept")
+                    + "; the residual flexibility stands in for the rest." if fewest
                     else "All the modes there is room for: no reduction, so the result is exact."
                     if model.n_red == n else "")
         else:
@@ -1191,10 +1179,19 @@ class SubstructuringPage(QtWidgets.QWidget):
                     f"<b>{model.omegas.size} modes</b>. ")
             if model.n_red == n:
                 kind += "Not exact even now: the mass of the discarded modes is dropped."
+        if len(model.substructures) == 1:
+            kind = (
+                "No cut: the whole chain is one substructure, and the tip is its only boundary DOF. "
+                + ("Its modes with the tip held, plus the static shape of a tip displacement. "
+                   if not model.free else
+                   "Its free-interface modes are the chain's own modes, so the kept ones are exact, "
+                   "and the residual flexibility adds the static response of the rest. ")
+                + kind
+            )
         worst = max((c.error for c in comparisons if c.error is not None), key=abs, default=0.0)
         worst_zeta = max((c.zeta_error for c in comparisons if c.zeta_error is not None), key=abs, default=0.0)
         return (
-            f"{model.name} reduced model: <b>{model.n_red} DOFs</b> instead of {n} "
+            f"{model.name} reduced model: <b>{model.n_red} DOF{'s' if model.n_red != 1 else ''}</b> instead of {n} "
             f"({model.n_modal} modal + {model.boundary.size} boundary): [{coords}]. {kind} "
             f"Largest frequency error: <b style='color:{error_color(worst)}'>{100 * worst:+.3g}%</b>; "
             f"damping ratio: <b style='color:{error_color(worst_zeta)}'>{100 * worst_zeta:+.3g}%</b>."

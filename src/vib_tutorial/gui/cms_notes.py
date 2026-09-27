@@ -43,7 +43,9 @@ mass and the springs to its left, B owns the springs to its right. (The free-int
 split the interface mass half and half instead, so that each substructure has mass wherever it
 can move.) Click more masses under <i>Interfaces at</i> to cut the chain into three or more
 substructures, A, B, C, ... from the ground: each interface is shared by the two on either side
-of it, and each substructure keeps its own number of modes.</p>
+of it, and each substructure keeps its own number of modes. Click every cut off and the whole
+chain is <i>one</i> substructure, whose only boundary DOF is the loaded tip: the classic
+single-component reduction, and the smallest model the page can make.</p>
 <p>The <i>Method</i> selector chooses how each substructure is reduced: <b>Craig–Bampton</b>
 (fixed interface, the next few sections) or <b>Rubin</b> and <b>MacNeal</b> (free interface,
 from <a href="#free">Free-interface methods</a> on). The <i>Compare methods</i> tab runs all
@@ -362,6 +364,12 @@ static solutions. So a slowly varying load is reproduced, and the error lives in
 vibration: in the ringing after a step, and above all near a resonance. A resonant peak is
 only about 2ζf<sub>n</sub> wide, so a frequency error of a few per cent there is a response
 error of tens of per cent, in amplitude and in phase.</li>
+<li><b>One substructure.</b> With no cut, Craig–Bampton keeps the chain's modes with the tip
+held plus one constraint mode, the static shape for a tip displacement. With no modes kept that
+is Guyan reduction to the tip alone: one DOF, one frequency. The free-interface methods are
+different: the free-interface modes of the only substructure <i>are</i> the chain's own modes,
+so every kept mode is exact, and the residual flexibility adds the static response of the
+discarded ones (modal truncation with a static correction).</li>
 <li><b>More substructures.</b> Each extra cut adds one boundary DOF that stays in the model
 whatever is kept, in exchange for smaller components with fewer, lower modes each. For the
 same model size, fewer interfaces and more modes are usually more accurate; many
@@ -409,6 +417,10 @@ chains move as one.</li>
 0.71%. Now cut at m3 and m6 instead (click m4 off, m3 and m6 on) and keep 1 mode in each of A, B
 and C: also 6 DOFs, but 3 of them are interfaces and the tip, and mode 4 is 2.3% high. Click
 <i>Guyan</i>: 3 physical DOFs, and mode 3 is 16% high.</li>
+<li>Click every cut off: one substructure. Guyan leaves only x<sub>8</sub>, and mode 1 is 7.3%
+high (with one cut at m4 it was within 2%). Keep 1 mode: mode 1 falls to 0.33%, mode 2 is 7.4%
+high. Choose <i>Rubin</i> with 1 mode: mode 1 is now exact, but mode 2 is 16% high. On
+<i>Time response</i>, a step with Guyan shows the whole chain moving as one static shape.</li>
 </ol>
 <p><b>Free interface</b> (back to 8 masses, the interface at m4, 1 mode each):</p>
 <ol start="9">
@@ -551,7 +563,9 @@ def matrices_html(model: CMSModel, full: ModalResult | None = None) -> str:
     parts.append("<h3>1. The full model</h3>")
     parts.append(
         f"<p>N = {n} physical DOFs. Boundary (master) DOFs: <b>{_join(_dof_labels(model.boundary))}</b> "
-        f"(the interface{'s' if len(interfaces) > 1 else ''} and the loaded tip). Interior: {_join([l for l, g in zip(labels, groups) if g == 'i'])}. "
+        + ("(the interface" + ("s" if len(interfaces) > 1 else "") + " and the loaded tip). " if interfaces else
+           "(only the loaded tip: with no cut the whole chain is one substructure). ")
+        + f"Interior: {_join([l for l, g in zip(labels, groups) if g == 'i'])}. "
         "K [N/m], C [N·s/m] and M [kg]. C is assembled from the dampers exactly like K from the "
         "springs, so it has the same tridiagonal pattern.</p>"
     )
@@ -780,12 +794,20 @@ def _assembly_steps(model: CMSModel, full: ModalResult | None) -> list[str]:
     parts = []
     parts.append("<h3>7. Assemble the reduced model</h3>")
     shared = _join(_dof_labels(np.array(interfaces)))
-    parts.append(
-        f"<p>Coordinates [q, x<sub>b</sub>]: {model.n_red} DOFs instead of {n} "
-        f"({model.n_modal} modal + {model.boundary.size} boundary). The interface DOF {shared} is shared, "
-        "so the A and B entries on its row and column add, just like element matrices in step 1. "
-        "The q of different substructures never touch.</p>"
-    )
+    if interfaces:
+        parts.append(
+            f"<p>Coordinates [q, x<sub>b</sub>]: {model.n_red} DOFs instead of {n} "
+            f"({model.n_modal} modal + {model.boundary.size} boundary). The interface DOF{'s' if len(interfaces) > 1 else ''} "
+            f"{shared} {'are' if len(interfaces) > 1 else 'is'} shared, so the entries of the substructures on "
+            "either side add on its row and column, just like element matrices in step 1. "
+            "The q of different substructures never touch.</p>"
+        )
+    else:
+        parts.append(
+            f"<p>Coordinates [q, x<sub>b</sub>]: {model.n_red} DOFs instead of {n} "
+            f"({model.n_modal} modal + 1 boundary). With no cut there is only substructure A, so there is "
+            "nothing to join: the reduced model is A's own reduced matrices.</p>"
+        )
     glabels = [
         f"q<sub>{l[2:]}</sub>" if l.startswith("q_") else l for l in model.labels
     ]

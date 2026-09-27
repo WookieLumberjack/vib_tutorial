@@ -272,9 +272,14 @@ def test_substructuring_time_response(app):
     tv.reset_button.click()
     assert tv.sim.t == 0.0 and not tv.force.active
 
-    # No model with one mass; the tab says why and stops.
+    # One mass is one substructure of just the tip: exact, 1 DOF.
     page.dof.setValue(1)
-    assert tv.sim is None and "at least 2 masses" in tv.header.text()
+    assert page.interfaces == [] and page.model.labels == ["x1"] and tv.sim is not None
+    # No model at all (Craig-Bampton with a floating interior): the tab says why.
+    page.dof.setValue(4)
+    w.params.rows[0][2].setValue(0.0)
+    w.params.rows[1][2].setValue(0.0)
+    assert tv.sim is None and "K_ii" in tv.header.text()
     w.pages.setCurrentWidget(w.sim_page)
     assert not tv._timer.isActive()
     w.set_theme("Light")
@@ -328,13 +333,25 @@ def test_substructuring_several_interfaces(app):
     t, y = tv.history.window(10.0)
     assert y.shape[1] == 8 and "interfaces" in tv.error_note.text()
 
-    # There is always at least one cut: unclicking the last one does nothing.
+    # No cut: the whole chain is one substructure, with the tip its only boundary DOF.
     page.set_interfaces([2])
     assert len(page.kept) == 2
     page.cut_buttons[2].click()
-    assert page.interfaces == [2] and page.cut_buttons[2].isChecked()
+    assert page.interfaces == [] and not page.cut_buttons[2].isChecked()
+    assert len(page.kept) == 1 and page.kept[0].maximum() == 7
+    assert [sub.name for sub in page.model.substructures] == ["A"]
+    assert "one substructure" in page.summary.text()
+    assert "nothing to join" in page.matrices.toPlainText()
+    page.guyan_button.click()
+    assert page.model.labels == ["x8"] and page.comparisons[0].error > 0.05  # Guyan onto the tip alone
+    assert tv._dofs == [7] and len(tv.e_curves) == 1
+    tv.step(0.3)
+    assert "interface" not in tv.error_note.text()
+    page.method.setCurrentIndex(2)  # MacNeal keeps at least one mode, or it would have no mass
+    assert page.kept[0].minimum() == 1 and page.model is not None
+    page.method.setCurrentIndex(0)
     with pytest.raises(ValueError):
-        page.set_interfaces([])
+        page.set_interfaces([7])
 
     # A new N starts again from one cut in the middle.
     page.dof.setValue(6)

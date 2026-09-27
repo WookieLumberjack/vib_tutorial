@@ -193,7 +193,7 @@ class CMSTimeView(QtWidgets.QWidget):
             view.set_masses(model.system.masses)
             view.gain = 10.0
         self.full_view.setTitle(f"Full model: {n} DOFs", size="10pt")
-        self.red_view.setTitle(f"{model.name} reduced model: {model.n_red} DOFs "
+        self.red_view.setTitle(f"{model.name} reduced model: {model.n_red} DOF{'s' if model.n_red != 1 else ''} "
                                f"({model.n_modal} modal + {model.boundary.size} boundary)", size="10pt")
         self.header.setText(
             f"<b>The {model.name} model against the full chain, in time.</b> The same force acts at the "
@@ -330,9 +330,9 @@ class CMSTimeView(QtWidgets.QWidget):
             rel = float(np.sqrt(np.mean(err[:, 0] ** 2))) / rms if rms > MIN_SPAN else 0.0
             self.error_note.setText(
                 f"Over the last {min(w, t[-1] - t[0]):.3g} s: tip error {100 * rel:.3g}% RMS of the full "
-                f"model's tip motion; largest |error| {_fmt(float(np.abs(err[:, 0]).max()))} at the tip, "
-                f"{_fmt(float(np.abs(err[:, 1:]).max()))} at the interface{'s' if k > 2 else ''}.   "
-                f"t = {sim.t:.2f} s"
+                f"model's tip motion; largest |error| {_fmt(float(np.abs(err[:, 0]).max()))} at the tip"
+                + (f", {_fmt(float(np.abs(err[:, 1:]).max()))} at the interface{'s' if k > 2 else ''}" if k > 1 else "")
+                + f".   t = {sim.t:.2f} s"
             )
 
 
