@@ -29,8 +29,11 @@ from .modal import TWO_PI, ModalResult
 from .model import ChainSystem
 
 # V is effectively singular when an eigenvalue is defective (a free chain's
-# repeated lambda = 0, or two coincident overdamped roots).
-MAX_EIGVEC_CONDITION = 1e8
+# repeated lambda = 0, or two coincident overdamped roots). Rounding splits such
+# a pair by ~sqrt(eps), leaving cond(V) as low as ~3e7 on some CPUs (seen on a
+# Windows CI runner); real chains stay below ~1e5, even within 1e-8 of critical
+# damping. A chain past the limit falls back safely (classical terms, direct stepping).
+MAX_EIGVEC_CONDITION = 1e6
 
 
 @dataclass(frozen=True)
