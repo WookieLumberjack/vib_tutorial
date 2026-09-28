@@ -26,12 +26,8 @@ def _close_graphics(app):
     """Tear down each test's plots now. Signal closures keep the windows alive until interpreter
     exit, where PySide deleting pyqtgraph items still in a scene can segfault.
 
-    Then collect the test's garbage here, with its plots torn down: left to run whenever, the
-    collector can free it in the middle of a later test building its plots, which segfaulted on
-    macOS. (Don't deleteLater() the windows first: collecting pyqtgraph's Python objects after
-    their C++ side is gone segfaults too.)"""
-    import gc
-
+    (Don't deleteLater() the windows here: collecting pyqtgraph's Python objects after their C++
+    side is gone segfaults too.)"""
     from shiboken6 import isValid
 
     from vib_tutorial.gui import close_graphics
@@ -41,7 +37,6 @@ def _close_graphics(app):
     for w in QtWidgets.QApplication.topLevelWidgets():
         if w not in before and isValid(w):
             close_graphics(w)
-    gc.collect()
 
 
 def test_window_interactions(app):
