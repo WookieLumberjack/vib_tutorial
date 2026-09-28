@@ -464,6 +464,24 @@ def test_exact_modal_terms_refuse_a_defective_eigenvalue():
     free = ChainSystem([1.0] * 3, [0.0, 400.0, 400.0], [0.0, 2.0, 2.0])  # rigid-body lambda = 0 (double)
     with pytest.raises(ValueError):
         modal_frf_terms(free, modal_analysis(free), exact=True)
+    # Rounding splits the double root differently on each CPU: really or imaginarily, by
+    # ~sqrt(eps). Mimic that with eps-sized noise on A; every split must still be refused.
+    from vib_tutorial.core import modal as modal_module
+
+    state_space = modal_module.state_space
+    rng = np.random.default_rng(0)
+    for _ in range(100):
+        def noisy(system):
+            A, B = state_space(system)
+            return A + np.finfo(float).eps * np.abs(A).max() * rng.standard_normal(A.shape), B
+
+        modal_module.state_space = noisy
+        try:
+            result = modal_analysis(free)
+        finally:
+            modal_module.state_space = state_space
+        with pytest.raises(ValueError):
+            modal_frf_terms(free, result, exact=True)
     f = np.geomspace(0.1, 20.0, 100)
     terms = modal_frf_terms(free, modal_analysis(free), exact=False)  # proportional, so still exact
     np.testing.assert_allclose(sum(t.evaluate(f) for t in terms), frf_matrix(free, f), rtol=1e-9)
