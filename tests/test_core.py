@@ -398,6 +398,15 @@ def test_free_interface_handles_a_floating_interior():
     np.testing.assert_allclose([c.fn_red for c in cmp], [c.fn_true for c in cmp], atol=1e-6)
 
 
+def test_mass_normalized_shapes_have_a_positive_peak():
+    # eigh's signs depend on the LAPACK build; fixing them keeps results the same on every OS.
+    for s in (ChainSystem.uniform(5), ChainSystem([1.0, 2.0, 1.0], [0.0, 300.0, 500.0], [0.0, 2.0, 1.0])):
+        for m in modal_analysis(s).modes:
+            phi = m.shape_mass_normalized
+            assert phi[np.argmax(np.abs(phi))] > 0
+            np.testing.assert_allclose(phi / np.abs(phi).max(), m.shape, atol=1e-12)
+
+
 def test_free_component_modes_share_the_kinetic_energy():
     from vib_tutorial.core import component_modes, free_interface
 
