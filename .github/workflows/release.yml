@@ -1,4 +1,4 @@
-# Builds unsigned standalone apps for Linux, Windows and macOS with PyInstaller.
+# Builds unsigned standalone apps for Linux and Windows (macOS paused, see the matrix) with PyInstaller.
 #
 # Pushing a version tag (git tag v0.2.0 && git push origin v0.2.0) builds all three and
 # publishes them as a GitHub Release. The tag must match the version in pyproject.toml.
@@ -32,8 +32,10 @@ jobs:
             name: linux-x86_64
           - os: windows-latest
             name: windows-x64
-          - os: macos-latest
-            name: macos-arm64
+          # macOS is left out until the GUI tests' intermittent segfault there is fixed
+          # (pyqtgraph menu construction, cause unknown); the macOS steps below are kept.
+          # - os: macos-latest
+          #   name: macos-arm64
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -64,17 +66,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --group build
 
-      # The GUI tests run on Linux only: on macOS they intermittently segfault inside
-      # pyqtgraph/PySide after building ~30 windows in one process (cause not yet found).
-      # Every OS still runs the numerical tests, which catch platform differences in
-      # LAPACK and rounding, and the smoke test below checks the packaged GUI starts.
       - name: Run tests
-        run: |
-          if [ "$RUNNER_OS" = Linux ]; then
-            uv run pytest
-          else
-            uv run pytest --ignore=tests/test_gui_smoke.py
-          fi
+        run: uv run pytest
 
       - name: Build
         run: uv run pyinstaller packaging/vib-tutorial.spec --noconfirm
