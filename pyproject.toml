@@ -1,6 +1,6 @@
 [project]
 name = "vib-tutorial"
-version = "0.1.0"
+version = "0.1.1"
 description = "Interactive real-time vibration tutorial: lumped mass-spring-damper chain with live modal analysis"
 readme = "README.md"
 license = "MIT"
