@@ -28,12 +28,32 @@ def close_graphics(widget) -> None:
 
     GraphicsView.close() clears its scene; closing the window does not call it. Items
     left in a scene until PySide's own teardown at interpreter exit can segfault there.
+
+    Stops the widget's timers first, so no frame is drawn into a cleared scene.
+
+    PlotWidget.close() also does setParent(None), which makes Qt delete the view's layout
+    item. PySide wraps those items when a filled layout is added to another (addLayout,
+    addRow), and isn't told when Qt deletes one, so its wrapper stays registered at the
+    freed address. A QWidgetAction later allocated there (pyqtgraph builds some for every
+    plot's menu) resolves to that wrapper in QMenu.addAction and segfaults. Taking the item
+    out with takeAt() first hands it to Python, which deletes it and unregisters it.
     """
     import pyqtgraph as pg
+    from PySide6 import QtCore, QtWidgets
 
+    for timer in widget.findChildren(QtCore.QTimer):
+        timer.stop()
     for view in widget.findChildren(pg.GraphicsView):
-        if not view.closed:
-            view.close()
+        if view.closed:
+            continue
+        parent = view.parentWidget()
+        if parent is not None:
+            for layout in parent.findChildren(QtWidgets.QLayout):
+                index = layout.indexOf(view)
+                if index >= 0:
+                    layout.takeAt(index)  # the returned item is Python's and freed right away
+                    break
+        view.close()
 
 
 def run() -> int:

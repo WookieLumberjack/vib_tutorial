@@ -1,4 +1,4 @@
-# Builds unsigned standalone apps for Linux and Windows (macOS paused, see the matrix) with PyInstaller.
+# Builds unsigned standalone apps for Linux, Windows and macOS with PyInstaller.
 #
 # Pushing a version tag (git tag v0.2.0 && git push origin v0.2.0) builds all three and
 # publishes them as a GitHub Release. The tag must match the version in pyproject.toml.
@@ -32,10 +32,8 @@ jobs:
             name: linux-x86_64
           - os: windows-latest
             name: windows-x64
-          # macOS is left out until the GUI tests' intermittent segfault there is fixed
-          # (pyqtgraph menu construction, cause unknown); the macOS steps below are kept.
-          # - os: macos-latest
-          #   name: macos-arm64
+          - os: macos-latest
+            name: macos-arm64
     runs-on: ${{ matrix.os }}
     defaults:
       run:
