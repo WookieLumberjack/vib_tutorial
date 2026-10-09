@@ -8,14 +8,18 @@ import numpy as np
 ENERGY_COLUMNS = ("kinetic", "potential", "added", "work", "dissipated")
 # History.s holds the element forces (with the parameters of the time): n springs, then n dampers.
 # History.g holds the ground displacement and velocity (0 unless the input is a ground motion).
+# History.offset numbers the samples: t[i] is sample offset + i of every sample ever stored.
+# It never restarts, not even on reset, so caches keyed by it (the plot's Decimator) see new data.
 
 
 class History:
     def __init__(self, n: int, capacity: int = 300_000) -> None:
         self.capacity = capacity
+        self.offset = self.size = 0
         self.reset(n)
 
     def reset(self, n: int) -> None:
+        self.offset += self.size
         self.n = n
         self.t = np.empty(self.capacity)
         self.x = np.empty((self.capacity, n))
@@ -42,6 +46,7 @@ class History:
             return
         if k >= self.capacity:
             new = tuple(a[-self.capacity :] for a in new)
+            self.offset += k - self.capacity  # samples never stored still count
             k = self.capacity
         arrays = (self.t, self.x, self.v, self.f, self.e, self.s, self.g)
         if self.size + k > self.capacity:
@@ -51,6 +56,7 @@ class History:
             for a in arrays:
                 a[:keep] = a[start : self.size]
             self.size = keep
+            self.offset += start
         s = slice(self.size, self.size + k)
         for a, b in zip(arrays, new):
             a[s] = b
