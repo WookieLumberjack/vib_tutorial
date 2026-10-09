@@ -1229,3 +1229,24 @@ def test_log_axis_labels(app):
     levels = axis.logTickValues(-2.2, 0.3, 300, [(1.0, [-2.0, -1.0, 0.0])])
     minor = next(v for s, v in levels if s is None)
     assert not {round(v, 9) for v in minor} & {-2.0, -1.0, 0.0}
+
+
+def test_record_startup(app, tmp_path):
+    """The release builds' smoke test records the time to the first painted window."""
+    import json
+    import time
+
+    from vib_tutorial.gui import record_startup
+    from vib_tutorial.gui.main_window import MainWindow
+
+    path = tmp_path / "startup.json"
+    w = MainWindow()
+    record_startup(w, str(path), launched_at=time.time() - 1.0)
+    w.show()
+    for _ in range(50):
+        app.processEvents()
+        if path.exists():
+            break
+        time.sleep(0.01)
+    t = json.loads(path.read_text())
+    assert 0 < t["window"] <= t["python"] and t["launch"] >= 1.0

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 
 
 def make_app(theme: str | None = None):
@@ -56,6 +58,36 @@ def close_graphics(widget) -> None:
         view.close()
 
 
+def record_startup(window, path: str, launched_at: float | None = None) -> None:
+    """Write how long startup took to `path` (JSON) once `window` first paints.
+
+    Seconds since the interpreter reached the package (`python`), and, when `launched_at`
+    (a time.time() taken just before launching) is given, since then (`launch`), which also
+    counts the frozen app's bootloader. `window` is the time MainWindow() took to build.
+    """
+    import json
+
+    from PySide6 import QtCore, QtWidgets
+
+    from .. import STARTED
+
+    built = time.perf_counter() - STARTED
+
+    class FirstPaint(QtCore.QObject):
+        def eventFilter(self, obj, event):
+            if event.type() == QtCore.QEvent.Type.Paint and obj.isWidgetType() and obj.window() is window:
+                QtWidgets.QApplication.instance().removeEventFilter(self)
+                timings = {"window": round(built, 3), "python": round(time.perf_counter() - STARTED, 3)}
+                if launched_at is not None:
+                    timings["launch"] = round(time.time() - launched_at, 3)
+                with open(path, "w") as f:
+                    json.dump(timings, f)
+            return False
+
+    window._first_paint = FirstPaint(window)
+    QtWidgets.QApplication.instance().installEventFilter(window._first_paint)
+
+
 def run() -> int:
     from PySide6 import QtCore
 
@@ -63,6 +95,9 @@ def run() -> int:
 
     app = make_app()
     window = MainWindow()
+    if path := os.environ.get("VIB_TUTORIAL_STARTUP_FILE"):  # set by the release builds' smoke test
+        launched = os.environ.get("VIB_TUTORIAL_LAUNCHED_AT")
+        record_startup(window, path, float(launched) if launched else None)
     window.show()
     if "--smoke-test" in sys.argv:  # release builds check the packaged app starts, then quit
         QtCore.QTimer.singleShot(2000, app.quit)
