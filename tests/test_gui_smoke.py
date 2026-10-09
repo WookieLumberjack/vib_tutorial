@@ -1300,6 +1300,19 @@ def test_log_axis_labels(app):
     assert not {round(v, 9) for v in minor} & {-2.0, -1.0, 0.0}
 
 
+def test_startup_skips_scipy_signal():
+    """scipy.signal (and the scipy.stats it pulls in) costs ~0.9 s; only the modal test needs it."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; import vib_tutorial.gui.main_window; "
+        "print([m for m in ('scipy.signal', 'scipy.stats', 'scipy.optimize') if m in sys.modules])"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "[]"
+
+
 def test_record_startup(app, tmp_path):
     """The release builds' smoke test records the time to the first painted window."""
     import json

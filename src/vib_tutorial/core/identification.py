@@ -32,8 +32,6 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
-import scipy.optimize
-import scipy.signal
 
 from .modal import TWO_PI, ModalResult
 
@@ -149,6 +147,8 @@ class Peak:
 
 def find_peaks(freqs: np.ndarray, H: np.ndarray, band: tuple[float, float], max_modes: int) -> list[Peak]:
     """Peaks of the mode indicator in the band, with half-power damping; at most max_modes, lowest first."""
+    import scipy.signal  # deferred: scipy.signal adds ~0.9 s to startup
+
     idx = np.flatnonzero(band_mask(freqs, band))
     if idx.size < 3:
         return []
@@ -244,6 +244,8 @@ def _circle_parameters(w: np.ndarray, h: np.ndarray, wr0: float, zeta0: float) -
     resonance point, x = (w^2 - w_r^2) / (2 zeta w_r w). The resonance
     direction, w_r and zeta are fitted to the measured angles.
     """
+    import scipy.optimize  # deferred like scipy.signal in find_peaks
+
     Y = 1j * w * h
     centre, _ = fit_circle(Y)
     phi = np.angle(Y - centre)
