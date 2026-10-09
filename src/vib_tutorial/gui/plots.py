@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 import pyqtgraph as pg
@@ -43,6 +44,7 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
         self.auto_range = True
         self.min_span = MIN_Y_SPAN
         self.x_curves: list[pg.PlotDataItem] = []
+        self.decimator = Decimator()
         self.apply_theme()
 
     def apply_theme(self) -> None:
@@ -66,6 +68,7 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
             self.x_plot.removeItem(c)
         self.x_plot.setLabel("left", label, units=units)
         self.min_span = min_span
+        self.decimator.reset()  # new curves: the cached picks were for other values
         self.x_curves = [self.x_plot.plot(pen=pg.mkPen(color, width=1), name=name) for name, color in curves]
         # pyqtgraph sizes the legend from its items' current widths, which lag behind
         # new, longer names and squeeze the entries together; use the preferred size.
@@ -89,20 +92,30 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
             else:
                 p.disableAutoRange(axis="y")
 
-    def update_data(self, t: np.ndarray, x: np.ndarray, f: np.ndarray, window: float) -> None:
+    def update_data(
+        self, t: np.ndarray, values: Callable[[slice | np.ndarray], np.ndarray], window: float, start: int = 0
+    ) -> None:
+        """Plot the samples t, numbered from `start` (History.offset numbering).
+
+        values(index) returns the plotted rows at index (a slice or index array into t):
+        one column per curve, then the force. Only the decimated rows are derived each
+        frame, and the decimation itself only scans samples it hasn't seen before.
+        """
         # Hand Qt at most MAX_POINTS per curve: drawing tens of thousands of
         # antialiased segments every frame is what made the app lag.
-        idx = decimation_index(np.column_stack([x, f]), MAX_POINTS)
+        idx = self.decimator.index(start, t.size, values, len(self.x_curves) + 1)
+        yd = values(idx)
         td = t[idx]
         for i, c in enumerate(self.x_curves):
-            c.setData(td, x[idx, i])
-        self.f_curve.setData(td, f[idx])
+            c.setData(td, yd[:, i])
+        self.f_curve.setData(td, yd[:, -1])
         t_end = t[-1] if t.size else 0.0
         self.x_plot.setXRange(max(0.0, t_end - window), max(window, t_end), padding=0)
         if self.auto_range:
             # Auto-fit, but never zoom in below +/-min_span (same reason as
             # MIN_AUTO_PEAK in the animation: decaying motion -> float noise).
-            peak = float(np.abs(x).max()) if x.size else 0.0
+            # The decimation keeps every extreme, so yd has the window's peak.
+            peak = float(np.abs(yd[:, :-1]).max()) if yd.size else 0.0
             if peak < self.min_span:
                 self.x_plot.setYRange(-self.min_span, self.min_span, padding=0.05)
             else:
@@ -115,17 +128,75 @@ def decimation_index(y: np.ndarray, max_points: int) -> np.ndarray:
     Preserves the visual envelope of oscillations (unlike plain striding, which
     can alias). With multiple columns, the extremes of every column are kept.
     """
-    k = y.shape[0]
-    if k <= max_points:
-        return np.arange(k)
-    blocks_per_sample = 1 + 2 * (y.shape[1] if y.ndim > 1 else 1)  # start + min + max per column
-    bucket = int(math.ceil(blocks_per_sample * k / max_points))
-    m = k // bucket
-    blocks = y[: m * bucket].reshape(m, bucket, -1)
-    base = (np.arange(m) * bucket)[:, None]
-    picks = [base, base + blocks.argmin(axis=1), base + blocks.argmax(axis=1)]
-    idx = np.concatenate([p.ravel() for p in picks] + [np.arange(m * bucket, k)])
-    return np.unique(idx)
+    y = y.reshape(len(y), -1)
+    return Decimator(max_points).index(0, len(y), y.__getitem__, y.shape[1])
+
+
+class Decimator:
+    """decimation_index for a record that grows at its end and loses samples at its start.
+
+    Samples are grouped in buckets aligned to their absolute numbers, and each whole
+    bucket's picks are cached, so a frame only scans the samples that are new since the
+    last one plus the two partial buckets at the window's edges. Call reset() when the
+    values of samples already seen change (other curves, another modal map).
+    """
+
+    def __init__(self, max_points: int = MAX_POINTS) -> None:
+        self.max_points = max_points
+        self.bucket = 0
+        self.reset()
+
+    def reset(self) -> None:
+        self.first = 0  # absolute number of the first cached bucket
+        # One row per whole bucket: its first sample, then the argmin and argmax of
+        # every column, as absolute sample numbers.
+        self.picks = np.empty((0, 0), dtype=np.intp)
+
+    def index(
+        self, start: int, k: int, values: Callable[[slice | np.ndarray], np.ndarray], columns: int
+    ) -> np.ndarray:
+        """Sorted indices into a window of k samples numbered from start.
+
+        values(slice(i, j)) returns the (j - i, columns) values of window samples i..j-1.
+        """
+        if k <= self.max_points:
+            return np.arange(k)
+        picks_per_bucket = 1 + 2 * columns
+        needed = math.ceil(picks_per_bucket * k / self.max_points)
+        # Keep the bucket size while the window grows or shrinks a little, so the
+        # cache survives; refit with some headroom when it drifts out of range.
+        if not needed <= self.bucket <= 1.5 * needed or self.picks.shape[1:] != (picks_per_bucket,):
+            self.bucket = math.ceil(1.2 * needed)
+            self.reset()
+            self.picks = np.empty((0, picks_per_bucket), dtype=np.intp)
+        b = self.bucket
+        end = start + k
+        j0, j1 = -(-start // b), end // b  # whole buckets in the window: j0..j1-1
+        if j1 <= j0:
+            return np.unique(self._edge(0, k, values))
+        cached_end = self.first + len(self.picks)
+        if not self.first <= j0 <= cached_end:
+            self.first, self.picks = j0, self.picks[:0]  # nothing cached is in the window
+        self.picks = self.picks[j0 - self.first : max(0, j1 - self.first)]
+        self.first = j0
+        lo = self.first + len(self.picks)
+        if lo < j1:
+            i = lo * b - start
+            y = values(slice(i, i + (j1 - lo) * b)).reshape(j1 - lo, b, columns)
+            base = (np.arange(lo, j1) * b)[:, None]
+            new = np.hstack([base, base + y.argmin(axis=1), base + y.argmax(axis=1)])
+            self.picks = np.vstack([self.picks, new])
+        head, tail = j0 * b - start, j1 * b - start
+        parts = [self._edge(0, head, values), self.picks.ravel() - start, self._edge(tail, k, values), [k - 1]]
+        return np.unique(np.concatenate(parts))
+
+    @staticmethod
+    def _edge(i: int, j: int, values: Callable[[slice | np.ndarray], np.ndarray]) -> np.ndarray:
+        """The first and last sample and the extremes of every column in window samples i..j-1."""
+        if j <= i:
+            return np.empty(0, dtype=np.intp)
+        y = values(slice(i, j))
+        return np.concatenate([[i, j - 1], i + y.argmin(axis=0), i + y.argmax(axis=0)])
 
 
 class ModalTable(QtWidgets.QTableWidget):

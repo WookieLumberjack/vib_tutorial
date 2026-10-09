@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 from PySide6 import QtCore, QtWidgets
@@ -578,6 +579,30 @@ class MainWindow(QtWidgets.QMainWindow):
             return s_el[:, n:]
         return s_el[:, :n] + s_el[:, n:]
 
+    def _plot_values(
+        self, x: np.ndarray, v: np.ndarray, f: np.ndarray, e: np.ndarray, s_el: np.ndarray, g: np.ndarray
+    ) -> Callable[[slice | np.ndarray], np.ndarray]:
+        """The strip chart's rows at an index into the window: the selected curves, then f.
+
+        The plot derives only the rows it needs (new samples and the decimated ones),
+        so a long window isn't projected onto the modes, or summed, every frame.
+        """
+        view = self.coords_combo.currentData()
+        n, m = self.sim.system.n, self._modal_map
+
+        def rows(i: slice | np.ndarray) -> np.ndarray:
+            if view == "forces":
+                y = self._element_curves(s_el[i])
+            elif view == "energy":
+                y = energy_curves(e[i])
+            elif view == "modal":
+                y = (x[i] - g[i, :1]) @ m[:n] + (v[i] - g[i, 1:]) @ m[n:]
+            else:
+                y = x[i]
+            return np.column_stack([y, f[i]])
+
+        return rows
+
     def _on_force_changed(self) -> None:
         s = self.force.settings
         system = self.sim.system
@@ -705,16 +730,8 @@ class MainWindow(QtWidgets.QMainWindow):
         else:  # the arrow shows the force holding the mass: the springs' pull on it, reversed
             hold = float(self.sim.system.matrices()[2][held] @ (self.sim.displacement - self.sim.ground))
             self.chain.update_state(self.sim.displacement, peak, hold, held, abs(hold), ground=self.sim.ground)
-        if self.forces_view:
-            y = self._element_curves(s_el)
-        elif self.energy_view:
-            y = energy_curves(e)
-        elif self.modal_view:
-            n = self.sim.system.n
-            y = (x - g[:, :1]) @ self._modal_map[:n] + (v - g[:, 1:]) @ self._modal_map[n:]
-        else:
-            y = x
-        self.time_plot.update_data(t, y, f, window)
+        start = self.history.offset + self.history.size - t.size
+        self.time_plot.update_data(t, self._plot_values(x, v, f, e, s_el, g), window, start)
         if self.energy.isVisible():
             self._update_energy(e[-min(len(e), 20_000) :])
         if self.force.settings.kind is ForceKind.CHIRP:
