@@ -89,6 +89,29 @@ def test_window_interactions(app):
     w.close()
 
 
+def test_secondary_pages_build_when_opened(app):
+    from vib_tutorial.gui.main_window import LAZY_PAGES, MainWindow
+    from vib_tutorial.gui.modal_coupling import ModalCouplingPage
+
+    w = MainWindow()
+    assert not w._built  # startup builds only the Simulation page
+    titles = [w.pages.tabText(i) for i in range(w.pages.count())]
+    w.params.dof.setValue(5)  # a page built later gets the current system
+
+    w.pages.setCurrentIndex(2)  # as a click on the tab does
+    page = w.pages.currentWidget()
+    assert isinstance(page, ModalCouplingPage) and page is w.coupling_page
+    assert list(w._built) == ["coupling_page"]
+    assert page.system.n == 5
+    assert [w.pages.tabText(i) for i in range(w.pages.count())] == titles
+
+    for name, _ in LAZY_PAGES:  # reading one builds it, without switching to it
+        assert w.pages.indexOf(getattr(w, name)) >= 0
+    assert w.pages.currentWidget() is page and w.pages.count() == 1 + len(LAZY_PAGES)
+    page.edit_parameters.emit()
+    assert w.pages.currentWidget() is w.sim_page
+
+
 def test_state_space_method(app):
     import numpy as np
 
