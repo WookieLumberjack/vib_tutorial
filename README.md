@@ -131,7 +131,7 @@ chain without its last mass*).
   spring pushes back with exactly the applied force. The one resonance becomes two, one
   either side.
 - **Tuned mass damper (Den Hartog)**: a 5% damper tuned to f<sub>a</sub>/f<sub>1</sub> =
-  1/(1 + μ) with ζ<sub>a</sub> = √(3μ/8(1 + μ)³). The resonance at 40 times the static
+  1/(1 + μ) with ζ<sub>a</sub> = √(3μ/8(1 + μ)³) (relative to f<sub>1</sub>, as Den Hartog defined it). The resonance at 40 times the static
   deflection becomes two flat peaks under 6. Set c2 to 0 or to 5 to see why the damping
   has an optimum.
 - **TMD on a 4-storey building**: the default chain shaken by the ground at its first
@@ -611,7 +611,7 @@ transmissibility(chain, np.array([0.5, 2.0]))                  # X / X_g, (freqs
 from vib_tutorial.core.presets import den_hartog, tuned_mass_damper, with_absorber
 
 tmd = tuned_mass_damper(ChainSystem.uniform(4), mu=0.05)       # 5-mass chain, damper on m4 tuned to mode 1
-den_hartog(0.05)                                               # (f_a / f_1, zeta_a) = (0.952, 0.127)
+den_hartog(0.05)                                               # (f_a / f_1, zeta_a on f_1) = (0.952, 0.127)
 
 from vib_tutorial.core import compare_modes, craig_bampton
 

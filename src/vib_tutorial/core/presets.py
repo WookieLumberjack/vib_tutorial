@@ -27,6 +27,8 @@ def den_hartog(mu: float) -> tuple[float, float]:
 
     Returns (frequency ratio f_a / f_primary, damping ratio zeta_a), which make the
     two fixed points of the primary's receptance equally high and put the peaks on them.
+    As in Den Hartog's own derivation, zeta_a = c_a / (2 m_a omega_primary): it is
+    referenced to the primary's natural frequency, not the absorber's.
     """
     return 1.0 / (1.0 + mu), math.sqrt(3.0 * mu / (8.0 * (1.0 + mu) ** 3))
 
@@ -55,7 +57,8 @@ def tuned_mass_damper(primary: ChainSystem, mu: float, mode: int = 0) -> ChainSy
     m_eff = modal_mass(primary, mode, primary.n - 1)
     ratio, zeta = den_hartog(mu)
     fn = modal_analysis(primary).modes[mode].fn_hz
-    return with_absorber(primary, mu * m_eff, ratio * fn, zeta)
+    # with_absorber takes the damping ratio on the absorber's own frequency ratio * fn.
+    return with_absorber(primary, mu * m_eff, ratio * fn, zeta / ratio)
 
 
 @dataclass(frozen=True)
@@ -106,7 +109,7 @@ def presets() -> list[Preset]:
         Preset(
             "Tuned mass damper (Den Hartog)",
             f"m1 on k1 is the structure ({f_tmd:.3g} Hz). m2 is a damper of {tmd_mu:.0%} of its "
-            f"mass, tuned to {tmd_ratio:.3f} f₁ with ζ = {tmd_zeta:.3f} (Den Hartog's optimum). "
+            f"mass, tuned to {tmd_ratio:.3f} f₁ with ζ = c₂/2m₂ω₁ = {tmd_zeta:.3f} (Den Hartog's optimum). "
             "The resonance splits into two low, flat peaks. Force at m1 at the old resonance.",
             tmd,
             ForceSettings(target=0, freq_hz=f_tmd),
@@ -116,7 +119,7 @@ def presets() -> list[Preset]:
             "TMD on a 4-storey building",
             f"The default chain as a building on shaking ground, with a damper on the roof (m5): "
             f"{b_mu:.0%} of mode 1's modal mass there ({b_meff:.3g} kg), tuned to "
-            f"{b_ratio:.3f} × {b_fn:.3g} Hz with ζ = {b_zeta:.3f}. The ground shakes at mode 1.",
+            f"{b_ratio:.3f} × {b_fn:.3g} Hz with ζ = {b_zeta:.3f} (relative to {b_fn:.3g} Hz). The ground shakes at mode 1.",
             building_tmd,
             ForceSettings(target=3, freq_hz=b_fn, base=True, base_amplitude=0.005),
             absorber=True,

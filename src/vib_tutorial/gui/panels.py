@@ -196,8 +196,10 @@ CHIRP_TIP = (
     "<i>Frequency response</i> tab follows the frequency.</p>"
     "<p>Sweep too fast and a lightly damped mode has no time to build up: its peak comes "
     "late and low, and it rings on after the sweep has moved on.</p>"
-    "<p><b>Log sweep:</b> equal time per octave rather than per hertz, so the low modes, "
-    "which are closer together, get as long as the high ones.</p>"
+    "<p><b>Log sweep:</b> equal time per octave rather than per hertz. A mode's bandwidth "
+    "(2ζf<sub>n</sub>) and its cycles per second both grow with frequency, so a linear sweep "
+    "rushes through the low modes; a log sweep gives each mode a similar number of cycles "
+    "across its peak.</p>"
 )
 
 
