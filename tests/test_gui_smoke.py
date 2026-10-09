@@ -1229,3 +1229,16 @@ def test_log_axis_labels(app):
     levels = axis.logTickValues(-2.2, 0.3, 300, [(1.0, [-2.0, -1.0, 0.0])])
     minor = next(v for s, v in levels if s is None)
     assert not {round(v, 9) for v in minor} & {-2.0, -1.0, 0.0}
+
+
+def test_startup_skips_scipy_signal():
+    """scipy.signal (and the scipy.stats it pulls in) costs ~0.9 s; only the modal test needs it."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; import vib_tutorial.gui.main_window; "
+        "print([m for m in ('scipy.signal', 'scipy.stats', 'scipy.optimize') if m in sys.modules])"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "[]"

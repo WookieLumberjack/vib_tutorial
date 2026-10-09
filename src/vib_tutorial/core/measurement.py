@@ -42,7 +42,6 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-import scipy.signal
 
 from .frf_matrix import MAX_EIGVEC_CONDITION
 from .modal import TWO_PI, ModalResult, modal_analysis
@@ -193,6 +192,8 @@ def oversampling(result: ModalResult, settings: MeasurementSettings) -> int:
 
 def block_windows(settings: MeasurementSettings, processing: Processing) -> tuple[np.ndarray, np.ndarray]:
     """(force window, response window), each of length Nb."""
+    import scipy.signal  # deferred: scipy.signal adds ~0.9 s to startup
+
     nb = settings.block
     w = processing.window
     if w is Window.RECTANGULAR:
@@ -254,6 +255,8 @@ class ChainResponse:
         return out
 
     def _run(self, f: np.ndarray) -> np.ndarray:
+        import scipy.signal
+
         if self._modal is not None:
             mu, V, Vinv, b0, b1 = self._modal
             eta0 = Vinv @ self.state
@@ -294,6 +297,8 @@ class Acquisition:
     """
 
     def __init__(self, system: ChainSystem, settings: MeasurementSettings, result: ModalResult | None = None) -> None:
+        import scipy.signal
+
         self.system = system
         self.settings = s = settings
         self.result = result or modal_analysis(system)
@@ -403,6 +408,8 @@ class Acquisition:
 
     def _shaker_noise(self, m: int) -> np.ndarray:
         """Band-limited Gaussian noise with RMS FORCE_RMS, continuous across calls."""
+        import scipy.signal
+
         s = self.settings
         white = self.rng.standard_normal(m) * FORCE_RMS * math.sqrt(self.fs_sim / (2.0 * s.band))
         out, self._shaker_zi = scipy.signal.sosfilt(self._shaker, white, zi=self._shaker_zi)
@@ -426,6 +433,8 @@ class Acquisition:
 
     def _run_analog(self, f: np.ndarray, keep: bool = True) -> tuple[np.ndarray, np.ndarray] | None:
         """Drive the chain with analog force samples; return them sampled at fs (f, x) if `keep`."""
+        import scipy.signal
+
         x = self._chain.run(f)
         self.t_analog += f.size / self.fs_sim
         data = np.column_stack([f, x])

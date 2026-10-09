@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 
 
 def make_app(theme: str | None = None):
@@ -56,6 +57,17 @@ def close_graphics(widget) -> None:
         view.close()
 
 
+def _preload_scipy() -> None:
+    """Import the SciPy modules that only the Virtual modal test uses.
+
+    core imports them on first use so they stay out of startup (~0.9 s); loading
+    them in the background once the window is up keeps that page's first visit
+    from stalling.
+    """
+    import scipy.optimize
+    import scipy.signal  # noqa: F401
+
+
 def run() -> int:
     from PySide6 import QtCore
 
@@ -64,8 +76,12 @@ def run() -> int:
     app = make_app()
     window = MainWindow()
     window.show()
+    preload = threading.Thread(target=_preload_scipy, name="preload-scipy", daemon=True)
+    QtCore.QTimer.singleShot(0, preload.start)  # after the first paint
     if "--smoke-test" in sys.argv:  # release builds check the packaged app starts, then quit
         QtCore.QTimer.singleShot(2000, app.quit)
     code = app.exec()
     close_graphics(window)
+    if preload.is_alive():  # don't tear the interpreter down mid-import
+        preload.join()
     return code
