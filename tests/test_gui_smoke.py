@@ -89,6 +89,29 @@ def test_window_interactions(app):
     w.close()
 
 
+def test_secondary_pages_build_when_opened(app):
+    from vib_tutorial.gui.main_window import LAZY_PAGES, MainWindow
+    from vib_tutorial.gui.modal_coupling import ModalCouplingPage
+
+    w = MainWindow()
+    assert not w._built  # startup builds only the Simulation page
+    titles = [w.pages.tabText(i) for i in range(w.pages.count())]
+    w.params.dof.setValue(5)  # a page built later gets the current system
+
+    w.pages.setCurrentIndex(2)  # as a click on the tab does
+    page = w.pages.currentWidget()
+    assert isinstance(page, ModalCouplingPage) and page is w.coupling_page
+    assert list(w._built) == ["coupling_page"]
+    assert page.system.n == 5
+    assert [w.pages.tabText(i) for i in range(w.pages.count())] == titles
+
+    for name, _ in LAZY_PAGES:  # reading one builds it, without switching to it
+        assert w.pages.indexOf(getattr(w, name)) >= 0
+    assert w.pages.currentWidget() is page and w.pages.count() == 1 + len(LAZY_PAGES)
+    page.edit_parameters.emit()
+    assert w.pages.currentWidget() is w.sim_page
+
+
 def test_state_space_method(app):
     import numpy as np
 
@@ -164,6 +187,52 @@ def test_decimation_keeps_extremes():
     assert idx.size <= 3000
     np.testing.assert_array_equal(y[idx].max(axis=0), y.max(axis=0))
     np.testing.assert_array_equal(y[idx].min(axis=0), y.min(axis=0))
+
+
+def test_decimator_cache_matches_a_fresh_pass():
+    import numpy as np
+
+    from vib_tutorial.gui.plots import Decimator
+
+    rng = np.random.default_rng(0)
+    y = rng.standard_normal((200_000, 3)).cumsum(axis=0)
+    cached = Decimator(3000)
+    start, end = 0, 2000
+    for _ in range(200):  # a window that grows, scrolls, and changes length
+        end = min(end + int(rng.integers(0, 3000)), len(y))
+        start = max(start, end - int(rng.integers(20_000, 60_000)))
+        w = y[start:end]
+        idx = cached.index(start, len(w), w.__getitem__, 3)
+        assert idx[0] == 0 and idx[-1] == len(w) - 1
+        if len(w) > 3000:
+            assert idx.size <= 3000
+            fresh = Decimator(3000)  # same buckets, nothing cached
+            fresh.bucket, fresh.picks = cached.bucket, np.empty((0, 7), dtype=np.intp)
+            np.testing.assert_array_equal(idx, fresh.index(start, len(w), w.__getitem__, 3))
+        np.testing.assert_array_equal(w[idx].max(axis=0), w.max(axis=0))
+        np.testing.assert_array_equal(w[idx].min(axis=0), w.min(axis=0))
+
+
+def test_history_offset_numbers_samples():
+    import numpy as np
+
+    from vib_tutorial.gui.history import History
+
+    h = History(1, capacity=100)
+    count = 0
+
+    def extend(k):
+        nonlocal count
+        ts = np.arange(count, count + k, dtype=float)  # t is the sample's number
+        h.extend(ts, np.zeros((k, 1)), np.zeros((k, 1)), np.zeros(k), np.zeros((k, 5)), np.zeros((k, 2)))
+        count += k
+        assert h.t[0] == h.offset and h.offset + h.size == count
+
+    for k in (30, 40, 50, 7, 250, 60):  # compactions, and a batch larger than the buffer
+        extend(k)
+    h.reset(1)
+    assert h.offset == count  # numbering continues after a reset
+    extend(10)
 
 
 def test_auto_scale_gain_is_bounded(app):
@@ -1242,3 +1311,24 @@ def test_startup_skips_scipy_signal():
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "[]"
+
+
+def test_record_startup(app, tmp_path):
+    """The release builds' smoke test records the time to the first painted window."""
+    import json
+    import time
+
+    from vib_tutorial.gui import record_startup
+    from vib_tutorial.gui.main_window import MainWindow
+
+    path = tmp_path / "startup.json"
+    w = MainWindow()
+    record_startup(w, str(path), launched_at=time.time() - 1.0)
+    w.show()
+    for _ in range(50):
+        app.processEvents()
+        if path.exists():
+            break
+        time.sleep(0.01)
+    t = json.loads(path.read_text())
+    assert 0 < t["window"] <= t["python"] and t["launch"] >= 1.0

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 from PySide6 import QtCore, QtWidgets
@@ -25,18 +26,38 @@ from ..core.presets import Preset, without_absorber
 from .animation import ChainView
 from .background import COUPLING_TIP, make_background_view
 from .energy import EnergyPanel, EnergyState
-from .frf_matrix import FrfMatrixPage
 from .history import History
-from .modal_coupling import ModalCouplingPage
-from .modal_test import ModalTestPage
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, PhasorPanel, TimeHistoryPlot
 from . import theming
 from .style import SYSTEM, colors
-from .substructuring import SubstructuringPage
 
 FRAME_MS = 16  # ~60 fps
+
+# The pages after the Simulation one, in tab order: (attribute, tab title). Each is
+# imported and built the first time it's opened (MainWindow._page), not at startup.
+LAZY_PAGES = (
+    ("frf_page", "FRF matrix"),
+    ("coupling_page", "Modal coupling"),
+    ("cms_page", "Substructuring (CMS)"),
+    ("test_page", "Virtual modal test"),
+)
+
+
+def _page_class(name: str) -> type[QtWidgets.QWidget]:
+    # Plain imports, not importlib, so PyInstaller still finds these modules.
+    if name == "frf_page":
+        from .frf_matrix import FrfMatrixPage
+        return FrfMatrixPage
+    if name == "coupling_page":
+        from .modal_coupling import ModalCouplingPage
+        return ModalCouplingPage
+    if name == "cms_page":
+        from .substructuring import SubstructuringPage
+        return SubstructuringPage
+    from .modal_test import ModalTestPage
+    return ModalTestPage
 MODE_ANIMATION_HZ = 0.5  # visual rate for the animated mode-shape plot
 
 METHOD_TIP = (
@@ -298,18 +319,17 @@ class MainWindow(QtWidgets.QMainWindow):
         splitter.setSizes([400, 750, 550])
         self.sim_page = splitter
 
-        # --- the other pages: same chain, each its own layout
-        self.cms_page = SubstructuringPage()
+        # --- the other pages: same chain, each its own layout. An empty placeholder
+        # holds each tab until the page is first opened (see _page).
         self.pages = QtWidgets.QTabWidget()
         self.pages.setDocumentMode(True)
         self.pages.addTab(self.sim_page, "Simulation && modal analysis")
-        self.frf_page = FrfMatrixPage()
-        self.pages.addTab(self.frf_page, "FRF matrix")
-        self.coupling_page = ModalCouplingPage()
-        self.pages.addTab(self.coupling_page, "Modal coupling")
-        self.pages.addTab(self.cms_page, "Substructuring (CMS)")
-        self.test_page = ModalTestPage()
-        self.pages.addTab(self.test_page, "Virtual modal test")
+        self._built: dict[str, QtWidgets.QWidget] = {}
+        self._placeholders: dict[str, QtWidgets.QWidget] = {}
+        for name, title in LAZY_PAGES:
+            self._placeholders[name] = QtWidgets.QWidget()
+            self.pages.addTab(self._placeholders[name], title)
+        self.pages.currentChanged.connect(self._on_page_changed)
         self.theme_combo = QtWidgets.QComboBox()
         self.theme_combo.addItems(theming.names())
         self.theme_combo.setCurrentText(theming.current_name())
@@ -338,17 +358,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
         self.coords_combo.currentIndexChanged.connect(self._set_plot_curves)
         self.element_combo.currentIndexChanged.connect(self._set_plot_curves)
-        self.cms_page.dof_requested.connect(self.params.dof.setValue)
-        self.cms_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
         self.chain.mass_grabbed.connect(self._on_mass_grabbed)
         self.chain.mass_dragged.connect(self._on_mass_dragged)
         self.chain.mass_released.connect(self._on_mass_released)
-        self.frf_page.dof_requested.connect(self.params.dof.setValue)
-        self.frf_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
-        self.coupling_page.dof_requested.connect(self.params.dof.setValue)
-        self.coupling_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
-        self.test_page.dof_requested.connect(self.params.dof.setValue)
-        self.test_page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
         self.theme_combo.textActivated.connect(self._on_theme_picked)
         app = QtWidgets.QApplication.instance()
         app.styleHints().colorSchemeChanged.connect(self._on_desktop_scheme)
@@ -366,6 +378,39 @@ class MainWindow(QtWidgets.QMainWindow):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._frame)
         self._timer.start(FRAME_MS)
+
+    # --------------------------------------------------------------- pages
+    frf_page = property(lambda self: self._page("frf_page"))
+    coupling_page = property(lambda self: self._page("coupling_page"))
+    cms_page = property(lambda self: self._page("cms_page"))
+    test_page = property(lambda self: self._page("test_page"))
+
+    def _page(self, name: str) -> QtWidgets.QWidget:
+        """The page `name` from LAZY_PAGES, built and put in its tab on first use."""
+        page = self._built.get(name)
+        if page is not None:
+            return page
+        page = self._built[name] = _page_class(name)()
+        page.dof_requested.connect(self.params.dof.setValue)
+        page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
+        page.set_system(self.sim.system, self.modal)
+        # Insert the page before its placeholder, switch to it if the placeholder was
+        # showing, then drop the placeholder: only the real page is ever shown.
+        holder = self._placeholders.pop(name)
+        index = self.pages.indexOf(holder)
+        showing = self.pages.currentIndex() == index
+        self.pages.insertTab(index, page, dict(LAZY_PAGES)[name])
+        if showing:
+            self.pages.setCurrentIndex(index)
+        self.pages.removeTab(index + 1)
+        holder.deleteLater()
+        return page
+
+    def _on_page_changed(self, index: int) -> None:
+        widget = self.pages.widget(index)
+        for name, holder in list(self._placeholders.items()):
+            if holder is widget:
+                self._page(name)
 
     # --------------------------------------------------------------- theme
     def set_theme(self, name: str) -> None:
@@ -390,7 +435,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _restyle(self) -> None:
         theming.restyle(self)
         for w in (self.chain, self.time_plot, self.mode_plot, self.phasor_plot.plot, self.frf_plot,
-                  self.params, self.energy, self.cms_page, self.coupling_page, self.frf_page, self.test_page):
+                  self.params, self.energy, *self._built.values()):
             w.apply_theme()
         self.force_panel.refresh()
         self._refresh_modal_views()  # mode colours: table, shapes, time and FRF curves
@@ -421,10 +466,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _refresh_modal(self) -> None:
         self.modal = modal_analysis(self.sim.system)
-        self.cms_page.set_system(self.sim.system, self.modal)
-        self.coupling_page.set_system(self.sim.system, self.modal)
-        self.frf_page.set_system(self.sim.system, self.modal)
-        self.test_page.set_system(self.sim.system, self.modal)
+        for page in self._built.values():  # the rest are given the system when built
+            page.set_system(self.sim.system, self.modal)
         self._refresh_modal_views()
 
     def _on_method_changed(self) -> None:
@@ -535,6 +578,30 @@ class MainWindow(QtWidgets.QMainWindow):
         if key == "damper":
             return s_el[:, n:]
         return s_el[:, :n] + s_el[:, n:]
+
+    def _plot_values(
+        self, x: np.ndarray, v: np.ndarray, f: np.ndarray, e: np.ndarray, s_el: np.ndarray, g: np.ndarray
+    ) -> Callable[[slice | np.ndarray], np.ndarray]:
+        """The strip chart's rows at an index into the window: the selected curves, then f.
+
+        The plot derives only the rows it needs (new samples and the decimated ones),
+        so a long window isn't projected onto the modes, or summed, every frame.
+        """
+        view = self.coords_combo.currentData()
+        n, m = self.sim.system.n, self._modal_map
+
+        def rows(i: slice | np.ndarray) -> np.ndarray:
+            if view == "forces":
+                y = self._element_curves(s_el[i])
+            elif view == "energy":
+                y = energy_curves(e[i])
+            elif view == "modal":
+                y = (x[i] - g[i, :1]) @ m[:n] + (v[i] - g[i, 1:]) @ m[n:]
+            else:
+                y = x[i]
+            return np.column_stack([y, f[i]])
+
+        return rows
 
     def _on_force_changed(self) -> None:
         s = self.force.settings
@@ -663,16 +730,8 @@ class MainWindow(QtWidgets.QMainWindow):
         else:  # the arrow shows the force holding the mass: the springs' pull on it, reversed
             hold = float(self.sim.system.matrices()[2][held] @ (self.sim.displacement - self.sim.ground))
             self.chain.update_state(self.sim.displacement, peak, hold, held, abs(hold), ground=self.sim.ground)
-        if self.forces_view:
-            y = self._element_curves(s_el)
-        elif self.energy_view:
-            y = energy_curves(e)
-        elif self.modal_view:
-            n = self.sim.system.n
-            y = (x - g[:, :1]) @ self._modal_map[:n] + (v - g[:, 1:]) @ self._modal_map[n:]
-        else:
-            y = x
-        self.time_plot.update_data(t, y, f, window)
+        start = self.history.offset + self.history.size - t.size
+        self.time_plot.update_data(t, self._plot_values(x, v, f, e, s_el, g), window, start)
         if self.energy.isVisible():
             self._update_energy(e[-min(len(e), 20_000) :])
         if self.force.settings.kind is ForceKind.CHIRP:

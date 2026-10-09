@@ -70,7 +70,11 @@ jobs:
       - name: Build
         run: uv run pyinstaller packaging/vib-tutorial.spec --noconfirm
 
-      # Launch the packaged app and quit after 2 s, to catch missing modules or plugins.
+      # Launch the packaged app and quit after 2 s, to catch missing modules or plugins. Twice,
+      # cold then warm, recording the time to the first painted window so startup regressions
+      # show in the job summary. "launch" counts from just before starting the executable, so it
+      # includes the bootloader (and macOS's first-launch checks on the cold run); "python" from
+      # the interpreter reaching the package; "window" is when MainWindow() was built.
       - name: Smoke-test the build
         run: |
           case "$RUNNER_OS" in
@@ -78,7 +82,28 @@ jobs:
             Windows) exe=dist/vib-tutorial/vib-tutorial.exe ;;
             macOS) exe="dist/Vibration Tutorial.app/Contents/MacOS/vib-tutorial" ;;
           esac
-          "$exe" --smoke-test
+          for run in cold warm; do
+            export VIB_TUTORIAL_STARTUP_FILE="startup-$run.json"  # relative: bash and the .exe agree on it
+            export VIB_TUTORIAL_LAUNCHED_AT=$(perl -MTime::HiRes=time -e 'printf "%.3f", time')
+            "$exe" --smoke-test
+            if [ ! -s "$VIB_TUTORIAL_STARTUP_FILE" ]; then
+              echo "::error::The $run launch quit without painting its window"
+              exit 1
+            fi
+          done
+          uv run --no-project python - <<'PY'
+          import json, os
+          rows = []
+          for run in ("cold", "warm"):
+              with open(f"startup-{run}.json") as f:
+                  t = json.load(f)
+              rows.append(f"| {run} | {t['launch']:.2f} | {t['python']:.2f} | {t['window']:.2f} |")
+              print(f"::notice title=Startup ({run})::first window after {t['launch']:.2f} s")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("### Startup time, ${{ matrix.name }}\n\n"
+                      "| Run | To first window (s) | Since Python start (s) | MainWindow built (s) |\n"
+                      "| --- | --- | --- | --- |\n" + "\n".join(rows) + "\n")
+          PY
 
       - name: Package
         run: |
