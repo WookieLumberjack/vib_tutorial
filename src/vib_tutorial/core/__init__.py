@@ -4,6 +4,7 @@ Nothing in this package depends on Qt, so it can be used from scripts,
 notebooks, and tests.
 """
 
+from .describing import FrictionResponse, friction_frf, friction_response, friction_transmissibility
 from .energy import kinetic_energy, modal_energies, potential_energy, stored_energy
 from .forcing import ForceController, ForceKind, ForceSettings
 from .frf_matrix import ModalTerm, frf_matrix, modal_frf_terms
@@ -65,6 +66,7 @@ __all__ = [
     "Estimator",
     "Excitation",
     "FrfEstimator",
+    "FrictionResponse",
     "MeasurementSettings",
     "Processing",
     "Response",
@@ -105,6 +107,9 @@ __all__ = [
     "free_interface",
     "frf_matrix",
     "friction_decay",
+    "friction_frf",
+    "friction_response",
+    "friction_transmissibility",
     "friction_zeta",
     "interior_counts",
     "kept_ranges",

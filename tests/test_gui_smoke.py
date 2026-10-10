@@ -1458,3 +1458,26 @@ def test_record_startup(app, tmp_path):
         time.sleep(0.01)
     t = json.loads(path.read_text())
     assert 0 < t["window"] <= t["python"] and t["launch"] >= 1.0
+
+
+def test_frequency_response_with_friction(app):
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    plot = w.frf_plot
+    w.params.rows[0][4].setValue(0.5)
+    w.params._copy_first_row()
+    assert not plot.friction_curves  # the Modal analysis tab is in front: not worked out yet
+    w.tabs.setCurrentWidget(w.frf_tab)
+    assert len(plot.friction_curves) == 2 * w.sim.system.n and w.frf_friction_note.isVisible()
+    assert "friction at 10 N" in plot.mag.titleLabel.text
+    w.force_panel.amplitude.setValue(2.0)
+    assert "friction at 2 N" in plot.mag.titleLabel.text and len(plot.friction_curves) == 2 * w.sim.system.n
+    w.force_panel.input.setCurrentIndex(1)  # ground motion
+    w.force_panel.base_amplitude.setValue(5.0)
+    assert "friction at 5 mm" in plot.mag.titleLabel.text
+    w.params._reset_defaults()
+    assert not plot.friction_curves and "friction" not in plot.mag.titleLabel.text
+    assert not w.frf_friction_note.isVisible()
+    w.close()

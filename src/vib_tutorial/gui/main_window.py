@@ -167,6 +167,20 @@ COMPARE_TIP = (
     "mass it hangs on stands still, and splits the old resonance into two peaks. A tuned "
     "mass damper's damper flattens those two peaks.</p>"
 )
+FRICTION_FRF_TIP = (
+    "<p>Friction is nonlinear, so the chain has no single frequency response: its force stays "
+    "the same as the motion grows, so it matters most for small motions.</p>"
+    "<p>The dash-dot curves keep only the first harmonic of each friction force, a square wave "
+    "against the velocity of size F<sub>f</sub>: its fundamental is a damper "
+    "c<sub>eq</sub> = 4F<sub>f</sub>/πωX that weakens as the amplitude X grows. The chain is "
+    "solved at each frequency with these dampers, at the amplitude set on the Excitation panel "
+    "(a force, or a ground motion). A mass that friction holds still through the whole cycle "
+    "leaves a gap.</p>"
+    "<p>Raise the amplitude and the curves approach the linear ones; lower it and friction "
+    "flattens the peaks. It's an approximation: good while every mass slides through the cycle, "
+    "rougher near sticking, where the real motion stick-slips. Compare a harmonic drive on the "
+    "simulation, or the stepped sine on the Virtual modal test.</p>"
+)
 RELEASE_FIT_TIP = (
     "<p>While <i>Auto-scale animation and plots</i> is on, the plot window is also "
     "fitted to this mode (Simulation \u2192 Fit window cycles).</p>"
@@ -311,6 +325,14 @@ class MainWindow(QtWidgets.QMainWindow):
         fv = QtWidgets.QVBoxLayout(frf_tab)
         fv.setContentsMargins(0, 4, 0, 0)
         fv.addWidget(self.frf_compare)
+        self.frf_friction_note = QtWidgets.QLabel(
+            "With friction the response depends on the input's size. Dash-dot: an approximate response "
+            "at the Excitation panel's amplitude (describing function); a gap marks a mass that sticks."
+        )
+        self.frf_friction_note.setWordWrap(True)
+        self.frf_friction_note.setToolTip(FRICTION_FRF_TIP)
+        theming.mute(self.frf_friction_note)
+        fv.addWidget(self.frf_friction_note)
         fv.addWidget(self.frf_plot, 1)
         self.background = make_background_view()
         tabs = self.tabs = QtWidgets.QTabWidget()
@@ -625,7 +647,11 @@ class MainWindow(QtWidgets.QMainWindow):
         system = self.sim.system
         self.frf_compare.setEnabled(system.n > 1)
         reference = without_absorber(system) if self.frf_compare.isChecked() else None
-        self.frf_plot.set_system(system, self.modal, s.target, base=s.base, reference=reference)
+        amplitude = s.base_amplitude if s.base else s.amplitude
+        self.frf_plot.set_system(
+            system, self.modal, s.target, base=s.base, reference=reference, friction_amplitude=amplitude
+        )
+        self.frf_friction_note.setVisible(bool(system.friction.any()))
         self._set_drive()
         self.time_plot.set_input(s.base)
 
