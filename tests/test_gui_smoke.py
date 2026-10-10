@@ -1050,6 +1050,32 @@ def test_drag_a_mass_and_let_go(app):
     w.close()
 
 
+def test_dragging_with_friction_leaves_the_chain_where_friction_holds_it(app):
+    import numpy as np
+
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    for row in w.params.rows:
+        row[4].setValue(2.0)
+    w.params.static_ratio.setValue(1.5)
+    w._on_mass_grabbed(3)
+    for x in np.linspace(0.0, 0.05, 11):  # out and back, as a hand would
+        w._on_mass_dragged(3, x)
+    for x in np.linspace(0.05, 0.0, 11):
+        w._on_mass_dragged(3, x)
+    w._on_mass_released(3)
+    held = w.sim.displacement.copy()
+    assert held[3] == 0.0 and np.all(held[:3] > 0.0)  # the others stayed out
+    # Let go: friction holds every mass, so nothing moves.
+    w._sim_target = w.sim.t + 0.5
+    w._tick()
+    np.testing.assert_array_equal(w.sim.displacement, held)
+    assert not w.sim.velocity.any()
+    w.close()
+
+
 def test_base_excitation_and_chirp(app):
     import math
 

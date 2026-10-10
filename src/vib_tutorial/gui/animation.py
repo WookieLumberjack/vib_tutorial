@@ -30,6 +30,10 @@ DRAG_TIP = (
     "take the static shape a slow pull gives (every spring balanced), and the red arrow is "
     "the force your hand needs. Let go and the chain vibrates freely from that shape, "
     "which excites every mode, most of all the low ones.</p>"
+    "<p>With <b>friction</b> the other masses stay put until their springs pull harder than "
+    "the static friction, then slide only as far as the sliding friction lets them. The shape "
+    "then depends on how you dragged: pull a mass out and back and the others stay out. Let go "
+    "and the chain may not move at all.</p>"
 )
 
 

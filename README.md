@@ -105,6 +105,11 @@ and the chain vibrates freely from that shape. The static shape is close to the 
 mode, so most of the energy starts in mode 1 (see *Energy: by mode*). Pull on m1 instead and
 more of it goes into the higher modes.
 
+With friction the other masses stay where they are until their springs pull harder than the
+static friction, and then slide only until the pull has fallen to the sliding friction. The
+shape depends on the path: drag a mass out and back and the others stay out, held by
+friction, and when you let go nothing may move.
+
 ![Holding m2 after an earlier pluck: the static shape, the holding force, and the shares of its energy in each mode](docs/images/pluck.png)
 
 ### Chirp and ground motion

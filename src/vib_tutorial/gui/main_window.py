@@ -19,7 +19,7 @@ from ..core import (
     modal_analysis,
     modal_coordinate_map,
     modal_energies,
-    pluck_shape,
+    drag_shape,
     potential_energy,
 )
 from ..core.presets import Preset, without_absorber
@@ -654,9 +654,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.force_panel.refresh()
 
     def _on_mass_dragged(self, i: int, x: float) -> None:
-        """Hold mass i at x (m) with the rest of the chain in static balance and at rest."""
+        """Hold mass i at x (m) with the rest of the chain in static balance and at rest.
+
+        With friction the other masses stay where friction holds them, so the shape
+        depends on the path the mass was dragged along.
+        """
         xg = self.sim.ground  # a ground motion stops, but only once time runs again
-        self.sim.set_displacement(xg + pluck_shape(self.sim.system, i, x - xg))
+        now = self.sim.displacement - xg
+        self.sim.set_displacement(xg + drag_shape(self.sim.system, now, i, x - xg))
 
     def _on_mass_released(self, _: int) -> None:
         self._sim_target = self.sim.t  # time stood still while the mass was held
