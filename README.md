@@ -508,14 +508,23 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   with the tracked sweeps over it and a marker at the current speed. On the polar plot the
   steady-state vector traces its circle through each critical speed.
 - **Campbell diagram**: the damped natural frequencies against speed, coloured by whirl
-  direction, with the 1X line and the critical speeds. Drag the speed line to set the target.
-- **Equations & matrices**: M, C, G and K with the current numbers, the shaft's condensed
-  beam stiffness, the state matrix A(Ω), and the modes at the current speed. G is
-  skew-symmetric: it sits beside C but does no work.
+  direction, with the 1X line and the critical speeds, and the onset of instability with the
+  growing modes crossed. Drag the speed line to set the target.
+- **Stability**: cross-coupled bearing stiffness k<sub>xy</sub> = −k<sub>yx</sub> and the
+  shaft's internal (rotating) damping. The stability map draws each mode's damping ratio or
+  log decrement against speed and marks the onset speed, where a forward mode's damping
+  crosses zero. Below it, the full spectrum of an orbit (the FFT of x + iy) separates forward
+  from backward whirl, so past the onset the subsynchronous whirl shows as a growing line below
+  +1X. The simulation pauses once the whirl reaches 2% of the span.
+- **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
+  the shaft's condensed beam stiffness, the state matrix A(Ω), and the modes at the current
+  speed. G is skew-symmetric: it sits beside C but does no work.
 - **Theory**: the classic case, heavy and high spot, the gyroscopic effect, forward and
   backward whirl, anisotropic supports, run-ups through a critical speed (why a fast ramp
-  peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²), and why
-  the solution uses state space.
+  peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²),
+  stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
+  c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whip), and why the solution
+  uses state space.
 
 The default is the classic case: the disc at midspan on identical, isotropic supports, so its
 translation and tilt are uncoupled, and the first critical speed is the textbook
@@ -531,6 +540,14 @@ The faster the ramp, the lower the peak, and the further past the critical speed
 it on a run-up, before it on a coast-down. Whether a ramp counts as slow depends on
 α/ω<sub>c</sub>² against ζ². Once past the critical, the free vibration left over at the natural
 frequency beats with the 1X response.
+
+![Jeffcott rotor's stability map and full spectrum with internal damping 20 N·s/m: the forward mode's damping crosses zero at 3910 rpm, and at 5000 rpm a tap grows into a forward whirl at 26.9 Hz, 0.32× the speed](docs/images/jeffcott_stability.png)
+
+Damping inside the shaft (c<sub>i</sub>) or cross-coupled stiffness in the bearings
+(k<sub>xy</sub>) pushes a forward whirl along its orbit. Past the onset speed the whirl grows by
+itself at the rotor's natural frequency, not at the speed, and no balancing removes it. With
+c<sub>i</sub> = 20 N·s/m the default rotor is stable up to 3910 rpm; with no damping in the
+supports the onset falls to the first critical speed itself.
 
 ![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1932 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
 
@@ -670,6 +687,8 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/rotor_sweep.py`: run-up and coast-down: the steady-state 1X vectors at each station,
   once-per-revolution tracking of the 1X vector and peak (`RevolutionTracker`), and
   `RunUpCoastDown`, which drives the stepper through a sweep and records each leg.
+- `core/rotor_stability.py`: the least damped mode, the onset speed of instability (swept,
+  then bisected), the log decrement, and the full spectrum of an orbit.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and
@@ -768,7 +787,7 @@ ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(st
 from vib_tutorial.core.rotor import RPM, Bearing, RotorSimulator, RotorSystem, campbell, unbalance_response
 
 rotor = RotorSystem(position=0.3, bearing_a=Bearing(kx=2e4, ky=8e4))   # disc off centre, A anisotropic
-M, C, G, K = rotor.matrices()                                  # 8x8; M q'' + (C + ΩG) q' + K q = f
+M, C, G, K = rotor.matrices()                                  # 8x8; M q'' + (C + ΩG) q' + (K + ΩH) q = f
 [(w * RPM, whirl) for w, whirl, zeta in campbell(rotor, 1000.0).criticals]  # rpm, +1 forward
 Q = unbalance_response(rotor, np.array([150.0]))               # steady whirl at 150 rad/s, complex (1, 8)
 spin = RotorSimulator(rotor)
@@ -782,6 +801,12 @@ spin.accel = 1000 / RPM                                        # 1000 rpm/s
 up, down = RunUpCoastDown(spin, 800 / RPM, 2400 / RPM).run()   # each leg tracked once per revolution
 w, v, peak = up.trace(1, "x")                                  # disc, x probe: speed, 1X vector, max |x|
 up.peak(1, "orbit")                                            # (largest 1X major axis, speed it came at)
+
+from vib_tutorial.core.rotor_stability import full_spectrum, stability_onset
+
+unstable = RotorSystem(internal_damping=20.0, bearing_a=Bearing(kxy=5e3))  # H = unstable.circulatory()
+onset = stability_onset(unstable, 1000.0)                      # Onset(omega, freq_hz, whirl) or None
+f, amp = full_spectrum(r.t, r.q[:, [1, 5]])                    # disc orbit: +f forward, −f backward
 ```
 
 ## Ideas for extension

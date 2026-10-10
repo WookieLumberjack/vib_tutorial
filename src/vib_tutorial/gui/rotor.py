@@ -4,8 +4,9 @@ Left: the speed controls, the run-up and coast-down sweep, and the rotor's
 parameters. Centre: a 3D view of the whirling shaft (projected onto a 2D
 pyqtgraph scene, no OpenGL), the orbits at the bearings, the disc and midspan,
 and a strip chart. Right: the Campbell diagram, the Bode and polar plots of the
-1X response (steady state and tracked sweeps), the matrices of the equations of
-motion at the current speed, and the theory notes.
+1X response (steady state and tracked sweeps), the stability map and full
+spectrum, the matrices of the equations of motion at the current speed, and the
+theory notes.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from ..core.rotor import (
     RotorSimulator,
     RotorSystem,
     campbell,
+    whirl_modes,
 )
 from ..core.rotor_sweep import (
     DIRECTIONS,
@@ -39,10 +41,12 @@ from ..core.rotor_sweep import (
     probe,
     steady_vectors,
 )
+from ..core.rotor_stability import Onset, full_spectrum, least_damped, stability_onset
 from .cms_time import SampleBuffer
 from .panels import spin
 from .rotor_bode import SWEEP_COLORS, BodePlots, PolarPlot, SweepPlots, nice_marks
 from .rotor_notes import THEORY_HTML, matrices_html, whirl_name
+from .rotor_stability import MEASURES, FullSpectrum, StabilityMap
 from .style import colors
 from .theming import add_legend, mute
 
@@ -64,6 +68,8 @@ DAMPED = 0.3  # modes with more damping than this are drawn hollow and are not c
 DASH = QtCore.Qt.PenStyle.DashLine
 DOT = QtCore.Qt.PenStyle.DotLine
 STEADY_POINTS = 2000  # speeds on the steady-state curve, plus as many again around the criticals
+RUB = 0.02  # of the span: a whirl this large pauses the simulation (a real rotor would rub)
+SPECTRUM_FRAMES = 6  # the full spectrum is recomputed every this many frames
 
 SPEED_TIP = (
     "<p>The speed the rotor ramps toward, at the ramp rate. Drag the red line on the Campbell diagram "
@@ -92,6 +98,22 @@ VIEW_TIP = (
     "magnified (the scale is in the top corner). Drag to turn the view; double-click to reset it.</p>"
     "<p>The red dot on the disc is the heavy spot, where its unbalance is: it turns with the shaft. "
     "The thin lines are the orbits of the four stations (bearings, disc, midspan).</p>"
+)
+INTERNAL_TIP = (
+    "<p>Damping inside the rotating shaft (material hysteresis, slip in shrink fits and couplings), as "
+    "the damping c<sub>i</sub> of a damper across the shaft at the disc. It resists the bending rate "
+    "the spinning shaft sees, so below the critical speed it damps the forward whirl, and above it "
+    "(the shaft then turns faster than it whirls) it drives it.</p>"
+    "<p>Try 20 N·s/m: the rotor becomes unstable at 3,910 rpm and, above that, whirls at its first "
+    "natural frequency, about 27 Hz, whatever the speed.</p>"
+)
+KXY_TIP = (
+    "<p>Cross-coupled stiffness: a displacement in x pushes the journal in y, and one in y pushes it "
+    "back in −x (k<sub>yx</sub> = −k<sub>xy</sub>). Fluid-film bearings, seals and impeller "
+    "clearances do this, the fluid being dragged round by the shaft. Positive k<sub>xy</sub> pushes a "
+    "forward whirl along its path: it lowers the forward modes' damping, and past the bearings' own "
+    "damping, the rotor is unstable.</p><p>Here k<sub>xy</sub> is constant; in a real bearing it "
+    "grows with speed, so read it as the value at the speed you look at. Try 15,000 N/m on both.</p>"
 )
 ORBIT_TIP = (
     "<p>The path of the shaft's centre at each station over the last few revolutions, looking from "
@@ -510,11 +532,17 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         self.crit = pg.ScatterPlotItem(size=11, symbol="o", name="critical speed")
         p.addItem(self.crit)
         self.crit_labels: list[pg.TextItem] = []
+        self.unstable = pg.ScatterPlotItem(size=7, symbol="x", name="growing (ζ &lt; 0)")
+        p.addItem(self.unstable)
+        self.onset_line = pg.InfiniteLine(angle=90)
+        self.onset_label = pg.TextItem(anchor=(1.05, 0.0))
+        p.addItem(self.onset_line)
+        p.addItem(self.onset_label)
         self.speed_line = pg.InfiniteLine(angle=90, movable=True)
         self.speed_line.setToolTip("The speed now. Drag it to set the target speed.")
         self.speed_line.sigPositionChangeFinished.connect(lambda line: self.speed_dragged.emit(max(0.0, line.value())))
         p.addItem(self.speed_line)
-        for item in (*self.points.values(), self.damped, self.sync, self.crit, self.uncrit):
+        for item in (*self.points.values(), self.damped, self.sync, self.crit, self.uncrit, self.unstable):
             self.legend.addItem(item, item.name())
         self.result: Campbell | None = None
         self.apply_theme()
@@ -533,10 +561,14 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         self.uncrit.setPen(pg.mkPen(colors.grey, width=2))
         self.speed_line.setPen(pg.mkPen(colors.force, width=2))
         self.speed_line.setHoverPen(pg.mkPen(colors.force, width=4))
+        self.unstable.setBrush(pg.mkBrush(colors.force))
+        self.unstable.setPen(pg.mkPen(None))
+        self.onset_line.setPen(pg.mkPen(colors.force, width=1.5, style=DASH))
+        self.onset_label.setColor(colors.force)
         for label in self.crit_labels:
             label.setColor(colors.force)
 
-    def set_result(self, result: Campbell, max_rpm: float, isotropic: bool) -> None:
+    def set_result(self, result: Campbell, max_rpm: float, isotropic: bool, onset: Onset | None = None) -> None:
         self.result = result
         rpm = np.repeat(result.omega * RPM, result.freq_hz.shape[1])
         f = result.freq_hz.ravel()
@@ -549,6 +581,14 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
             m = mask & ok & ~damped
             self.points[key].setData(rpm[m], f[m])
         self.damped.setData(rpm[ok & damped], f[ok & damped])
+        growing = ok & (result.zeta.ravel() < 0.0)
+        self.unstable.setData(rpm[growing], f[growing])
+        self.onset_line.setVisible(onset is not None)
+        if onset is not None:
+            self.onset_line.setValue(onset.omega * RPM)
+            self.onset_label.setText(f"instability onset\n{onset.omega * RPM:,.0f} rpm")
+        else:
+            self.onset_label.setText("")
         self.sync.setData([0.0, max_rpm], [0.0, max_rpm / 60.0])
         p = self.plot
         for label in self.crit_labels:
@@ -565,7 +605,11 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
             p.addItem(label)
             self.crit_labels.append(label)
         top = np.nanmax(f[ok & (f < 2.5 * max_rpm / 60.0)]) if np.any(ok & (f < 2.5 * max_rpm / 60.0)) else 1.0
-        p.setRange(xRange=(0.0, max_rpm), yRange=(0.0, 1.1 * max(top, max_rpm / 60.0)), padding=0)
+        y_top = 1.1 * max(top, max_rpm / 60.0)
+        p.setRange(xRange=(0.0, max_rpm), yRange=(0.0, y_top), padding=0)
+        if onset is not None:
+            self.onset_label.setAnchor((1.05, 0.0) if onset.omega * RPM > 0.5 * max_rpm else (-0.05, 0.0))
+            self.onset_label.setPos(onset.omega * RPM, 0.97 * y_top)
         self.apply_theme()
 
     def set_speed(self, rpm: float) -> None:
@@ -593,6 +637,9 @@ class RotorPage(QtWidgets.QWidget):
         self._sweep_pairs = 0  # sweeps started since the plots were cleared (each pair's colour)
         self._steady_rpm = np.empty(0)  # the steady-state curve: speeds (rpm)
         self._steady_vectors = np.empty((0, len(STATIONS), 2), dtype=complex)  # and 1X vectors there
+        self.onset: Onset | None = None  # where the rotor goes unstable, if it does up to MAX_RPM
+        self.rubbed = False  # the whirl grew past RUB of the span and the simulation paused
+        self._frames = 0
 
         # --- parameters
         left = QtWidgets.QWidget()
@@ -673,6 +720,32 @@ class RotorPage(QtWidgets.QWidget):
         pt = QtWidgets.QVBoxLayout(polar_tab)
         pt.addWidget(self.polar, 1)
         pt.addWidget(self.polar_note)
+        self.stability_map = StabilityMap(DAMPED)
+        self.measure = QtWidgets.QComboBox()
+        self.measure.addItems(MEASURES)
+        self.measure.setToolTip(
+            "<p>The log decrement δ = 2πζ/√(1 − ζ²) is the natural log of the ratio of successive peaks of "
+            "a decaying vibration; API 684 asks for δ ≥ 0.1 at the running speed.</p>"
+        )
+        self.measure.currentIndexChanged.connect(lambda i: self.stability_map.set_measure(i == 1))
+        self.stability_note = QtWidgets.QLabel()
+        self.stability_note.setWordWrap(True)
+        self.stability_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self.spectrum = FullSpectrum()
+        self.spectrum_note = QtWidgets.QLabel()
+        self.spectrum_note.setWordWrap(True)
+        mute(self.spectrum_note)
+        stability_tab = QtWidgets.QWidget()
+        st = QtWidgets.QVBoxLayout(stability_tab)
+        measure_row = QtWidgets.QHBoxLayout()
+        measure_row.addWidget(QtWidgets.QLabel("Stability map:"))
+        measure_row.addWidget(self.measure)
+        measure_row.addStretch(1)
+        st.addLayout(measure_row)
+        st.addWidget(self.stability_map, 3)
+        st.addWidget(self.stability_note)
+        st.addWidget(self.spectrum, 2)
+        st.addWidget(self.spectrum_note)
         self.matrices = QtWidgets.QTextBrowser()
         self.theory = QtWidgets.QTextBrowser()
         self.theory.setHtml(THEORY_HTML)
@@ -680,6 +753,7 @@ class RotorPage(QtWidgets.QWidget):
         self.tabs.addTab(campbell_tab, "Campbell diagram")
         self.tabs.addTab(bode_tab, "Bode plot")
         self.tabs.addTab(polar_tab, "Polar plot")
+        self.tabs.addTab(stability_tab, "Stability")
         self.tabs.addTab(self.matrices, "Equations && matrices")
         self.tabs.addTab(self.theory, "Theory")
         self.tabs.currentChanged.connect(lambda _: self._refresh_matrices())
@@ -847,12 +921,15 @@ class RotorPage(QtWidgets.QWidget):
         form.addRow("Polar inertia Ip:", self.ip)
         form.addRow("Diametral inertia Id:", self.id)
         form.addRow("Unbalance m·e:", self.unbalance)
+        self.internal_damping = spin(0.0, 1e5, s.internal_damping, 1, " N·s/m")
+        self.internal_damping.setToolTip(INTERNAL_TIP)
+        form.addRow("Internal damping c<sub>i</sub>:", self.internal_damping)
         self.shaft_note = QtWidgets.QLabel()
         self.shaft_note.setWordWrap(True)
         mute(self.shaft_note)
         form.addRow(self.shaft_note)
         for box_ in (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip,
-                     self.id, self.unbalance):
+                     self.id, self.unbalance, self.internal_damping):
             box_.valueChanged.connect(self._on_params)
         return box
 
@@ -864,7 +941,8 @@ class RotorPage(QtWidgets.QWidget):
                  ("k<sub>y</sub> [N/m]", "Vertical support stiffness"),
                  ("c<sub>x</sub> [N·s/m]", "Horizontal support damping"),
                  ("c<sub>y</sub> [N·s/m]", "Vertical support damping"),
-                 ("m [kg]", "Mass of the journal and whatever moves with it on the support"))
+                 ("m [kg]", "Mass of the journal and whatever moves with it on the support"),
+                 ("k<sub>xy</sub> [N/m]", KXY_TIP))
         for c, (text, tip) in enumerate(heads):
             label = QtWidgets.QLabel(text)
             label.setToolTip(tip)
@@ -873,9 +951,10 @@ class RotorPage(QtWidgets.QWidget):
         for r, name in enumerate("AB"):
             grid.addWidget(QtWidgets.QLabel(f"<b>{name}</b>"), r + 1, 0)
             row = [spin(1e2, 1e10, b.kx, 0), spin(1e2, 1e10, b.ky, 0), spin(0.0, 1e6, b.cx, 1),
-                   spin(0.0, 1e6, b.cy, 1), spin(0.001, 100.0, b.mass, 3)]
+                   spin(0.0, 1e6, b.cy, 1), spin(0.001, 100.0, b.mass, 3), spin(-1e9, 1e9, b.kxy, 0)]
+            row[5].setToolTip(KXY_TIP)
             for c, w in enumerate(row):
-                w.setMinimumWidth(64)
+                w.setMinimumWidth(52)
                 w.valueChanged.connect(self._on_params)
                 grid.addWidget(w, r + 1, c + 1)
             self.bearing_rows.append(row)
@@ -894,8 +973,8 @@ class RotorPage(QtWidgets.QWidget):
         )
         for c in (self.isotropic, self.same_bearings):
             c.toggled.connect(self._on_params)
-        grid.addWidget(self.isotropic, 3, 0, 1, 6)
-        grid.addWidget(self.same_bearings, 4, 0, 1, 6)
+        grid.addWidget(self.isotropic, 3, 0, 1, 7)
+        grid.addWidget(self.same_bearings, 4, 0, 1, 7)
         return box
 
     # ------------------------------------------------------------- parameters
@@ -925,12 +1004,13 @@ class RotorPage(QtWidgets.QWidget):
             bearing_a=bearings[0],
             bearing_b=bearings[1],
             unbalance=self.unbalance.value() / 1e6,
+            internal_damping=self.internal_damping.value(),
         )
 
     def set_system(self, system: RotorSystem) -> None:
         """Show and use `system` (for scripts and tests)."""
         boxes = (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip, self.id,
-                 self.unbalance, self.isotropic, self.same_bearings, *(w for row in self.bearing_rows for w in row))
+                 self.unbalance, self.internal_damping, self.isotropic, self.same_bearings, *(w for row in self.bearing_rows for w in row))
         for w in boxes:
             w.blockSignals(True)
         self.length.setValue(system.length)
@@ -941,11 +1021,12 @@ class RotorPage(QtWidgets.QWidget):
         self.ip.setValue(system.ip)
         self.id.setValue(system.id)
         self.unbalance.setValue(system.unbalance * 1e6)
+        self.internal_damping.setValue(system.internal_damping)
         A, B = system.bearing_a, system.bearing_b
         self.isotropic.setChecked(all(b.kx == b.ky and b.cx == b.cy for b in (A, B)))
         self.same_bearings.setChecked(A == B)
         for row, b in zip(self.bearing_rows, (A, B)):
-            for w, v in zip(row, (b.kx, b.ky, b.cx, b.cy, b.mass)):
+            for w, v in zip(row, (b.kx, b.ky, b.cx, b.cy, b.mass, b.kxy)):
                 w.setValue(v)
         for w in boxes:
             w.blockSignals(False)
@@ -971,8 +1052,10 @@ class RotorPage(QtWidgets.QWidget):
         """The Campbell diagram and critical speeds for the current parameters."""
         system = self.sim.system
         self.campbell = campbell(system, MAX_RPM / RPM, n_modes=8)
+        self.onset = stability_onset(system, MAX_RPM / RPM)
         iso = _isotropic(system)
-        self.campbell_plot.set_result(self.campbell, MAX_RPM, iso)
+        self.campbell_plot.set_result(self.campbell, MAX_RPM, iso, self.onset)
+        self.stability_map.set_result(self.campbell, self.onset, MAX_RPM)
         crits = critical_speeds(self.campbell, iso)
         self.time.set_criticals([w * RPM for w, _ in crits])
         lines = [f"{w * RPM:,.0f} rpm ({w / (2 * math.pi):.4g} Hz), {whirl_name(r)} whirl" for w, r in crits]
@@ -983,17 +1066,42 @@ class RotorPage(QtWidgets.QWidget):
             + ("<br><small>The backward whirl crossings are not critical: an isotropic rotor's unbalance "
                "drives only forward whirl.</small>" if iso else "")
             + f"<br><small>Textbook Jeffcott estimate (massless journals, no tilt): {jeff:,.0f} rpm</small>"
+            + f"<br><b>Stability:</b> {self._onset_text()}"
         )
+        self.stability_note.setText(self._stability_note())
         self.campbell_note.setText(
             "Each dot is a damped natural frequency at that speed, coloured by its whirl direction "
             f"(modes damped more than ζ = {DAMPED:g}, here the journals bouncing on their supports, are "
             "hollow). A critical speed (circled) is where a lightly damped whirl frequency meets the 1X "
             "line: the unbalance, turning once per revolution, drives that mode at its natural "
             "frequency. An isotropic rotor's unbalance drives only its forward whirl."
+            + (" Crosses mark growing modes (ζ < 0), above the onset of instability (dashed)." if self.onset else "")
         )
         self._matrices_speed = -1.0
         self._refresh_matrices()
         self._refresh_steady()
+
+    def _onset_text(self) -> str:
+        o = self.onset
+        if o is None:
+            return f"stable up to {MAX_RPM:,.0f} rpm."
+        whirl = whirl_name(o.whirl)
+        if o.omega == 0.0:
+            return f"<b>unstable even at rest</b>: the {whirl} whirl at {o.freq_hz:.3g} Hz grows."
+        return (f"<b>unstable above {o.omega * RPM:,.0f} rpm</b>, where the {whirl} whirl at "
+                f"{o.freq_hz:.3g} Hz ({o.order:.2f}×) starts to grow.")
+
+    def _stability_note(self) -> str:
+        s = self.sim.system
+        coupled = [f"k<sub>xy</sub> = {b.kxy:,.0f} N/m at {n}" for n, b in (("A", s.bearing_a), ("B", s.bearing_b))
+                   if b.kxy]
+        if s.internal_damping:
+            coupled.append(f"internal damping c<sub>i</sub> = {s.internal_damping:g} N·s/m")
+        cause = ("With " + " and ".join(coupled) + ": " if coupled else
+                 "No cross-coupling and no internal damping: every mode stays damped, however fast it spins. "
+                 "Set c<sub>i</sub> or k<sub>xy</sub> to see one go unstable. ")
+        return (f"<small>{cause}{self._onset_text()} Modes damped more than ζ = {DAMPED:g} are left off. "
+                "Below: the full spectrum of the strip chart's station.</small>")
 
     def _refresh_steady(self) -> None:
         """The steady-state 1X vectors at every station, finely around each critical speed."""
@@ -1019,6 +1127,8 @@ class RotorPage(QtWidgets.QWidget):
         self.orbits.apply_theme()
         self.time.apply_theme()
         self.campbell_plot.apply_theme()
+        self.stability_map.apply_theme()
+        self.spectrum.apply_theme()
         self.bode.apply_theme()
         self.polar.apply_theme()
         self.sweep_plots.apply_theme()
@@ -1047,6 +1157,8 @@ class RotorPage(QtWidgets.QWidget):
 
     def _on_run(self) -> None:
         self.running = not self.running
+        if self.running:
+            self.rubbed = False
         self.run_button.setText("Pause" if self.running else "Run")
         if self.running:
             self._start_timer()
@@ -1058,6 +1170,7 @@ class RotorPage(QtWidgets.QWidget):
     def reset(self) -> None:
         self.stop_sweep()
         self.sim.reset()
+        self.rubbed = False
         self.history.clear()
         self._target_t = 0.0
         self._carry = 0
@@ -1283,6 +1396,10 @@ class RotorPage(QtWidgets.QWidget):
             self._carry = (r.t.size - 1 - pick[-1]) if pick.size else self._carry + r.t.size
             if pick.size:
                 self.history.extend(r.t[pick], self._columns(r.q[pick], r.phase[pick], r.omega[pick]))
+        if self.running and np.abs(self.sim.q[[XA, XD, XB, YA, YD, YB]]).max() > RUB * self.sim.system.length:
+            self.stop_sweep()
+            self._on_run()  # pause
+            self.rubbed = True
         self._draw()
         self._refresh_matrices()
 
@@ -1313,7 +1430,12 @@ class RotorPage(QtWidgets.QWidget):
         st = self.station.currentIndex()
         self.time.update_curves(t, hist[:, 2 * st : 2 * st + 2], hist[:, OMEGA] * RPM, self.window.value())
         self.campbell_plot.set_speed(sim.omega * RPM)
+        self.stability_map.set_speed(sim.omega * RPM)
         self._draw_tracking()
+        self._frames += 1
+        if self.tabs.currentWidget() is self.spectrum.parentWidget() and (
+                self._frames % SPECTRUM_FRAMES == 0 or not self.running):
+            self._draw_spectrum()
 
         # Readout.
         rpm = sim.omega * RPM
@@ -1331,10 +1453,34 @@ class RotorPage(QtWidgets.QWidget):
                 swept = float(np.sum(disc[:-1, 0] * np.diff(disc[:, 1]) - disc[:-1, 1] * np.diff(disc[:, 0])))
                 text += ", whirling " + ("forward" if swept > 0 else "backward")
             parts.append(text)
-        if steady and r_disc > 1e-3 * max(sim.system.unbalance / sim.system.disc_mass, MIN_PEAK):
+        growing = self.onset is not None and sim.omega >= self.onset.omega and least_damped(sim.system, w)[0] < 0
+        if steady and not growing and r_disc > 1e-3 * max(sim.system.unbalance / sim.system.disc_mass, MIN_PEAK):
             lag = math.degrees(sim.phase - math.atan2(here[3], here[2])) % 360.0
             parts.append(f"heavy spot leads the high spot by {lag:.0f}°")
+        if growing:
+            zeta, f, _ = least_damped(sim.system, w)
+            if w > 0:
+                grow = -zeta * 2 * math.pi * f / math.sqrt(max(1 - zeta * zeta, 1e-12))
+                parts.append(f"<span style='color:{colors.force}'>unstable: a whirl at {f:.3g} Hz "
+                             f"({2 * math.pi * f / w:.2f}×) grows ×e every {1 / grow:.2g} s</span>")
+        if self.rubbed:
+            parts.append(
+                f"<span style='color:{colors.force}'><b>Paused:</b> the whirl passed "
+                f"{_fmt_len(RUB * sim.system.length)} ({RUB:.0%} of the span), where a real rotor would rub its "
+                "seals or wreck its bearings. The model is linear, so it would grow for ever. Lower the target "
+                "below the onset and Reset.</span>")
         self.readout.setText(" · ".join(parts))
+
+    def _draw_spectrum(self) -> None:
+        """The full spectrum at the strip chart's station over the strip chart's window."""
+        t, hist = self.history.window(self.window.value())
+        st = self.station.currentIndex()
+        freqs, amps = full_spectrum(t, hist[:, 2 * st : 2 * st + 2])
+        omega = self.sim.omega
+        self.spectrum.update_spectrum(freqs, amps, omega, whirl_modes(self.sim.system, omega), DAMPED)
+        self.spectrum_note.setText(
+            f"Full spectrum of the {STATIONS[st].lower()} orbit over the last {self.window.value():g} s "
+            "(the strip chart's station and window): forward whirl on the right, backward on the left.")
 
 
 def lightly_damped(result: Campbell) -> list[tuple[float, float]]:

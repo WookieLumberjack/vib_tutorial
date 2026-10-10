@@ -24,13 +24,22 @@ disc has angular momentum Ip Ω along its tilted axis; turning that axis takes a
 moment, the gyroscopic moment. It enters the equations of motion through the
 velocities:
 
-    M q'' + (C + Ω G) q' + K q = f(t)
+    M q'' + (C + Ω G) q' + (K + Ω H) q = f(t)
 
 G is skew-symmetric (G^T = -G), so q'^T G q' = 0: the gyroscopic forces do no
 work and dissipate nothing, though they sit next to the damping matrix. They
 couple the two planes' slopes, and make the natural frequencies depend on Ω:
 each whirl mode splits into a forward (with the spin) and a backward (against
 it) branch, the Campbell diagram.
+
+Two terms can make the rotor unstable. A bearing (or seal) may have
+cross-coupled stiffness: a displacement in x pushes the journal in y and vice
+versa, k_xy = -k_yx, so K is not symmetric. And the shaft may have internal
+(rotating) damping, which resists the bending rate seen by the spinning shaft,
+q' - Ω J q in fixed coordinates (J turns x toward y). Part of it is ordinary
+damping in C; the rest is Ω H, a skew stiffness growing with the speed. Both
+skew stiffnesses push a forward whirl along its path, feeding it energy; above
+the speed where that outweighs the damping, the whirl grows by itself.
 
 The force is the disc's mass unbalance U = m e (kg·m): its centre of mass is a
 distance e from the shaft's centre at angle φ, with φ' = Ω. Keeping the centre
@@ -73,6 +82,7 @@ class Bearing:
     cx: float = 100.0  # N·s/m
     cy: float = 100.0  # N·s/m
     mass: float = 0.1  # kg, the journal and whatever moves with it
+    kxy: float = 0.0  # N/m, cross-coupled stiffness: f_x = -k_xy y, f_y = +k_xy x (k_yx = -k_xy)
 
 
 @dataclass(frozen=True)
@@ -89,6 +99,7 @@ class RotorSystem:
     bearing_a: Bearing = field(default_factory=Bearing)
     bearing_b: Bearing = field(default_factory=Bearing)
     unbalance: float = 20e-6  # kg·m (20 g·mm)
+    internal_damping: float = 0.0  # N·s/m, the shaft's rotating damping, as a damper at the disc
 
     def __post_init__(self) -> None:
         if not 0.0 < self.position < 1.0:
@@ -97,6 +108,8 @@ class RotorSystem:
                     self.bearing_a.mass, self.bearing_b.mass)
         if min(positive) <= 0.0:
             raise ValueError("lengths, Young's modulus, masses and Id must be positive")
+        if self.internal_damping < 0.0:
+            raise ValueError("the internal damping cannot be negative")
 
     def with_(self, **changes) -> RotorSystem:
         return replace(self, **changes)
@@ -141,6 +154,16 @@ class RotorSystem:
         """One plane's shaft stiffness (4x4) on [w_A, w_D, θ_D, w_B]."""
         return self._shaft_condensation()[0]
 
+    @property
+    def disc_stiffness(self) -> float:
+        """The shaft's stiffness at the disc with the bearings held (N/m), 3EIL/(a²b²)."""
+        return 3.0 * self.ei * self.length / (self.a * self.b) ** 2
+
+    @property
+    def loss_time(self) -> float:
+        """η (s): the internal damping is η K_shaft, so that it is c_i on the disc's own stiffness."""
+        return self.internal_damping / self.disc_stiffness
+
     def shape_matrix(self, z: np.ndarray) -> np.ndarray:
         """S (len(z) x 4): the shaft's deflection at axial positions z (m) is S @ [w_A, w_D, θ_D, w_B].
 
@@ -167,7 +190,9 @@ class RotorSystem:
     def matrices(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """(M, C, G, K), each 8x8 on q = [x_A, x_D, θx, x_B, y_A, y_D, θy, y_B].
 
-        The equations of motion are M q'' + (C + Ω G) q' + K q = f.
+        The equations of motion are M q'' + (C + Ω G) q' + (K + Ω H) q = f, H from
+        circulatory(). K holds the bearings' cross-coupled stiffness (so it is not
+        symmetric unless k_xy = 0) and C the shaft's internal damping.
         """
         A, B = self.bearing_a, self.bearing_b
         ks = self.shaft_stiffness()
@@ -175,20 +200,41 @@ class RotorSystem:
         K = np.zeros((N_DOF, N_DOF))
         K[:4, :4] = ks + np.diag([A.kx, 0.0, 0.0, B.kx])
         K[4:, 4:] = ks + np.diag([A.ky, 0.0, 0.0, B.ky])
+        for j, bearing in ((XA, A), (XB, B)):
+            K[j, j + 4], K[j + 4, j] = bearing.kxy, -bearing.kxy
         C = np.diag([A.cx, 0.0, 0.0, B.cx, A.cy, 0.0, 0.0, B.cy])
+        C[:4, :4] += self.loss_time * ks
+        C[4:, 4:] += self.loss_time * ks
         G = np.zeros((N_DOF, N_DOF))
         # Id θx'' + Ω Ip θy' = moment in x-z;  Id θy'' - Ω Ip θx' = moment in y-z.
         G[TX, TY] = self.ip
         G[TY, TX] = -self.ip
         return M, C, G, K
 
+    def circulatory(self) -> np.ndarray:
+        """H (8x8): the internal damping's skew stiffness per unit speed, Ω H in the equations.
+
+        The shaft's internal damping η K_shaft acts on the bending rate seen in the
+        rotating shaft, q' - Ω J q, J turning x toward y. Its -Ω J part moves to the
+        left side as Ω H, with H = η [0 K_shaft; -K_shaft 0].
+        """
+        H = np.zeros((N_DOF, N_DOF))
+        eta_ks = self.loss_time * self.shaft_stiffness()
+        H[:4, 4:], H[4:, :4] = eta_ks, -eta_ks
+        return H
+
+    def stiffness(self, omega: float) -> np.ndarray:
+        """K + Ω H: the whole stiffness at speed Ω."""
+        K = self.matrices()[3]
+        return K + omega * self.circulatory() if self.internal_damping else K
+
     def state_matrix(self, omega: float) -> np.ndarray:
         """A(Ω) (16x16) for z = [q, q']: z' = A z + B u."""
-        M, C, G, K = self.matrices()
+        M, C, G, _ = self.matrices()
         Minv = np.diag(1.0 / np.diag(M))
         A = np.zeros((2 * N_DOF, 2 * N_DOF))
         A[:N_DOF, N_DOF:] = np.eye(N_DOF)
-        A[N_DOF:, :N_DOF] = -Minv @ K
+        A[N_DOF:, :N_DOF] = -Minv @ self.stiffness(omega)
         A[N_DOF:, N_DOF:] = -Minv @ (C + omega * G)
         return A
 
@@ -366,14 +412,15 @@ def unbalance_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
     """Steady-state response to the unbalance at constant speeds: Q (len(omegas), 8), complex.
 
     q(t) = Re(Q e^{iΩt}), with the unbalance's centre of mass at angle φ = Ωt
-    (along +x at t = 0).
+    (along +x at t = 0). Above the stability onset this particular solution still
+    exists, but the free whirl grows over it, so the rotor never settles to it.
     """
-    M, C, G, K = system.matrices()
+    M, C, G, _ = system.matrices()
     out = np.empty((np.size(omegas), N_DOF), dtype=complex)
     for i, w in enumerate(np.atleast_1d(omegas)):
         f = np.zeros(N_DOF, dtype=complex)
         f[XD], f[YD] = system.unbalance * w * w, -1j * system.unbalance * w * w
-        out[i] = np.linalg.solve(K - w * w * M + 1j * w * (C + w * G), f)
+        out[i] = np.linalg.solve(system.stiffness(w) - w * w * M + 1j * w * (C + w * G), f)
     return out
 
 
@@ -433,6 +480,7 @@ class RotorSimulator:
     def energy(self) -> tuple[float, float]:
         """(kinetic, potential) energy of the vibration (J); the spin's own energy left out."""
         M, _, _, K = self.system.matrices()
+        # Only K's symmetric part stores energy: the cross-coupling does work instead.
         return 0.5 * float(self.qdot @ M @ self.qdot), 0.5 * float(self.q @ K @ self.q)
 
     # ------------------------------------------------------------- stepping

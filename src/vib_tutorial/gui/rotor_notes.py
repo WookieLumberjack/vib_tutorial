@@ -71,6 +71,7 @@ def _mat(A: np.ndarray, title: str) -> str:
 def matrices_html(system: RotorSystem, omega: float) -> str:
     """The equations of motion, every matrix with the current numbers, and the modes at speed Ω."""
     M, C, G, K = system.matrices()
+    H = system.circulatory()
     s = system
     ks = s.shaft_stiffness()
     one = ["w<sub>A</sub>", "w<sub>D</sub>", "θ<sub>D</sub>", "w<sub>B</sub>"]
@@ -87,7 +88,7 @@ def matrices_html(system: RotorSystem, omega: float) -> str:
     rpm = omega * RPM
     return f"""
 <h3>Equations of motion at {rpm:,.0f} rpm (Ω = {omega:.4g} rad/s)</h3>
-<p style='font-size:large' align='center'>M q̈ + (C + Ω G) q̇ + K q = f(t)</p>
+<p style='font-size:large' align='center'>M q̈ + (C + Ω G) q̇ + (K + Ω H) q = f(t)</p>
 <p>q = [x<sub>A</sub>, x<sub>D</sub>, θ<sub>x</sub>, x<sub>B</sub> | y<sub>A</sub>, y<sub>D</sub>,
 θ<sub>y</sub>, y<sub>B</sub>]: the journals' displacements at A and B, the disc's displacement, and the
 shaft's slope at the disc (θ<sub>x</sub> = dx/dz, θ<sub>y</sub> = dy/dz), first in the horizontal x–z
@@ -97,7 +98,11 @@ plane, then in the vertical y–z plane. Units: m and rad; forces in N, moments 
 <h4>Mass M and stiffness K</h4>
 <p>M is diagonal: the journal masses, the disc's mass m on its displacements and its diametral
 inertia I<sub>d</sub> on its slopes. K is the shaft's bending stiffness plus each support spring on its
-journal. Nothing joins the two planes: with isotropic supports K has two identical blocks.</p>
+journal. Only the bearings' cross-coupled stiffness k<sub>xy</sub> joins the two planes, as
+K[x, y] = k<sub>xy</sub> and K[y, x] = −k<sub>xy</sub> at each journal (here
+{fmt(s.bearing_a.kxy, 1.0)} N/m at A and {fmt(s.bearing_b.kxy, 1.0)} N/m at B). That part is
+skew-symmetric, so K is symmetric only without it; with isotropic supports and no cross-coupling K has
+two identical blocks.</p>
 {_mat(M, "M")}<br>{_mat(K, "K")}
 
 <h4>The shaft (one plane)</h4>
@@ -109,16 +114,26 @@ The supports hold it.</p>
 {shaft}
 
 <h4>Damping C and the gyroscopic matrix Ω G</h4>
-<p>C has only the support dampers. G has just two entries, ±I<sub>p</sub> = ±{s.ip:.4g} kg·m², joining
+<p>C has the support dampers, and the shaft's internal damping η K<sub>shaft</sub> in each plane
+(η = c<sub>i</sub>/k<sub>disc</sub> = {s.loss_time:.4g} s, so that it is c<sub>i</sub> =
+{s.internal_damping:g} N·s/m on the disc's own stiffness k<sub>disc</sub> = 3EIL/(a²b²)). G has just two entries, ±I<sub>p</sub> = ±{s.ip:.4g} kg·m², joining
 the disc's two slopes, one plane to the other. It is <b>skew-symmetric</b> (G<sup>T</sup> = −G), so
 q̇<sup>T</sup>(ΩG)q̇ = 0: unlike C, it takes no power out. It only turns the motion from one plane into
 the other, and it grows with the speed.</p>
 {_mat(C, "C")}<br>{_mat(omega * G, "Ω G")}
 
+<h4>The circulatory matrix Ω H</h4>
+<p>The internal damping acts on the bending rate the spinning shaft sees, q̇ − ΩJq in fixed
+coordinates (J turns x toward y). The −ΩJq part becomes a stiffness that grows with the speed,
+ΩH = Ωη[0 K<sub>shaft</sub>; −K<sub>shaft</sub> 0], skew-symmetric like the cross-coupling in K. A skew
+stiffness pushes a forward whirl along its orbit: per cycle it puts in energy where C takes it out.
+Damping falls off as the speed rises, and past the onset the whirl grows.</p>
+{_mat(omega * H, "Ω H")}
+
 <h4>State space</h4>
 <p>With z = [q, q̇] the equations become z' = A(Ω) z + B u, u = [f<sub>x</sub>, f<sub>y</sub>] on the
 disc:</p>
-<p align='center'>A(Ω) = [ 0 &nbsp; I ; −M<sup>−1</sup>K &nbsp; −M<sup>−1</sup>(C + ΩG) ]</p>
+<p align='center'>A(Ω) = [ 0 &nbsp; I ; −M<sup>−1</sup>(K + ΩH) &nbsp; −M<sup>−1</sup>(C + ΩG) ]</p>
 <p>A is 16 × 16 and not symmetric, and its eigenvalues λ = −ζω<sub>n</sub> ± iω<sub>d</sub> come in
 conjugate pairs. The modes at this speed, lowest first:</p>
 <table border='1' cellspacing='0' cellpadding='3'>
@@ -128,7 +143,8 @@ conjugate pairs. The modes at this speed, lowest first:</p>
 </table>
 <p><small>Whirl ratio: +1 for a circular forward whirl (the same way as the spin, x toward y), −1 for
 circular backward whirl, 0 for a straight line; in between, an ellipse. The stations are weighted by
-their masses (and the slopes by I<sub>d</sub>).</small></p>
+their masses (and the slopes by I<sub>d</sub>). A negative ζ is a mode that grows: the rotor is unstable
+at this speed.</small></p>
 
 <h4>The unbalance force</h4>
 <p>The unbalance U = m e = {s.unbalance * 1e6:.4g} g·mm turns with the shaft at angle φ (φ' = Ω).
@@ -256,6 +272,52 @@ later work on passage through resonance builds on it.</li>
 <p>The summary under the Bode plot gives each sweep's peak against the steady-state one, and how many
 rpm away from it the peak came.</p>
 
+<h3>Stability: cross-coupling and internal damping</h3>
+<p>Everything so far is forced vibration: the unbalance drives the rotor, and however hard it shakes at
+a critical speed, every free whirl dies away. Two effects can instead make a free whirl grow by itself.
+Both are stiffnesses that are not symmetric.</p>
+<p><b>Cross-coupled stiffness.</b> In a fluid-film bearing (or a seal, or an impeller's clearance) the
+fluid is dragged round by the shaft, so pushing the journal in x raises the pressure ahead of it and
+pushes it in y too: f<sub>x</sub> = −k<sub>xy</sub>y, f<sub>y</sub> = +k<sub>xy</sub>x. On a circular
+forward orbit that force always points along the orbit, the way the journal moves: it does work on the
+whirl, 2πk<sub>xy</sub>r² per cycle, where a damper c takes out 2πcωr². So the forward modes lose
+damping and the backward ones gain it, and once k<sub>xy</sub> passes cω the forward mode grows. With the
+defaults the threshold is k<sub>xy</sub> = 16,400 N/m at both bearings, close to cω = 16,600 N/m for
+their 100 N·s/m at the 26.4 Hz whirl (ζ of the forward mode
+0.046 → 0.033 → 0.019 → 0.004 at 0, 5,000, 10,000 and 15,000 N/m). In a real bearing k<sub>xy</sub>
+grows with speed, roughly as cΩ/2 (the oil swirls at about half the shaft speed), which is why plain
+journal bearings go unstable above about twice the first critical, whirling at about half the speed
+(<i>oil whip</i>). Here k<sub>xy</sub> is a constant, so read it as the value at the speed of interest.</p>
+<p><b>Internal (rotating) damping.</b> Damping in the shaft itself (material hysteresis, friction in
+shrink fits, splines and couplings) resists the bending rate that the spinning shaft sees, not the one
+seen from the bearings. In a forward whirl at ω the shaft is bent toward the orbit's centre and that bend
+turns at ω while the shaft turns at Ω; from the shaft, the bend moves at ω − Ω. Below the critical
+speed (ω &gt; Ω) internal damping damps the whirl like any other damping. Above it the shaft turns faster
+than it whirls, the bend moves backward through the shaft, and the internal damping force points
+forward along the orbit: it drives the whirl. In fixed coordinates the rotating damper c<sub>i</sub>
+gives c<sub>i</sub>q̇ (ordinary damping) plus Ωc<sub>i</sub> times a skew stiffness, ΩH: a cross-coupling
+that grows with the speed. For the classic Jeffcott rotor on rigid bearings, with external damping
+c<sub>e</sub> at the disc,</p>
+<p align='center'>Ω<sub>onset</sub> = ω<sub>n</sub>(1 + c<sub>e</sub>/c<sub>i</sub>)</p>
+<p>always above the critical speed, and with no external damping exactly at it. (On flexible supports
+only the shaft's share of the motion is damped internally, so the onset rises further.) This was the
+cause of the supercritical whirl of early built-up rotors, studied by Kimball and Newkirk in the 1920s.
+With the defaults and c<sub>i</sub> = 20 N·s/m the rotor is stable up to 3,910 rpm; 10 N·s/m moves the
+onset up to 6,220 rpm, 40 N·s/m down to 2,760 rpm. Below the critical, internal damping helps: at rest the
+first mode's ζ rises from 0.046 to 0.078 with c<sub>i</sub> = 20 N·s/m.</p>
+<p><b>The stability map</b> (the <i>Stability</i> tab) draws the damping ratio, or the log decrement
+δ = 2πζ/√(1 − ζ²), of each mode against speed. The <b>onset speed</b> is where the first forward mode
+crosses zero; it is marked on the Campbell diagram too, and the growing modes there are crossed. Industry
+practice (API 684) asks for δ ≥ 0.1 at the running speed; the defaults' first mode has δ = 0.29.</p>
+<p><b>Beyond the onset</b> a tap, or just the unbalance's start-up transient, sets off a whirl that grows
+exponentially at the mode's own natural frequency, not at the speed: a <b>subsynchronous</b> whirl, at
+26.9 Hz (0.32×) at 5,000 rpm with c<sub>i</sub> = 20 N·s/m, growing by e every 0.28 s, while the
+unbalance still turns at 83 Hz. No balancing removes it. The <b>full spectrum</b> under the stability map
+transforms x + iy of the orbit: forward whirl at positive frequencies, backward at negative. The
+unbalance shows at +1X, and the instability as a growing line below it on the forward side. The model is
+linear, so the whirl would grow for ever; in a machine it grows until something rubs or the bearing's
+nonlinearity holds it to a limit cycle. The page pauses when it reaches 2% of the span.</p>
+
 <h3>Why state space</h3>
 <p>Undamped modes and modal superposition need symmetric M, C and K, and real modes that do not change.
 Here ΩG is skew-symmetric and changes with the speed, and support damping is not proportional, so the
@@ -287,6 +349,13 @@ toward the rigid-bearing value.</li>
 <li>Move the disc to a/L = 0.3: the forward and backward criticals separate (1737 and 1731 rpm) and the
 disc's tilting mode splits strongly with speed (from 360 Hz at rest to 465 Hz forward and 289 Hz
 backward at 6000 rpm). Tap the disc at speed and the orbit becomes a rosette.</li>
+<li>Set the internal damping c<sub>i</sub> to 20 N·s/m and look at the <i>Stability</i> tab: the forward
+first mode's damping falls with speed and crosses zero at 3,910 rpm, while the backward mode's rises. Ramp
+to 5,000 rpm and tap the disc: the whirl grows at 26.9 Hz, a line at 0.32× on the full spectrum, until
+the page pauses it. Lower the target to 3,000 rpm and Reset: below the onset the tap dies away.</li>
+<li>Set c<sub>i</sub> back to 0 and give both bearings k<sub>xy</sub> = 15,000 N/m: the forward mode's
+ζ drops to 0.004 at every speed and the backward one's rises to 0.075. Above 16,400 N/m the rotor is
+unstable even at rest. More support damping raises the threshold.</li>
 <li>Pause near the critical speed and turn the 3D view: the shaft bows in one plane, which turns with
 the spin, rather than flapping back and forth.</li>
 </ol>
@@ -308,5 +377,9 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>ζ</td><td>damping ratio of a mode, −Re λ / |λ|</td><td>—</td></tr>
 <tr><td>α</td><td>angular acceleration of a ramp, Ω'</td><td>rad/s² (rpm/s)</td></tr>
 <tr><td>V</td><td>1X vector: amplitude |V|, phase lag −arg V</td><td>m</td></tr>
+<tr><td>k<sub>xy</sub></td><td>a bearing's cross-coupled stiffness (k<sub>yx</sub> = −k<sub>xy</sub>)</td><td>N/m</td></tr>
+<tr><td>c<sub>i</sub>, η</td><td>internal (rotating) damping of the shaft, as a damper at the disc; η = c<sub>i</sub>/k<sub>disc</sub></td><td>N·s/m, s</td></tr>
+<tr><td>H</td><td>circulatory matrix: the internal damping's skew stiffness per unit speed</td><td>N·s/m</td></tr>
+<tr><td>δ</td><td>log decrement, 2πζ/√(1 − ζ²)</td><td>—</td></tr>
 </table>
 """
