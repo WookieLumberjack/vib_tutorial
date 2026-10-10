@@ -820,6 +820,47 @@ def test_modal_test_page(app):
     w.close()
 
 
+def test_modal_test_with_friction_holds_one_level_for_comparison(app):
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.test_page
+    p.seed = 1
+    w.pages.setCurrentWidget(p)
+    for row in w.params.rows:
+        row[4].setValue(0.5)
+    assert "Friction on m1, m2, m3, m4" in p.check.toPlainText()
+    legend = p.frf_view.mag.legend
+    labels = lambda: [label.text for _, label in legend.items]  # noqa: E731
+    assert p.force_level_info.text() == "100 N peak"
+    p.hold.setChecked(True)  # nothing finished yet: nothing to hold
+    assert not p.hold.isChecked() and p.held is None
+    while not p.acq.done:
+        p._measure_some()
+    assert "Exact, without friction" in labels()
+    p.hold.setChecked(True)
+    first = p.estimate.H[:, 3].copy()
+    p.force_level.setValue(1000.0)
+    assert p.force_level_info.text() == "1000 N peak" and p.acq.settings.force_level == 10.0
+    while not p.acq.done:
+        p._measure_some()
+    assert "Held: impact hammer, force level 100%" in labels()
+    held = p.frf_view.held_curves[0].getData()[1]
+    assert held.size and 10 ** np.nanmax(held) == pytest.approx(np.abs(first[1:]).max())  # log axis
+    # Friction: the stronger hit gives a taller first peak.
+    assert np.abs(p.estimate.H[:, 3]).max() > 1.5 * np.abs(first).max()
+    # Measuring another quantity hides the held curve; letting go of it clears it.
+    p.response.setCurrentIndex(1)
+    while not p.acq.done:
+        p._measure_some()
+    hidden = p.frf_view.held_curves[0].getData()[0]
+    assert hidden is None or hidden.size == 0
+    p.hold.setChecked(False)
+    assert p.held is None
+    w.close()
+
+
 def test_modal_test_playback_draws_each_record_as_it_is_recorded(app):
     from vib_tutorial.gui.main_window import MainWindow
 

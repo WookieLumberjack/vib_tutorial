@@ -417,7 +417,7 @@ Each step of the measurement, and each error it can bring in, can be switched on
 - **Excitation**: impact hammer (the tip sets the pulse length, and so how high it
   excites), continuous random, burst random, periodic random, periodic chirp, or stepped
   sine. The response is simulated with the same exact first-order-hold discretization as
-  the simulator.
+  the simulator. **Force level** scales the force.
 - **Response sensor**: displacement (receptance) or acceleration (accelerance, as with
   accelerometers). The acceleration comes from the simulated chain itself, so it is filtered,
   sampled and made noisy like a real accelerometer signal. With response noise, displacement
@@ -433,10 +433,16 @@ Each step of the measurement, and each error it can bring in, can be switched on
 - Noise and processing act on the data already measured, so the same test can be compared
   with different windows, estimators or noise levels. Blocks are measured a few per frame,
   so the average can be watched settling.
+- **Friction and the linearity check**: give the masses friction (F<sub>f</sub> on the
+  Simulation page) and the response is simulated with stick-slip, step by step. The chain is
+  then nonlinear, so the measured FRF depends on the force level and the excitation: a light
+  force gives low, heavily damped peaks, a strong one approaches the frictionless FRF, and the
+  coherence drops even without noise. *Hold for comparison* keeps one FRF on the plot while you
+  measure at another level, the overlay a lab uses to check linearity.
 - **Setup check**: each mode's half-power bandwidth against Δf, how much of a hit is left
   at the end of the block, the hammer's level at each mode, and aliasing.
 - **Theory**: sampling and aliasing, the DFT and leakage, windows, averaging, H1 against H2,
-  coherence, and the excitation types.
+  coherence, the excitation types, and what friction does to a measured FRF.
 
 ![Virtual modal test: a short block with an exponential window; the measured FRF follows the exact one with the window's extra damping](docs/images/virtual_modal_test.png)
 
@@ -569,7 +575,8 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/presets.py`: the preset chains, vibration absorbers and Den Hartog's tuning.
 - `core/energy.py`: kinetic, potential and stored energy, and the energy in each mode.
 - `core/measurement.py`: the virtual modal test: excitation signals, a fast exact response
-  (the FOH update diagonalized into one first-order filter per eigenvalue), anti-alias
+  (the FOH update diagonalized into one first-order filter per eigenvalue, or the simulator's
+  stick-slip stepping with friction), anti-alias
   filtering and sampling, noise, windows, and the H1/H2 and coherence estimates.
 - `core/identification.py`: modal parameter extraction from a measured FRF column: peak
   picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
