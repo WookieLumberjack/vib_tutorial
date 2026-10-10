@@ -1539,3 +1539,63 @@ def test_modal_test_draws_the_describing_function_for_a_stepped_sine(app):
     first_frequency()
     assert not any(t.startswith("Describing function") for t in labels())
     w.close()
+
+
+def test_rotor_page(app):
+    from vib_tutorial.core.rotor import RPM, Bearing, RotorSystem
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.style import colors
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    w.params.dof.setValue(3)  # the chain's edits leave the rotor alone
+    assert p.sim.system == RotorSystem()
+
+    # It ramps toward the target and the plots fill.
+    p.set_target_rpm(1500.0)
+    assert p.sim.target == pytest.approx(1500.0 / RPM)
+    for _ in range(40):
+        p.step(0.05)
+    assert 0 < p.sim.omega <= p.sim.target and p.history.size > 0
+    assert p.orbits.trails[1].getData()[0].size > 0
+    assert "rpm" in p.readout.text()
+    assert "1,584 rpm" in p.crit_label.text() and "forward" in p.crit_label.text()
+    assert not p.orbits.plots[2].isVisible()  # midspan is the disc
+
+    # Off centre, anisotropic, different bearings: the panels describe it and the analysis follows.
+    p.position.setValue(0.3)
+    p.isotropic.setChecked(False)
+    p.bearing_rows[0][1].setValue(8e4)
+    p.same_bearings.setChecked(False)
+    p.bearing_rows[1][0].setValue(3e4)
+    s = p.sim.system
+    assert s.position == 0.3 and s.bearing_a.ky == 8e4 and s.bearing_b.kx == 3e4 and s.bearing_b.ky == 8e4
+    assert p.orbits.plots[2].isVisible()
+    p._refresh_analysis()
+    assert len(p.campbell.criticals) >= 2
+    p.tap()
+    for _ in range(5):
+        p.step(0.05)
+    assert np.isfinite(p.sim.state).all()
+
+    # The matrices at the current speed.
+    p.tabs.setCurrentWidget(p.matrices)
+    html = p.matrices.toHtml()
+    assert "Ω G" in html and "backward" in html
+
+    # Dragging the speed line on the Campbell diagram sets the target.
+    p.campbell_plot.speed_dragged.emit(2500.0)
+    assert p.target_rpm.value() == 2500.0 and p.speed_slider.value() == 2500
+
+    # Themes reach the view, and set_system round-trips through the panels.
+    w.set_theme("Dark")
+    assert p.view.shaft.opts["pen"].color().name() == colors.structure
+    bearing = Bearing(kx=2e4, ky=8e4, cx=20.0, cy=20.0)
+    system = RotorSystem(position=0.4, bearing_a=bearing, bearing_b=bearing, unbalance=5e-5)
+    p.set_system(system)
+    assert p.sim.system == system and not p.isotropic.isChecked() and p.same_bearings.isChecked()
+    p.reset()
+    assert p.sim.t == 0.0 and p.history.size == 0
+    w.set_theme("Light")

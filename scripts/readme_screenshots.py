@@ -374,11 +374,26 @@ def modal_extraction():
     save(test_page(1024, 0.0, 1.0, 100.0, "stab_plot", poles=3), "modal_extraction")
 
 
+# ------------------------------------------------------------------ Jeffcott rotor
+def jeffcott_rotor():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False  # the script drives time, as on the Simulation page
+    page.ramp.setValue(5000.0)
+    page.set_target_rpm(1400.0)
+    for _ in range(150):
+        page.step(0.02)
+    save(w, "jeffcott_rotor")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
-         virtual_modal_test, modal_extraction]
+         virtual_modal_test, modal_extraction, jeffcott_rotor]
 
 
 def main(names: list[str]) -> None:

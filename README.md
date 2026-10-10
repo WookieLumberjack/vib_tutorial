@@ -43,7 +43,8 @@ Four more pages work on the same chain, in order from analysis to simplification
 **Modal coupling** joins two halves of the chain one mode each, to show when their modes split,
 **Substructuring (CMS)** reduces the chain by component mode synthesis (Craig–Bampton, Rubin or
 MacNeal), and **Virtual modal test** measures the FRF from simulated force and response signals,
-as in a lab (all below).
+as in a lab. The **Jeffcott rotor** page leaves the chain for a
+spinning shaft: a disc on a flexible shaft in flexible bearings (all below).
 
 ### Themes
 
@@ -481,6 +482,38 @@ exact modes:
 
 ![Stabilization diagram of a noisy impact test: stable columns at modes 1 to 3, picked automatically; the fitted model over the measured FRF](docs/images/modal_extraction.png)
 
+### Jeffcott rotor
+
+The **Jeffcott rotor** page spins a disc on a flexible, massless shaft between two bearings,
+each on springs and dampers to ground, horizontally and vertically. The disc has a mass,
+polar and diametral moments of inertia, and a mass unbalance. The model has 8 DOFs: in each
+plane, both journals, the disc, and the shaft's slope at the disc. It is stepped in state
+space with the same exact first-order-hold update as the chain, as the speed ramps to a target.
+
+- **3D view**: the whirling shaft, the disc with its heavy spot, and the supports, drawn
+  in perspective on an ordinary 2D plot, with no OpenGL. Drag to turn it.
+- **Orbits** at bearing A, the disc, midspan and bearing B, seen from the B end, with
+  once-per-revolution (keyphasor) marks. A line on the disc's orbit points at the heavy spot,
+  so the phase lag can be read off it: 0° below the critical speed, 90° at it, 180° above.
+- **Speed**: a target and a ramp rate, for run-ups and coast-downs through the criticals.
+  Tapping the disc rings every mode, forward and backward.
+- **Campbell diagram**: the damped natural frequencies against speed, coloured by whirl
+  direction, with the 1X line and the critical speeds. Drag the speed line to set the target.
+- **Equations & matrices**: M, C, G and K with the current numbers, the shaft's condensed
+  beam stiffness, the state matrix A(Ω), and the modes at the current speed. G is
+  skew-symmetric: it sits beside C but does no work.
+- **Theory**: the classic case, heavy and high spot, the gyroscopic effect, forward and
+  backward whirl, anisotropic supports, and why the solution uses state space.
+
+The default is the classic case: the disc at midspan on identical, isotropic supports, so its
+translation and tilt are uncoupled, and the first critical speed is the textbook
+√(k<sub>eq</sub>/m), 1580 rpm (1584 rpm with the journals' mass). Moving the disc off
+centre or making the bearings differ couples the tilt in, so the gyroscopic effect splits the
+first mode. Different vertical and horizontal stiffness splits the critical speed in two,
+with backward whirl between them.
+
+![Jeffcott rotor at 1400 rpm, just below its 1584 rpm critical speed: the disc whirls 67 µm from centre and its heavy spot leads the high spot by 20°](docs/images/jeffcott_rotor.png)
+
 ## The math, briefly
 
 The *Background* tab in the app explains this in more depth; this is the outline.
@@ -611,6 +644,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/back_expansion.py`: recovery of the interior DOFs from the coupled solution (by T,
   from the boundary alone, and by re-solving each interior with the boundary motion imposed,
   stepped in the same exact update) and of the spring forces.
+- `core/rotor.py`: the Jeffcott rotor: shaft (beam elements, condensed), disc, bearings and the
+  gyroscopic matrix; whirl modes, the Campbell diagram and critical speeds, the steady
+  unbalance response, and an exact FOH time stepper that follows a speed ramp.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and
@@ -705,6 +741,16 @@ band = (0.0, acq.settings.band)
 stab = lscf(est.freqs, est.H, band, max_order=30)              # poles at every order
 ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(stab)])
 [(r.mode, r.identified and r.identified.fn_hz, r.mac) for r in match_modes(ident.modes, res, 8.0)]
+
+from vib_tutorial.core.rotor import RPM, Bearing, RotorSimulator, RotorSystem, campbell, unbalance_response
+
+rotor = RotorSystem(position=0.3, bearing_a=Bearing(kx=2e4, ky=8e4))   # disc off centre, A anisotropic
+M, C, G, K = rotor.matrices()                                  # 8x8; M q'' + (C + ΩG) q' + K q = f
+[(w * RPM, whirl) for w, whirl, zeta in campbell(rotor, 1000.0).criticals]  # rpm, +1 forward
+Q = unbalance_response(rotor, np.array([150.0]))               # steady whirl at 150 rad/s, complex (1, 8)
+spin = RotorSimulator(rotor)
+spin.target = 3000 / RPM                                       # ramps at spin.accel (rad/s²)
+r = spin.advance(0.25)                                         # r.t, r.q (steps, 8), r.omega, r.phase
 ```
 
 ## Ideas for extension

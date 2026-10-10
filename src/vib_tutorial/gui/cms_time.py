@@ -251,7 +251,7 @@ class CMSTimeView(CMSRunView):
 
     def _build(self) -> None:
         self._dofs = [0]  # plotted masses: the tip, then each interface
-        self.history = _Buffer(2)  # the plotted masses: full model, then reduced
+        self.history = SampleBuffer(2)  # the plotted masses: full model, then reduced
         self.full_view = ChainView(draggable=False)
         self.red_view = ChainView(draggable=False)
         for view in (self.full_view, self.red_view):
@@ -325,7 +325,7 @@ class CMSTimeView(CMSRunView):
     def _on_model(self, model: CMSModel) -> None:
         n = model.system.n
         self._dofs = [n - 1] + [int(b) for b in model.boundary[:-1]]
-        self.history = _Buffer(2 * len(self._dofs))
+        self.history = SampleBuffer(2 * len(self._dofs))
         self._make_curves()
         for view in (self.full_view, self.red_view):
             view.set_masses(model.system.masses)
@@ -403,7 +403,7 @@ def _fmt(meters: float) -> str:
     return f"{meters * 1e9:.3g} nm"
 
 
-class _Buffer:
+class SampleBuffer:
     """Recent samples (t, columns), dropping the oldest half when full: amortized O(1) per sample."""
 
     def __init__(self, columns: int, capacity: int = 200_000) -> None:

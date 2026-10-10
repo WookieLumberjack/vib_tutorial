@@ -43,7 +43,13 @@ LAZY_PAGES = (
     ("coupling_page", "Modal coupling"),
     ("cms_page", "Substructuring (CMS)"),
     ("test_page", "Virtual modal test"),
+    ("rotor_page", "Jeffcott rotor"),
 )
+
+
+def _follows_chain(page: QtWidgets.QWidget) -> bool:
+    """Whether a page shows the chain (and is given it); the rotor page has a model of its own."""
+    return getattr(page, "follows_chain", True)
 
 
 def _page_class(name: str) -> type[QtWidgets.QWidget]:
@@ -57,6 +63,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "cms_page":
         from .substructuring import SubstructuringPage
         return SubstructuringPage
+    if name == "rotor_page":
+        from .rotor import RotorPage
+        return RotorPage
     from .modal_test import ModalTestPage
     return ModalTestPage
 MODE_ANIMATION_HZ = 0.5  # visual rate for the animated mode-shape plot
@@ -413,6 +422,7 @@ class MainWindow(QtWidgets.QMainWindow):
     coupling_page = property(lambda self: self._page("coupling_page"))
     cms_page = property(lambda self: self._page("cms_page"))
     test_page = property(lambda self: self._page("test_page"))
+    rotor_page = property(lambda self: self._page("rotor_page"))
 
     def _page(self, name: str) -> QtWidgets.QWidget:
         """The page `name` from LAZY_PAGES, built and put in its tab on first use."""
@@ -420,9 +430,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if page is not None:
             return page
         page = self._built[name] = _page_class(name)()
-        page.dof_requested.connect(self.params.dof.setValue)
-        page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
-        page.set_system(self.sim.system, self.modal)
+        if _follows_chain(page):
+            page.dof_requested.connect(self.params.dof.setValue)
+            page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
+            page.set_system(self.sim.system, self.modal)
         # Insert the page before its placeholder, switch to it if the placeholder was
         # showing, then drop the placeholder: only the real page is ever shown.
         holder = self._placeholders.pop(name)
@@ -496,7 +507,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _refresh_modal(self) -> None:
         self.modal = modal_analysis(self.sim.system)
         for page in self._built.values():  # the rest are given the system when built
-            page.set_system(self.sim.system, self.modal)
+            if _follows_chain(page):
+                page.set_system(self.sim.system, self.modal)
         self._refresh_modal_views()
 
     def _on_method_changed(self) -> None:
