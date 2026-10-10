@@ -15,6 +15,37 @@ COUPLING_TIP = (
 )
 
 BACKGROUND_HTML = """
+<h3>Start with one mass</h3>
+<p>Everything on these pages is built from the single-degree-of-freedom (SDOF) oscillator:
+one mass m on a spring k and a damper c, <b>m ẍ + c ẋ + k x = f(t)</b>. Set <i>Number of
+masses</i> to 1 to see it on its own (with the defaults m = 1 kg, k = 400 N/m,
+c = 2 N·s/m, the numbers in brackets below).</p>
+<ul>
+<li><b>Natural frequency</b> ω<sub>n</sub> = √(k/m), f<sub>n</sub> = ω<sub>n</sub>/2π
+(20 rad/s, 3.18 Hz): how fast it vibrates if nothing damps it.</li>
+<li><b>Damping ratio</b> ζ = c / 2√(km) = c / 2mω<sub>n</sub> (0.05): the damping as a
+fraction of the <i>critical</i> damping 2√(km), the least that stops it oscillating.
+ζ &lt; 1 is underdamped, which nearly every structure is (typically 0.5% to 5%).</li>
+<li><b>Free vibration</b> decays as x(t) = X e<sup>−ζω<sub>n</sub>t</sup> cos(ω<sub>d</sub>t
+− θ), at the <b>damped natural frequency</b> ω<sub>d</sub> = ω<sub>n</sub>√(1 − ζ²), barely
+lower than ω<sub>n</sub> for light damping. The envelope falls by e in the <b>time
+constant</b> 1/(ζω<sub>n</sub>) (1 s), and by the <b>logarithmic decrement</b>
+δ = ln(x<sub>k</sub>/x<sub>k+1</sub>) = 2πζ/√(1 − ζ²) ≈ 2πζ per cycle (0.31), which is
+how damping is measured from a decay record.</li>
+<li><b>Forced response.</b> For f = F e<sup>iωt</sup> the steady response is X = H(ω)F with
+the <b>receptance</b> H(ω) = 1/(k − ω²m + iωc). Well below ω<sub>n</sub> the spring
+carries the force (X ≈ F/k, in phase); well above it the mass does (X ≈ −F/ω²m, 180°
+behind); near ω<sub>n</sub> only the damper limits the motion. At ω = ω<sub>n</sub> the
+response lags the force by exactly 90° and |X| = (F/k)/2ζ: the <b>dynamic
+amplification</b> or <b>quality factor</b> Q ≈ 1/2ζ (10). The displacement peak itself is
+slightly lower, at ω<sub>n</sub>√(1 − 2ζ²).</li>
+<li><b>Half-power bandwidth.</b> The peak is about 2ζf<sub>n</sub> wide between the points
+where |X| falls to 1/√2 of its peak (0.32 Hz), so ζ ≈ (f<sub>2</sub> − f<sub>1</sub>)/2f<sub>n</sub>.
+A lightly damped peak is tall and narrow; the measurement pages depend on this.</li>
+</ul>
+<p>The rest of this tab shows that a chain of N masses is N of these oscillators, one per
+mode, as long as the damping is proportional.</p>
+
 <h3>Equations of motion</h3>
 <p>The chain obeys <b>M ẍ + C ẋ + K x = f(t)</b>: M is diagonal (the masses);
 K and C are tridiagonal (each spring and damper links two neighbouring masses, or a mass
@@ -26,7 +57,14 @@ and the ground).</p>
 ω<sub>r</sub> and <b>real</b> mode shapes φ<sub>r</sub>: every mass moves exactly
 in phase or exactly out of phase with the others. They all pass through zero at the same
 instant, like a standing wave.</p>
-<p>Collecting the shapes (mass-normalized) into Φ and writing x = Φq turns the
+<p>The eigenproblem fixes each mode's <i>shape</i>, not its size: any multiple of
+φ<sub>r</sub> is the same mode. A convenient size is the <b>mass-normalized</b> one, scaled
+so that φ<sub>r</sub><sup>T</sup>Mφ<sub>r</sub> = 1 (its entries are then in 1/√kg). The
+modes are also <b>orthogonal</b> through M and K: φ<sub>r</sub><sup>T</sup>Mφ<sub>s</sub> = 0
+and φ<sub>r</sub><sup>T</sup>Kφ<sub>s</sub> = 0 for r ≠ s, which follows from Kφ = ω²Mφ and
+the symmetry of M and K. (The <i>Modal coupling</i> page's Theory tab explains why one entry
+of a mass-normalized mode, squared, is a mass.)</p>
+<p>Collecting the mass-normalized shapes into Φ and writing x = Φq turns the
 equations into <i>modal coordinates</i> q:</p>
 <p>&nbsp;&nbsp;Φ<sup>T</sup>MΦ = I, &nbsp;&nbsp; Φ<sup>T</sup>KΦ =
 diag(ω<sub>r</sub>²), &nbsp;&nbsp; Φ<sup>T</sup>CΦ = C<sub>m</sub></p>
@@ -38,10 +76,18 @@ equation</p>
 <p>&nbsp;&nbsp;q̈<sub>r</sub> + 2ζ<sub>r</sub>ω<sub>r</sub>q̇<sub>r</sub>
 + ω<sub>r</sub>²q<sub>r</sub> = φ<sub>r</sub><sup>T</sup>f, &nbsp;&nbsp; with
 ζ<sub>r</sub> = C<sub>m,rr</sub> / 2ω<sub>r</sub></p>
-<p>This happens for Rayleigh damping C = αM + βK. In this app, the simplest case
-is every damper being the same multiple of its spring (all c<sub>i</sub>/k<sub>i</sub>
-equal), as in the default chain. The damped modes then have the same real shapes as the
-undamped ones, and <b>ζ modal is exact</b>.</p>
+<p>This happens for <b>Rayleigh damping</b> C = αM + βK. Then
+Φ<sup>T</sup>CΦ = αI + β diag(ω<sub>r</sub>²), so</p>
+<p>&nbsp;&nbsp;<b>ζ<sub>r</sub> = α/(2ω<sub>r</sub>) + βω<sub>r</sub>/2</b></p>
+<p>The mass-proportional part damps the low modes most, the stiffness-proportional part the
+high ones. In this app the simplest case is every damper being the same multiple of its
+spring (all c<sub>i</sub>/k<sub>i</sub> = β equal), as in the default chain: C = βK with
+β = 2/400 = 0.005 s, so ζ<sub>r</sub> = βω<sub>r</sub>/2 grows in proportion to frequency.
+That is why the default chain's ζ column climbs from 0.017 for mode 1 to 0.094 for mode 4.
+(Mass-proportional damping cannot be built from this chain: it would need a damper from
+every mass to the ground.) The damped modes then have the same real shapes as the undamped
+ones, and <b>ζ modal is exact</b>. The general condition, Caughey's, is that
+CM<sup>−1</sup>K = KM<sup>−1</sup>C; Rayleigh damping is the most-used case of it.</p>
 
 <h3>Non-proportional damping and "coupling"</h3>
 <p>Otherwise C<sub>m</sub> has off-diagonal terms: damping forces produced by motion in
@@ -178,7 +224,11 @@ the chain only through k<sub>1</sub> and c<sub>1</sub>:</p>
 <p>For a harmonic x<sub>g</sub> the <i>transmissibility</i> X<sub>i</sub>/X<sub>g</sub> is
 receptance column 1 times k<sub>1</sub> + iωc<sub>1</sub>. It is 1 at low frequency (the
 chain moves with the ground), peaks at every mode, and falls away above the highest one:
-isolation. The damper c<sub>1</sub> passes on the ground's velocity, so at high frequency
+isolation. For a single mass on k and c, |X/X<sub>g</sub>| is below 1 only above
+<b>√2 f<sub>n</sub></b>, whatever the damping. Below √2 f<sub>n</sub> more damping lowers the
+resonant peak; above it more damping makes the isolation <i>worse</i>, which is the
+trade-off in choosing an isolator. In the chain each mass has its own crossover, and some
+masses fall below 1 well before the highest mode (in the default chain, m3 above 1.65 Hz). The damper c<sub>1</sub> passes on the ground's velocity, so at high frequency
 x<sub>1</sub> falls only as 1/ω rather than 1/ω². The work the ground does is the tension
 in element 1 times the ground's velocity, with a minus sign: −∫T<sub>1</sub>ẋ<sub>g</sub> dt.
 While the ground moves, the modal coordinates and the energy by mode use the motion
