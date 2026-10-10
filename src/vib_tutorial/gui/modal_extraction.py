@@ -360,9 +360,10 @@ U and L, the <b>residuals</b>, stand in for the modes above and below the fitted
 <li><b>Peak picking</b> treats each peak as a single-DOF resonance: f<sub>n</sub> at the peak,
 ζ = (f<sub>2</sub> − f<sub>1</sub>)/(2f<sub>n</sub>) from the half-power points, the shape from
 the FRF at the peak. It needs well-separated, lightly damped modes and a fine line spacing.</li>
-<li><b>Circle fit</b>: for a single mode the mobility iωH is exactly a circle. How fast the
-points move round it peaks at resonance, and the angles give ω<sub>n</sub> and ζ between the
-lines. Still one mode at a time.</li>
+<li><b>Circle fit</b>: for a single mode the mobility iωH (velocity per unit force) is exactly
+a circle in the complex plane. How fast the
+points move round it peaks at resonance, and the angles give ω<sub>n</sub> and ζ even when
+ω<sub>n</sub> falls between two frequency lines. Still one mode at a time.</li>
 <li><b>LSCF + LSFD</b> fit every mode and every response at once. The model order (number of
 poles) is not known in advance, so the fit is repeated at every order and the poles are
 plotted in a <b>stabilization diagram</b>. Physical modes form vertical columns of stable poles;

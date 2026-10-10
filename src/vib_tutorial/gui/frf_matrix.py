@@ -778,6 +778,22 @@ Pushing at m<sub>k</sub> and measuring at m<sub>j</sub> gives exactly the same F
 other way round (Maxwell–Betti).</li>
 </ul>
 
+<h3>Three forms of the same FRF</h3>
+<p>H here is the <b>receptance</b> (or compliance, dynamic flexibility): displacement per unit
+force, in m/N. The same information is often given per unit force as velocity or acceleration,
+which for harmonic motion only multiplies H by iω or −ω²:</p>
+<table border="1" cellspacing="0" cellpadding="3">
+<tr><th>Form</th><th>Response</th><th>In terms of H</th><th>Units</th><th>Below / above the modes (driving point)</th></tr>
+<tr><td>Receptance</td><td>displacement</td><td>H</td><td>m/N</td><td>flat (static compliance) / falls as 1/ω²</td></tr>
+<tr><td>Mobility</td><td>velocity</td><td>iωH</td><td>m/(N·s)</td><td>rises as ω / falls as 1/ω</td></tr>
+<tr><td>Accelerance (inertance)</td><td>acceleration</td><td>−ω²H</td><td>1/kg</td><td>rises as ω² / flat at 1/m</td></tr>
+</table>
+<p>The poles, mode shapes and damping are the same in all three; only the weighting of low and
+high frequencies changes. Tests usually measure acceleration, so a measured FRF is most often an
+accelerance (see the Virtual modal test page). Plotting Im H against Re H (a <i>Nyquist</i> plot)
+turns each lightly damped resonance into a near-circle; for mobility and viscous damping it is
+exactly a circle, which the circle fit uses. Transfer FRFs (j ≠ k) fall faster above the modes.</p>
+
 <h3>Several forces at once</h3>
 <p>Because the system is linear, the response to several forces is the sum of the responses to
 each: x<sub>j</sub> = Σ<sub>k</sub> H<sub>jk</sub> F<sub>k</sub>, a sum along row j. Tick
@@ -819,6 +835,13 @@ misses. The missing high modes act almost like springs there (their <i>residual 
 Σ φ<sub>jr</sub>φ<sub>kr</sub>/ω<sub>r</sub>²), and leaving them out shifts the antiresonances.
 Compare the <b>real part</b>: the terms add directly, so you can see the offset left by a
 missing mode.</p>
+<p>Leaving out a <i>low</i> mode does the opposite. Well above its frequency a mode's term
+is −φ<sub>jr</sub>φ<sub>kr</sub>/ω², mass-like, so the missing low modes leave a
+<b>residual mass</b> (residual inertia) term that grows towards low frequency as 1/ω². Untick
+mode 1 and the sum is wrong by about that amount above it. A model or test band that starts
+above the lowest modes needs both corrections, H ≈ Σ<sub>kept</sub> + U − L/ω² (the
+<i>residuals</i> fitted on the Virtual modal test page): U for the modes above, L for those
+below.</p>
 <p>At ω = 0 the sum of every mode is the <b>static compliance</b> K<sup>−1</sup> =
 Σ<sub>r</sub> φ<sub>r</sub>φ<sub>r</sub><sup>T</sup>/ω<sub>r</sub>² (damping plays no part
 there, so even the classical sum is exact). Each mode's share of it is

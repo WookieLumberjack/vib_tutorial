@@ -19,6 +19,7 @@ from vib_tutorial.core import (
     frf,
     modal_analysis,
     modal_energies,
+    modal_frf_terms,
     transmissibility,
 )
 from vib_tutorial.core.presets import presets
@@ -157,3 +158,20 @@ def test_background_isolation_above_root_2_fn():
     f = np.linspace(0.01, 20, 20001)
     t3 = np.abs(transmissibility(ChainSystem.uniform(4), f))[:, 2]
     assert f[np.nonzero(t3 > 1)[0][-1]] == pytest.approx(1.65, abs=0.01)  # m3's crossover
+
+
+def test_frf_matrix_three_forms_and_residual_mass():
+    s = ChainSystem.uniform(4)
+    r = modal_analysis(s)
+    hi = np.array([60.0, 120.0])  # far above the modes: driving-point accelerance tends to 1/m
+    w = 2 * np.pi * hi
+    acc = np.abs(-(w**2) * frf(s, hi, 3)[:, 3])
+    assert acc[1] == pytest.approx(1 / s.masses[3], rel=0.01)
+    # Dropping mode 1 leaves a mass-like error -phi phi / w^2 above it.
+    f = np.array([4.0, 5.5])
+    w = 2 * np.pi * f
+    terms = modal_frf_terms(s, r, exact=False)
+    without_1 = sum(t.evaluate(f) for t in terms[1:])[:, 3, 3]
+    error = frf(s, f, 3)[:, 3] - without_1
+    phi = r.modes[0].shape_mass_normalized[3]
+    assert error.real == pytest.approx(-(phi**2) / w**2, rel=0.1)
