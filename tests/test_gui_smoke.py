@@ -1507,3 +1507,35 @@ def test_every_legend_has_the_theme_background(app):
     bare = [legend for legend in legends if legend.opts["brush"].style() == QtCore.Qt.BrushStyle.NoBrush]
     assert not bare
     w.close()
+
+
+def test_modal_test_draws_the_describing_function_for_a_stepped_sine(app):
+    from vib_tutorial.core import Excitation
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.test_page
+    p.seed = 1
+    w.pages.setCurrentWidget(p)
+    legend = p.frf_view.mag.legend
+    labels = lambda: [label.text for _, label in legend.items]  # noqa: E731
+
+    def first_frequency():
+        while p.acq.progress[0] < 1:
+            p._measure_some()
+
+    p.excitation.setCurrentIndex(p.excitation.findData(Excitation.STEPPED_SINE))
+    first_frequency()
+    assert not any(t.startswith("Describing function") for t in labels())  # no friction
+    for row in w.params.rows:
+        row[4].setValue(0.5)
+    first_frequency()
+    assert "Describing function at 10 N" in labels()
+    p.force_level.setValue(30.0)
+    first_frequency()
+    assert "Describing function at 3 N" in labels()
+    p.excitation.setCurrentIndex(p.excitation.findData(Excitation.IMPACT))  # no single amplitude
+    first_frequency()
+    assert not any(t.startswith("Describing function") for t in labels())
+    w.close()

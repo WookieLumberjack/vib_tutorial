@@ -29,6 +29,7 @@ from ..core import (
     Response,
     Window,
     frf,
+    friction_frf,
     from_receptance,
     impact_spectrum,
     modal_analysis,
@@ -118,6 +119,12 @@ FORCE_LEVEL_TIP = (
     "does the noise, which is sized to each channel's range. With <b>friction</b> on a mass "
     "(F<sub>f</sub> on the Simulation page) it does. A lab checks linearity this way: measure at "
     "two force levels and overlay the FRFs (<i>Hold for comparison</i>).</p>"
+    "<p>With friction and a stepped sine, the plot also shows the describing-function FRF at "
+    "this level (dash-dot): the frequency response worked out with each friction force "
+    "replaced by its first harmonic, the same approximation as the dash-dot curves on the "
+    "Simulation page's Frequency response tab. A stepped sine reads that first harmonic, so "
+    "the two should agree while every mass slides; a random or impact test has no single "
+    "amplitude to compare with.</p>"
 )
 HOLD_TIP = (
     "<p>Keep the FRF measured now on the plot, in grey, while you change the force level or the "
@@ -367,7 +374,7 @@ class FrfView(pg.GraphicsLayoutWidget):
         # The exact curves, mode lines and bands change only with the test; while it runs,
         # only the measured curves are updated.
         key = (id(system), id(result), settings.fs, settings.input_dof, settings.response, j, stepped,
-               processing.window, processing.exp_end, processing.estimator)
+               processing.window, processing.exp_end, processing.estimator, settings.force_level)
         if key != self._key:
             self._key = key
             self._draw_reference(j, system, result, settings, processing, stepped)
@@ -411,6 +418,19 @@ class FrfView(pg.GraphicsLayoutWidget):
             pen = pg.mkPen(colors.grey, width=1, style=dash)
             self.mag.plot(f, np.abs(damped), pen=pen, name="Exact + window damping")
             self.phase.plot(f, phase_deg(damped), pen=pen)
+        if stepped and np.any(system.friction > 0):
+            # A stepped sine reads the first harmonic at each frequency, which is what the
+            # describing function approximates. A mass held by friction leaves a gap.
+            amplitude = settings.force_level * SINE_AMPLITUDE
+            fd = np.unique(np.concatenate([np.linspace(nyq / 600, nyq, 600), peaks]))
+            rf = friction_frf(system, fd, settings.input_dof, amplitude)
+            h = rf.X[:, j] / amplitude
+            h[rf.stuck[:, j]] = np.nan
+            described = from_receptance(fd, h, response)
+            pen = pg.mkPen(colors.strong, width=1.5, style=QtCore.Qt.PenStyle.DashDotLine)
+            self.mag.plot(fd, np.abs(described), pen=pen, connect="finite",
+                          name=f"Describing function at {amplitude:.3g} N")
+            self.phase.plot(fd, phase_deg(described), pen=pen, connect="finite")
 
         held_pen = pg.mkPen(colors.grey, width=1.5)
         self.held_curves = [self.mag.plot(pen=held_pen), self.phase.plot(pen=held_pen)]

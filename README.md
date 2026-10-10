@@ -67,8 +67,12 @@ legible on its background. The choice is remembered.
   static friction. *Static / sliding friction* (one ratio for the whole floor) sets
   F<sub>s</sub> above F<sub>f</sub>: a stuck mass then holds until its springs pull harder
   than F<sub>s</sub>, and lurches off against the smaller F<sub>f</sub>, which gives
-  stick-slip under a slow pull. Only the simulation includes friction; the modes and
-  frequency responses use the linear chain.
+  stick-slip under a slow pull. The simulation includes friction exactly. The modes and
+  frequency responses use the linear chain, with two approximations of friction beside them:
+  the modal table's *ζ friction* column (each mode's equivalent viscous damping at the
+  release amplitude, c<sub>eq</sub> = 4F<sub>f</sub>/πωX, so it falls as the amplitude
+  grows), and on the *Frequency response* tab a dash-dot describing-function response at the
+  excitation's amplitude, where a mass that friction holds still leaves a gap.
 - **Apply a force to any mass**: a step, a harmonic `F sin(2πft)`, a rectangular pulse, or a
   chirp (a frequency sweep). Press **Space** (or the button) to switch it on and off, and
   watch the transients as it starts and stops.
@@ -447,7 +451,11 @@ Each step of the measurement, and each error it can bring in, can be switched on
   then nonlinear, so the measured FRF depends on the force level and the excitation: a light
   force gives low, heavily damped peaks, a strong one approaches the frictionless FRF, and the
   coherence drops even without noise. *Hold for comparison* keeps one FRF on the plot while you
-  measure at another level, the overlay a lab uses to check linearity.
+  measure at another level, the overlay a lab uses to check linearity. A stepped sine reads
+  the first harmonic at each frequency, so with friction it is drawn against the
+  describing-function FRF at its force level. With 0.5 N on each mass of the default chain,
+  the measured |H| is within 0.7% of it (median) at 10 N and 1.6% at 3 N, where the
+  frictionless FRF is 5% and 18% off.
 - **Setup check**: each mode's half-power bandwidth against Δf, how much of a hit is left
   at the end of the block, the hammer's level at each mode, and aliasing.
 - **Theory**: sampling and aliasing, the DFT and leakage, windows, averaging, H1 against H2,
@@ -580,6 +588,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/modal.py`: classical modes (`scipy.linalg.eigh`), all 2N state-space eigenpairs
   (`scipy.linalg.eig`), the MAC pairing, the modal-coordinate map, and the frequency response.
 - `core/frf_matrix.py`: the full receptance matrix and its modal (pole–residue) terms.
+- `core/describing.py`: the describing-function (harmonic balance) response with Coulomb
+  friction: each friction force's first harmonic, solved per frequency for the sliding and
+  stuck masses.
 - `core/simulator.py`: the exact first-order-hold time stepper (piecewise, with stick-slip friction) and its exact energy ledger.
 - `core/presets.py`: the preset chains, vibration absorbers and Den Hartog's tuning.
 - `core/energy.py`: kinetic, potential and stored energy, and the energy in each mode.
