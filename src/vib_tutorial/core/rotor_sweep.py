@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .rotor import RPM, RotorSamples, RotorSimulator, RotorSystem, unbalance_response, whirl_modes
+from .rotor import RPM, RotorSamples, RotorSimulator, RotorSystem, synchronous_response, whirl_modes
 
 STATIONS = ("Bearing A", "Disc", "Midspan", "Bearing B")
 DIRECTIONS = ("x", "y", "orbit")  # probe directions; "orbit" is the major axis
@@ -45,7 +45,7 @@ def station_motion(system: RotorSystem, q: np.ndarray) -> np.ndarray:
 
 def steady_vectors(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
     """Steady-state 1X vectors at each station, (len(omegas), 4, 2) complex: (x, y) = Re(V e^{iφ})."""
-    return station_motion(system, unbalance_response(system, omegas))
+    return station_motion(system, synchronous_response(system, omegas))
 
 
 def probe(vectors: np.ndarray, direction: str) -> np.ndarray:

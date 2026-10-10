@@ -115,6 +115,23 @@ KXY_TIP = (
     "damping, the rotor is unstable.</p><p>Here k<sub>xy</sub> is constant; in a real bearing it "
     "grows with speed, so read it as the value at the speed you look at. Try 15,000 N/m on both.</p>"
 )
+BOW_TIP = (
+    "<p>A shaft bent for good (by a thermal bow, a sag left after standing, or a bent repair), by δ at "
+    "the disc, toward an angle measured from the heavy spot in the direction of spin. It turns with the "
+    "shaft, so it drives the rotor once per revolution like an unbalance, but with a force k δ that does "
+    "not grow with speed.</p><p>Turning slowly, the probes read the bow itself (the <i>slow-roll "
+    "runout</i>), and the polar plot starts from it rather than from the origin. Well above the critical "
+    "speed the disc stays on the bearings' axis and the shaft bends round it. Put the bow at 180° to the "
+    "heavy spot and the two cancel at one speed.</p>"
+)
+SKEW_TIP = (
+    "<p>The disc mounted out of square: its own axis tilted by τ from the shaft's, toward an angle "
+    "measured from the heavy spot in the direction of spin. Spinning, the tilted disc's inertia makes a "
+    "moment (I<sub>d</sub> − I<sub>p</sub>) τ Ω² that turns with the shaft: a <i>couple unbalance</i>. "
+    "It drives the disc's tilt directly, and pushes a thin disc (I<sub>p</sub> &gt; I<sub>d</sub>) toward "
+    "square to the spin axis, bending the shaft at the disc by −τ at high speed.</p><p>At midspan on "
+    "identical bearings it only tilts the disc; move the disc off centre and it moves it too.</p>"
+)
 ORBIT_TIP = (
     "<p>The path of the shaft's centre at each station over the last few revolutions, looking from "
     "the B end toward A: x to the right, y up, and the shaft spinning counterclockwise (x toward y). "
@@ -247,6 +264,10 @@ class RotorView(pg.PlotWidget):
     def update_state(self, q: np.ndarray, phase: float, trails: list[np.ndarray], peak: float) -> None:
         """Draw displacements q (8,), the heavy spot at angle `phase`, and each station's recent (x, y)."""
         s = self.system
+        # The disc's own axis: the shaft's slope there plus the skew. Its rim's wobble counts as motion.
+        axis = np.array([q[2], q[6]]) + s.skew * np.array([math.cos(phase + s.skew_angle),
+                                                           math.sin(phase + s.skew_angle)])
+        peak = max(peak, float(np.hypot(*axis)) * self.disc_radius * s.length / AXIAL)
         target = SWING / max(peak, MIN_PEAK)
         # Shrink at once (keep the motion on screen), grow slowly (no flicker as it settles).
         self.gain = target if target < self.gain else self.gain + 0.08 * (target - self.gain)
@@ -273,9 +294,9 @@ class RotorView(pg.PlotWidget):
             else:
                 curve.setData([], [])
 
-        # Disc: a circle square to the shaft's (magnified) slope at the disc.
+        # Disc: a circle square to its own (magnified) axis.
         scale = g * s.length / AXIAL  # display slope per radian of real slope
-        n = np.array([q[2] * scale, q[6] * scale, 1.0])
+        n = np.array([axis[0] * scale, axis[1] * scale, 1.0])
         n /= np.linalg.norm(n)
         u = np.cross([0.0, 1.0, 0.0], n)
         u /= np.linalg.norm(u)
@@ -712,7 +733,8 @@ class RotorPage(QtWidgets.QWidget):
         self.polar_note = QtWidgets.QLabel(
             "The 1X vector at the chosen station: its length is the amplitude, its angle clockwise from "
             "the right the phase lag. Through a lightly damped critical speed the steady-state vector "
-            "traces a circle, lagging 90° at its lowest point. The labels give the speed in rpm."
+            "traces a circle, lagging 90° at its lowest point. With a bowed shaft the curve starts from the "
+            "bow (the slow-roll runout), not from the origin. The labels give the speed in rpm."
         )
         self.polar_note.setWordWrap(True)
         mute(self.polar_note)
@@ -921,6 +943,22 @@ class RotorPage(QtWidgets.QWidget):
         form.addRow("Polar inertia Ip:", self.ip)
         form.addRow("Diametral inertia Id:", self.id)
         form.addRow("Unbalance m·e:", self.unbalance)
+        self.bow = spin(0.0, 5000.0, s.bow * 1e6, 1, " µm")
+        self.bow_angle = spin(-180.0, 180.0, math.degrees(s.bow_angle), 0, "°")
+        self.skew = spin(0.0, 10.0, math.degrees(s.skew), 3, "°")
+        self.skew_angle = spin(-180.0, 180.0, math.degrees(s.skew_angle), 0, "°")
+        for size, angle, tip, label in ((self.bow, self.bow_angle, BOW_TIP, "Shaft bow δ<sub>b</sub>:"),
+                                        (self.skew, self.skew_angle, SKEW_TIP, "Disc skew τ:")):
+            angle.setWrapping(True)
+            angle.setStepType(QtWidgets.QAbstractSpinBox.StepType.DefaultStepType)
+            angle.setSingleStep(15.0)
+            row = QtWidgets.QHBoxLayout()
+            row.addWidget(size, 3)
+            row.addWidget(QtWidgets.QLabel("at"))
+            row.addWidget(angle, 2)
+            for w in (size, angle):
+                w.setToolTip(tip)
+            form.addRow(label, row)
         self.internal_damping = spin(0.0, 1e5, s.internal_damping, 1, " N·s/m")
         self.internal_damping.setToolTip(INTERNAL_TIP)
         form.addRow("Internal damping c<sub>i</sub>:", self.internal_damping)
@@ -929,7 +967,8 @@ class RotorPage(QtWidgets.QWidget):
         mute(self.shaft_note)
         form.addRow(self.shaft_note)
         for box_ in (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip,
-                     self.id, self.unbalance, self.internal_damping):
+                     self.id, self.unbalance, self.bow, self.bow_angle, self.skew, self.skew_angle,
+                     self.internal_damping):
             box_.valueChanged.connect(self._on_params)
         return box
 
@@ -1004,13 +1043,18 @@ class RotorPage(QtWidgets.QWidget):
             bearing_a=bearings[0],
             bearing_b=bearings[1],
             unbalance=self.unbalance.value() / 1e6,
+            bow=self.bow.value() / 1e6,
+            bow_angle=math.radians(self.bow_angle.value()),
+            skew=math.radians(self.skew.value()),
+            skew_angle=math.radians(self.skew_angle.value()),
             internal_damping=self.internal_damping.value(),
         )
 
     def set_system(self, system: RotorSystem) -> None:
         """Show and use `system` (for scripts and tests)."""
         boxes = (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip, self.id,
-                 self.unbalance, self.internal_damping, self.isotropic, self.same_bearings, *(w for row in self.bearing_rows for w in row))
+                 self.unbalance, self.bow, self.bow_angle, self.skew, self.skew_angle, self.internal_damping,
+                 self.isotropic, self.same_bearings, *(w for row in self.bearing_rows for w in row))
         for w in boxes:
             w.blockSignals(True)
         self.length.setValue(system.length)
@@ -1021,6 +1065,10 @@ class RotorPage(QtWidgets.QWidget):
         self.ip.setValue(system.ip)
         self.id.setValue(system.id)
         self.unbalance.setValue(system.unbalance * 1e6)
+        self.bow.setValue(system.bow * 1e6)
+        self.bow_angle.setValue(math.degrees(system.bow_angle))
+        self.skew.setValue(math.degrees(system.skew))
+        self.skew_angle.setValue(math.degrees(system.skew_angle))
         self.internal_damping.setValue(system.internal_damping)
         A, B = system.bearing_a, system.bearing_b
         self.isotropic.setChecked(all(b.kx == b.ky and b.cx == b.cy for b in (A, B)))

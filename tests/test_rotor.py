@@ -9,13 +9,15 @@ from vib_tutorial.core.rotor import (
     RPM,
     TX,
     TY,
+    XA,
+    XB,
     XD,
     YD,
     Bearing,
     RotorSimulator,
     RotorSystem,
     campbell,
-    unbalance_response,
+    synchronous_response,
     whirl_modes,
 )
 
@@ -116,7 +118,7 @@ def test_anisotropic_supports_give_backward_whirl_between_the_split_criticals():
     assert m.freq_hz[1] > 1.1 * m.freq_hz[0]
     w1, w2 = 2 * math.pi * m.freq_hz[0], 2 * math.pi * m.freq_hz[1]
     between = 0.5 * (w1 + w2)
-    Q = unbalance_response(s, [0.5 * w1, between, 2 * w2])
+    Q = synchronous_response(s, [0.5 * w1, between, 2 * w2])
     X, Y = Q[:, XD], Q[:, YD]
     direction = np.imag(X * np.conj(Y))  # > 0: forward (x toward y)
     assert direction[0] > 0 and direction[1] < 0 and direction[2] > 0
@@ -127,12 +129,12 @@ def test_anisotropic_supports_give_backward_whirl_between_the_split_criticals():
     assert all(abs(r) < 0.1 for w, r, _ in c.criticals if w < 1.2 * w2)
 
 
-def test_simulation_matches_the_steady_unbalance_response():
+def test_simulation_matches_the_steady_synchronous_response():
     s = RotorSystem(position=0.35)
     sim = RotorSimulator(s)
     sim.omega = sim.target = 150.0
     pieces = run(sim, 4.0)
-    Q = unbalance_response(s, [sim.omega])[0]
+    Q = synchronous_response(s, [sim.omega])[0]
     last = pieces[-1]
     expected = np.real(Q[None, :] * np.exp(1j * last.phase[:, None]))
     np.testing.assert_allclose(last.q, expected, atol=1e-5 * np.abs(Q).max())
@@ -175,7 +177,7 @@ def test_speed_ramps_to_the_target_and_the_phase_follows():
 def test_passing_the_critical_peaks_and_the_phase_lags_by_180():
     s = RotorSystem()
     wc = s.jeffcott_speed()
-    Q = unbalance_response(s, [0.3 * wc, wc, 3.0 * wc])
+    Q = synchronous_response(s, [0.3 * wc, wc, 3.0 * wc])
     amp = np.abs(Q[:, XD])
     assert amp[1] > 5 * amp[0] and amp[1] > 5 * amp[2]
     # Far above the critical the disc spins about its centre of mass: |x| -> e.
@@ -183,3 +185,71 @@ def test_passing_the_critical_peaks_and_the_phase_lags_by_180():
     assert amp[2] == pytest.approx(e, rel=0.2)
     lag = -np.degrees(np.angle(Q[:, XD]))  # the heavy spot leads the high spot by this
     assert lag[0] < 20 and 60 < lag[1] < 120 and lag[2] > 150
+
+
+def test_the_bow_loads_only_the_shaft_and_shows_as_slow_roll():
+    s = RotorSystem(position=0.35, unbalance=0.0, bow=50e-6, bow_angle=math.radians(60.0))
+    f = s.shaft_stiffness() @ s.bow_shape()
+    assert f[0] + f[1] + f[3] == pytest.approx(0.0, abs=1e-9 * abs(f[1]))  # no net force
+    assert s.a * f[1] + s.length * f[3] == pytest.approx(0.0, abs=1e-9 * abs(f[1]))  # nor moment
+    assert f[2] == pytest.approx(0.0, abs=1e-9 * abs(f[1]))  # a load at the disc, no moment
+    # Turning slowly, the shaft just carries its bow round: the slow-roll runout.
+    Q = synchronous_response(s, [0.1, 1e4])
+    bow = s.bow * np.exp(1j * s.bow_angle)
+    assert Q[0, XD] == pytest.approx(bow, rel=1e-4)
+    assert abs(Q[0, XA]) < 1e-4 * s.bow and abs(Q[0, XB]) < 1e-4 * s.bow
+    # Far above the critical the disc stays on the bearings' axis and the shaft bends round it.
+    assert abs(Q[1, XD]) < 0.01 * s.bow
+
+
+def test_a_bow_against_the_unbalance_cancels_it_at_one_speed():
+    # Rigid bearings, disc at midspan: (k - mΩ²) X = UΩ² + k δ e^{iβ}, zero where UΩ² = k δ for β = 180°.
+    s = RotorSystem(bearing_a=RIGID, bearing_b=RIGID, bow=10e-6, bow_angle=math.pi)
+    k = s.disc_stiffness
+    w0 = math.sqrt(k * s.bow / s.unbalance)
+    Q = synchronous_response(s, [0.5 * w0, w0, 1.5 * w0])
+    amp = np.abs(Q[:, XD])
+    assert amp[1] < 1e-3 * min(amp[0], amp[2])
+    # In phase they add: the slow-roll and the unbalance response at that speed.
+    same = synchronous_response(s.with_(bow_angle=0.0), [w0])[0, XD]
+    assert abs(same) == pytest.approx(2 * s.bow / (1 - w0**2 * s.disc_mass / k), rel=1e-3)
+
+
+def test_a_skewed_disc_spins_flat_at_high_speed():
+    gamma = math.radians(30.0)
+    s = RotorSystem(unbalance=0.0, skew=1e-3, skew_angle=gamma)
+    Q = synchronous_response(s, [1.0, 2e4])
+    # At rest nothing pushes it; fast, the disc's own axis lines up with the spin: θ -> -τ.
+    assert abs(Q[0, TX]) < 1e-6 * s.skew
+    assert Q[1, TX] == pytest.approx(-s.skew * np.exp(1j * gamma), rel=1e-2)
+    # At midspan on identical bearings the tilt does not move the disc; off centre it does.
+    assert abs(Q[1, XD]) < 1e-9
+    off = synchronous_response(s.with_(position=0.3), [1584.0 / RPM])[0]
+    assert abs(off[XD]) > 1e-6
+    # A disc with Ip = Id has no couple unbalance from its skew.
+    assert np.abs(synchronous_response(s.with_(ip=s.id), [300.0])).max() == 0.0
+
+
+def test_simulation_matches_the_steady_response_with_bow_and_skew():
+    s = RotorSystem(position=0.35, bow=30e-6, bow_angle=1.0, skew=2e-3, skew_angle=-2.0)
+    sim = RotorSimulator(s)
+    sim.omega = sim.target = 150.0
+    pieces = run(sim, 4.0)
+    Q = synchronous_response(s, [sim.omega])[0]
+    last = pieces[-1]
+    expected = np.real(Q[None, :] * np.exp(1j * last.phase[:, None]))
+    np.testing.assert_allclose(last.q, expected, atol=1e-5 * np.abs(Q).max())
+
+
+def test_a_bowed_shaft_starts_at_rest_in_its_bent_shape():
+    sim = RotorSimulator(RotorSystem(bow=40e-6, bow_angle=0.5))
+    rest = sim.system.bow_displacement(0.0)
+    assert rest[XD] == pytest.approx(40e-6 * math.cos(0.5)) and rest[XA] == rest[XB] == 0.0
+    np.testing.assert_array_equal(sim.q, rest)
+    assert sim.energy() == (0.0, pytest.approx(0.0, abs=1e-15))  # strain is measured from the bow
+    run(sim, 0.2)  # not spinning, nothing loads it: it stays put
+    np.testing.assert_allclose(sim.q, rest, atol=1e-12)
+    sim.target = 300.0
+    run(sim, 0.5)
+    sim.reset()
+    np.testing.assert_array_equal(sim.q, rest)
