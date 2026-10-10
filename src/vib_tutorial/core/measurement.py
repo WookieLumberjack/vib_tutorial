@@ -13,7 +13,8 @@ Signal chain
    samples per acquired sample), and the chain's response is found with the
    same exact first-order-hold discretization as the simulator. The discrete
    system is diagonalized, so each mode is a first-order recursive filter and
-   long records are fast.
+   long records are fast. With friction on any mass the chain is nonlinear and
+   is stepped by the simulator instead (stick-slip included), which is slower.
 2. Anti-alias filter (optional): an elliptic low-pass with its passband edge
    at AA_CUTOFF x fs/2, on every channel. The same filter on force and
    response cancels in their ratio.
@@ -34,21 +35,30 @@ blocks, G_ff = <|F|^2>, G_xx = <|X|^2> and G_xf = <X F*> give
     coherence = |G_xf|^2 / (G_ff G_xx)
 
 A stepped sine instead fits a sine to force and response at each frequency.
+
+Force level
+-----------
+The force is scaled by ``force_level``. A linear chain's FRF does not depend on
+it (the noise is sized to each channel, so it scales too). With friction it
+does, which is how a lab checks linearity: measure at two levels and overlay.
 """
 
 from __future__ import annotations
 
 import enum
 import math
+import time
 from dataclasses import dataclass
 
 import numpy as np
 
 from .frf_matrix import MAX_EIGVEC_CONDITION
 from .modal import TWO_PI, ModalResult, modal_analysis
+from .forcing import ForceController, ForceSettings
 from .model import ChainSystem, state_space
-from .simulator import foh_discretize
+from .simulator import Simulator, foh_discretize
 
+# At force level 1:
 FORCE_RMS = 10.0  # N, random and chirp excitation
 IMPACT_PEAK = 100.0  # N
 SINE_AMPLITUDE = 10.0  # N
@@ -64,6 +74,7 @@ SINE_CYCLES = 8  # measured per stepped-sine frequency
 MIN_SINE_SAMPLES = 64
 FIT_POINTS_PER_CYCLE = 32  # drawing the fitted stepped sine
 CHUNK = 1 << 16  # analog samples simulated at a time
+FRICTION_PIECE = 2048  # analog samples between pauses (Acquisition.work) when friction makes them slow
 
 
 class Excitation(enum.Enum):
@@ -136,6 +147,7 @@ class MeasurementSettings:
     tip_width: float = 0.05  # s, duration of the hammer's half-sine pulse
     burst: float = 0.5  # burst random: fraction of the block the shaker is on
     sine_points: int = 100  # stepped sine
+    force_level: float = 1.0  # multiplies FORCE_RMS, IMPACT_PEAK and SINE_AMPLITUDE
     seed: int | None = None
 
     @property
@@ -272,6 +284,7 @@ class ChainResponse:
     filter per eigenvalue, eta_r[k] = mu_r eta_r[k-1] + b0_r f[k-1] + b1_r f[k],
     which scipy runs in C. A defective eigenvalue (a free chain's rigid-body
     lambda = 0) has no diagonal form, so that case steps the state directly.
+    With friction the simulator steps it (Simulator.drive), stick-slip and all.
     """
 
     def __init__(
@@ -287,9 +300,14 @@ class ChainResponse:
         self.state = np.zeros(2 * system.n)
         self.f_prev = 0.0
         self._Phi, self._g0, self._g1 = Phi, G0[:, input_dof].copy(), G1[:, input_dof].copy()
+        self.h = h
+        self.displacement = response is Response.DISPLACEMENT
+        self._sim = None
+        if np.any(system.friction > 0):
+            self._sim = Simulator(system, ForceController(ForceSettings(target=input_dof)))
         mu, V = np.linalg.eig(Phi)
         self._modal = None
-        if np.linalg.cond(V) < MAX_EIGVEC_CONDITION:
+        if self._sim is None and np.linalg.cond(V) < MAX_EIGVEC_CONDITION:
             Vinv = np.linalg.inv(V)
             self._modal = (mu, V, Vinv, Vinv @ self._g0, Vinv @ self._g1)
 
@@ -309,6 +327,10 @@ class ChainResponse:
     def _run(self, f: np.ndarray) -> np.ndarray:
         import scipy.signal
 
+        if self._sim is not None:
+            z, a = self._sim.drive(f, self.h)
+            self.state, self.f_prev = z[-1].copy(), float(f[-1])
+            return z[:, : self.n] if self.displacement else a
         if self._modal is not None:
             mu, V, Vinv, b0, b1 = self._modal
             eta0 = Vinv @ self.state
@@ -346,6 +368,10 @@ class Acquisition:
 
     The records are kept noise-free; each chunk of samples has its own seeded
     unit noise, so processing can add any noise level to the same data.
+
+    ``step`` measures the next record at once. ``work`` measures for a given
+    time and can stop part-way through a record, so a slow (friction) chain
+    does not hold up the GUI; the record carries on with the next call.
     """
 
     def __init__(self, system: ChainSystem, settings: MeasurementSettings, result: ModalResult | None = None) -> None:
@@ -376,6 +402,8 @@ class Acquisition:
         self.last_sine: tuple[np.ndarray, ...] | None = None  # (t, f, x, unit noise f, x) of the last point
         self._settled = False
         self._chirp = self._chirp_period() if s.excitation is Excitation.CHIRP else None
+        self._piece = FRICTION_PIECE if np.any(system.friction > 0) else CHUNK
+        self._pending = None  # the record being measured (a generator), if work stopped part-way
 
     # ---------------------------------------------------------- properties
     @property
@@ -416,54 +444,69 @@ class Acquisition:
     # --------------------------------------------------------------- steps
     def step(self) -> None:
         """Measure the next block (or stepped-sine frequency)."""
-        if self.done:
-            return
+        self.work(math.inf)
+
+    def work(self, budget: float) -> bool:
+        """Measure for about `budget` seconds; True once the record in progress is complete."""
+        if self._pending is None:
+            if self.done:
+                return True
+            self._pending = self._step()
+        end = time.perf_counter() + budget
+        for _ in self._pending:
+            if time.perf_counter() >= end:
+                return False
+        self._pending = None
+        return True
+
+    def _step(self):
+        """Measure the next record, pausing (yield) between pieces of analog signal."""
         s = self.settings
         nb, R = s.block, self.oversample
         kind = s.excitation
         if kind is Excitation.STEPPED_SINE:
-            self._sine_point(self.sine_frequencies()[len(self.points)])
+            yield from self._sine_point(self.sine_frequencies()[len(self.points)])
             return
         if kind is Excitation.IMPACT:
             if self._chunks:  # wait for the last hit to die away before hitting again
-                self._settle_with(np.zeros)
+                yield from self._settle_with(np.zeros)
             f = np.zeros(nb * R)
             k = np.arange(math.ceil(s.tip_width * self.fs_sim) + 1)
-            pulse = IMPACT_PEAK * np.sin(np.pi * k / (s.tip_width * self.fs_sim))
+            pulse = s.force_level * IMPACT_PEAK * np.sin(np.pi * k / (s.tip_width * self.fs_sim))
             start = PRETRIGGER * R
             f[start : start + k.size] = np.clip(pulse, 0.0, None)[: max(0, f.size - start)]
-            self._record(f)
+            yield from self._record(f)
         elif kind is Excitation.BURST_RANDOM:
             f = self._shaker_noise(nb * R)
             f[round(s.burst * nb) * R :] = 0.0
-            self._record(f)
+            yield from self._record(f)
         elif kind is Excitation.RANDOM:
             if not self._settled:
-                self._settle_with(self._shaker_noise)
-            self._record(self._shaker_noise((nb if not self._chunks else self.hop) * R))
+                yield from self._settle_with(self._shaker_noise)
+            yield from self._record(self._shaker_noise((nb if not self._chunks else self.hop) * R))
         else:  # periodic random, chirp: steady state of a signal repeated every block
             period = self._chirp if kind is Excitation.CHIRP else self._random_period()
             if kind is Excitation.PERIODIC_RANDOM or not self._settled:
                 repeats = max(1, math.ceil(self.settle / s.duration))
-                self._run_analog(np.tile(period, repeats), keep=False)
+                yield from self._run_analog(np.tile(period, repeats), keep=False)
                 self._settled = True
-            self._record(period)
+            yield from self._record(period)
 
-    def _settle_with(self, source) -> None:
+    def _settle_with(self, source):
         """Run the chain for the settling time on force samples source(m), recording nothing."""
         remaining = round(self.settle * self.fs_sim)
         while remaining > 0:
             m = min(remaining, CHUNK)
-            self._run_analog(source(m), keep=False)
+            yield from self._run_analog(source(m), keep=False)
             remaining -= m
         self._settled = True
 
     def _shaker_noise(self, m: int) -> np.ndarray:
-        """Band-limited Gaussian noise with RMS FORCE_RMS, continuous across calls."""
+        """Band-limited Gaussian noise with RMS force_level x FORCE_RMS, continuous across calls."""
         import scipy.signal
 
         s = self.settings
-        white = self.rng.standard_normal(m) * FORCE_RMS * math.sqrt(self.fs_sim / (2.0 * s.band))
+        white = self.rng.standard_normal(m) * s.force_level * FORCE_RMS * math.sqrt(self.fs_sim / (2.0 * s.band))
         out, self._shaker_zi = scipy.signal.sosfilt(self._shaker, white, zi=self._shaker_zi)
         return out
 
@@ -475,45 +518,53 @@ class Acquisition:
         top = int(s.band * s.duration)
         spectrum[1 : top + 1] = np.exp(1j * self.rng.uniform(0.0, TWO_PI, top))
         p = np.fft.irfft(spectrum, m)
-        return p * FORCE_RMS / np.sqrt(np.mean(p**2))
+        return p * s.force_level * FORCE_RMS / np.sqrt(np.mean(p**2))
 
     def _chirp_period(self) -> np.ndarray:
         """Linear sweep from 0 to the band edge over one block, repeated."""
         s = self.settings
         t = np.arange(1, s.block * self.oversample + 1) / self.fs_sim
-        return math.sqrt(2.0) * FORCE_RMS * np.sin(np.pi * s.band * t**2 / s.duration)
+        return math.sqrt(2.0) * s.force_level * FORCE_RMS * np.sin(np.pi * s.band * t**2 / s.duration)
 
-    def _run_analog(self, f: np.ndarray, keep: bool = True) -> tuple[np.ndarray, np.ndarray] | None:
-        """Drive the chain with analog force samples; return them sampled at fs (f, x) if `keep`."""
+    def _run_analog(self, f: np.ndarray, keep: bool = True):
+        """Drive the chain with analog force samples; return them sampled at fs (f, x) if `keep`.
+
+        A generator (use ``yield from``): it pauses after each piece of the signal.
+        """
         import scipy.signal
 
-        x = self._chain.run(f)
-        self.t_analog += f.size / self.fs_sim
-        data = np.column_stack([f, x])
-        if self._aa is not None:
-            data, self._aa_zi = scipy.signal.sosfilt(self._aa, data, axis=0, zi=self._aa_zi)
+        kept = []
+        for start in range(0, f.size, self._piece):
+            seg = f[start : start + self._piece]
+            data = np.column_stack([seg, self._chain.run(seg)])
+            self.t_analog += seg.size / self.fs_sim
+            if self._aa is not None:
+                data, self._aa_zi = scipy.signal.sosfilt(self._aa, data, axis=0, zi=self._aa_zi)
+            if keep:
+                kept.append(data)
+            yield
         if not keep:
             return None
         R = self.oversample
-        sampled = data[R - 1 :: R]
+        sampled = np.concatenate(kept)[R - 1 :: R]
         return sampled[:, 0].copy(), sampled[:, 1:].copy()
 
-    def _record(self, f_analog: np.ndarray) -> None:
-        f, x = self._run_analog(f_analog)
+    def _record(self, f_analog: np.ndarray):
+        f, x = yield from self._run_analog(f_analog)
         self._starts.append(self.samples)
         self._chunks.append((f, x))
         self.samples += f.size
 
-    def _sine_point(self, freq: float) -> None:
+    def _sine_point(self, freq: float):
         s = self.settings
         w = TWO_PI * freq
         settle = max(self.settle, 5.0 / freq)
         n_meas = max(MIN_SINE_SAMPLES, math.ceil(SINE_CYCLES * s.fs / freq))
         m_settle = round(settle * self.fs_sim)
         t = np.arange(1, m_settle + n_meas * self.oversample + 1) / self.fs_sim
-        f_analog = SINE_AMPLITUDE * np.sin(w * t)
-        self._run_analog(f_analog[:m_settle], keep=False)
-        f, x = self._run_analog(f_analog[m_settle:])
+        f_analog = s.force_level * SINE_AMPLITUDE * np.sin(w * t)
+        yield from self._run_analog(f_analog[:m_settle], keep=False)
+        f, x = yield from self._run_analog(f_analog[m_settle:])
         tm = np.arange(n_meas) / s.fs
         rng = np.random.default_rng([self.noise_seed, len(self.points)])
         nf = rng.standard_normal(n_meas)

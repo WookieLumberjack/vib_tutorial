@@ -240,3 +240,75 @@ def test_impact_spectrum_of_a_half_sine():
     freqs = np.fft.rfftfreq(1 << 16, 1 / fs)
     keep = freqs < 1.2 / width
     np.testing.assert_allclose(F[keep] / F[0], impact_spectrum(width, freqs[keep]), atol=2e-3)
+
+
+# ------------------------------------------------------------------ friction
+FRICTION = ChainSystem.uniform(4, friction=0.5)
+
+
+def test_drive_follows_the_simulator_and_skips_rest():
+    from vib_tutorial.core import ForceController, ForceKind, ForceSettings, Simulator
+
+    # A pulse at m4, then nothing: the chain slides, sticks and stays stuck. drive()
+    # on the recorded force matches advance() (which keeps the ledger), and skips the rest.
+    force = ForceController(ForceSettings(target=3, kind=ForceKind.PULSE, amplitude=20.0, pulse_duration=0.2))
+    sim = Simulator(FRICTION, force)
+    force.switch_on()
+    _, xs, vs, fs = sim.advance(8.0)
+    driven = Simulator(FRICTION, ForceController(ForceSettings(target=3)))
+    z, a = driven.drive(fs, sim.step_size())
+    np.testing.assert_allclose(z, np.hstack([xs, vs]), rtol=0, atol=1e-12)
+    assert np.all(vs[-100:] == 0.0)  # at rest at the end
+    # Accelerations: the equation of motion with friction, zero while stuck.
+    _, C, K = FRICTION.matrices()  # unit masses
+    pull = -xs @ K - vs @ C
+    pull[:, 3] += fs
+    stuck = (vs == 0) & (np.abs(pull) <= 0.5)
+    way = np.where(vs != 0, np.sign(vs), np.sign(pull))
+    np.testing.assert_allclose(a, np.where(stuck, 0.0, pull - 0.5 * way), rtol=0, atol=1e-9)
+    assert stuck.any() and (~stuck).any()
+
+
+def test_force_level_leaves_a_linear_frf_alone():
+    settings = dict(excitation=Excitation.IMPACT, input_dof=3, averages=2)
+    a, b = (measure(SYSTEM, force_level=level, **settings) for level in (1.0, 10.0))
+    processing = Processing(window=Window.FORCE_EXPONENTIAL)
+    ha, hb = (FrfEstimator(acq, processing).estimate().H for acq in (a, b))
+    np.testing.assert_allclose(hb, ha, rtol=1e-9, atol=0)
+    assert np.abs(b.block(0)[0]).max() == pytest.approx(10 * np.abs(a.block(0)[0]).max())
+
+
+def test_friction_frf_depends_on_the_force_level():
+    # Stepped sine at m4 on a chain with 0.5 N of friction on every mass: the first
+    # peak is flattened by a light force and close to the frictionless one under a strong force.
+    ratios = []
+    for level in (0.2, 3.0):
+        acq = measure(FRICTION, excitation=Excitation.STEPPED_SINE, input_dof=3, fs=19.0, sine_points=6,
+                      force_level=level)
+        est = FrfEstimator(acq, Processing()).estimate()
+        exact = frf(FRICTION, est.freqs, 3)[:, 3]  # the chain without friction
+        ratios.append(np.abs(est.H[:, 3]).max() / np.abs(exact).max())
+    assert ratios[0] < 0.25 and 0.9 < ratios[1] < 1.0
+
+
+def test_friction_lowers_the_coherence_of_random_excitation():
+    def coherence(system):
+        acq = measure(system, excitation=Excitation.RANDOM, input_dof=3, fs=19.0, averages=4, force_level=0.1)
+        est = FrfEstimator(acq, Processing(window=Window.HANN)).estimate()
+        keep = (est.freqs > 0.2) & (est.freqs < acq.settings.band)
+        return est.coherence[keep, 3].mean()
+
+    assert coherence(SYSTEM) > 0.99 and coherence(FRICTION) < 0.95
+
+
+def test_work_measures_in_slices_and_gives_the_same_record():
+    settings = MeasurementSettings(excitation=Excitation.RANDOM, input_dof=3, fs=19.0, averages=2, seed=3)
+    whole = Acquisition(FRICTION, settings)
+    whole.step()
+    sliced = Acquisition(FRICTION, MeasurementSettings(**{**settings.__dict__}))
+    calls = 0
+    while not sliced.work(0.0):  # one piece of analog signal per call
+        calls += 1
+    assert calls > 3 and sliced.blocks == whole.blocks == 1
+    for x, y in zip(whole.block(0), sliced.block(0)):
+        np.testing.assert_array_equal(x, y)

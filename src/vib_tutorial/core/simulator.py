@@ -314,9 +314,9 @@ class Simulator:
         Aw = input_system(self._A, b, b_du)
         return self.system.masses[:, None] * Aw[n : 2 * n]
 
-    def _friction_system(self, key: tuple, b: np.ndarray, b_du: np.ndarray | None, stuck: tuple) -> np.ndarray:
+    def _friction_system(self, key: tuple, b: np.ndarray, b_du: np.ndarray | None, stuck: np.ndarray) -> np.ndarray:
         """Aw for w = [x, v, u, du, e], e the friction force on each mass, with the stuck masses held still."""
-        ck = ("Aw", key, stuck)
+        ck = ("Aw", key, stuck.tobytes())
         if ck not in self._friction_cache:
             n = self.system.n
             Aw = np.zeros((3 * n + 2, 3 * n + 2))
@@ -326,24 +326,25 @@ class Simulator:
             self._friction_cache[ck] = Aw
         return self._friction_cache[ck]
 
-    def _friction_step_maps(self, key: tuple, Aw: np.ndarray, stuck: tuple, s: float, h: float):
-        """(Phi, W_dissipated, W_work) over s; cached for whole steps (s == h)."""
-        ck = ("step", key, stuck, s)
+    def _friction_step_maps(self, key: tuple, Aw: np.ndarray, stuck: np.ndarray, s: float, h: float, ledger: bool):
+        """(Phi, W_dissipated, W_work) over s (the W are None without the ledger); cached for whole steps."""
+        ck = ("step", key, stuck.tobytes(), ledger, h)
         if s == h and ck in self._friction_cache:
             return self._friction_cache[ck]
-        n = self.system.n
-        pad = np.zeros((3 * n + 2, 3 * n + 2))
-        Qs = []
-        for Q in self._energy_quadratics(key):
-            P = pad.copy()
-            P[: 2 * n + 2, : 2 * n + 2] = Q
-            Qs.append(P)
-        out = (scipy.linalg.expm(Aw * s), *quadratic_integrals(Aw, s, Qs))
+        out: tuple = (scipy.linalg.expm(Aw * s), None, None)
+        if ledger:
+            n = self.system.n
+            Qs = []
+            for Q in self._energy_quadratics(key):
+                padded = np.zeros((3 * n + 2, 3 * n + 2))
+                padded[: 2 * n + 2, : 2 * n + 2] = Q
+                Qs.append(padded)
+            out = (out[0], *quadratic_integrals(Aw, s, Qs))
         if s == h:
             self._friction_cache[ck] = out
         return out
 
-    def _slip(self, w: np.ndarray, P: np.ndarray, forced: dict[int, float]) -> tuple[tuple, np.ndarray]:
+    def _slip(self, w: np.ndarray, P: np.ndarray, forced: dict[int, float]) -> tuple[np.ndarray, np.ndarray]:
         """(stuck, e): which masses stick, and the friction force on each sliding one.
 
         A moving mass slides the way it moves. One at rest sticks while the pull
@@ -353,33 +354,49 @@ class Simulator:
         n = self.system.n
         F = self.system.friction
         v = w[n : 2 * n]
-        pull = P @ w[: 2 * n + 2]
-        way = np.where(v != 0.0, np.sign(v), np.sign(pull))
-        stuck = (F > 0) & (v == 0.0) & (np.abs(pull) <= F)
+        way = np.sign(v)
+        rest = (v == 0.0) & (F > 0)
+        stuck = np.zeros(n, dtype=bool)
+        if forced or rest.any():
+            pull = P @ w[: 2 * n + 2]
+            way = np.where(rest, np.sign(pull), way)
+            stuck = rest & (np.abs(pull) <= F)
         for i, d in forced.items():
             stuck[i], way[i] = False, d
-        return tuple(stuck.tolist()), np.where(stuck, 0.0, -F * way)
+        return stuck, np.where(stuck, 0.0, -F * way)
 
     def _first_event(self, w0, w1, Aw, P, stuck, e, s) -> tuple[float, int, float] | None:
         """(time, mass, way) of the first stop (way 0) or break-free (way ±1) within the step w0 -> w1."""
         n = self.system.n
+        m = 2 * n + 2
         F = self.system.friction
-        st = np.array(stuck)
+        # A sliding mass whose velocity changed sign stopped on the way: its velocity
+        # now has the sign of the friction force (which opposed the sliding).
+        reversed_ = e * w1[n : 2 * n] > 0.0
+        # A stuck mass whose pull grew beyond its friction broke free on the way.
+        frees, p1 = np.empty(0, dtype=int), np.empty(0)
+        if stuck.any():
+            frees = np.flatnonzero(stuck)
+            p1 = P[frees] @ w1[:m]
+            keep = np.abs(p1) > F[frees]
+            frees, p1 = frees[keep], p1[keep]
+        elif not reversed_.any():
+            return None
+        stops = np.flatnonzero(reversed_)
+        if not stops.size and not frees.size:
+            return None
+        way = -np.sign(e)
+        g1 = way * w1[n : 2 * n]
         d0, d1 = Aw @ w0, Aw @ w1
         best: tuple[float, int, float] | None = None
-        # A sliding mass whose velocity changed sign stopped on the way.
-        way = -np.sign(e)
-        g0, g1 = way * w0[n : 2 * n], way * w1[n : 2 * n]
-        for i in np.flatnonzero(~st & (F > 0) & (g1 < 0)):
-            t = first_root(g0[i], way[i] * d0[n + i], g1[i], way[i] * d1[n + i], s)
+        for i in stops:
+            t = first_root(way[i] * w0[n + i], way[i] * d0[n + i], g1[i], way[i] * d1[n + i], s)
             if best is None or t < best[0]:
                 best = (t, int(i), 0.0)
-        # A stuck mass whose pull grew beyond its friction broke free on the way.
-        m = 2 * n + 2
-        p0, p1 = P @ w0[:m], P @ w1[:m]
-        for i in np.flatnonzero(st & (np.abs(p1) > F)):
-            sg = float(np.sign(p1[i]))
-            t = first_root(F[i] - sg * p0[i], -sg * (P[i] @ d0[:m]), F[i] - sg * p1[i], -sg * (P[i] @ d1[:m]), s)
+        for i, p in zip(frees, p1):
+            sg = float(np.sign(p))
+            p0 = P[i] @ w0[:m]
+            t = first_root(F[i] - sg * p0, -sg * (P[i] @ d0[:m]), F[i] - sg * p, -sg * (P[i] @ d1[:m]), s)
             if best is None or t < best[0]:
                 best = (t, int(i), sg)
         return best
@@ -389,39 +406,45 @@ class Simulator:
         ground = w[2 * n] if self.force.settings.base else 0.0
         return stored_energy(self.system, w[:n] - ground, w[n : 2 * n])
 
-    def _friction_step(self, w: np.ndarray, h: float, inp: tuple, P: np.ndarray) -> np.ndarray:
-        """Step w = [x, v, u, du, e] by h in place; return the step's (dissipated, work, friction loss)."""
+    def _friction_step(self, w: np.ndarray, h: float, inp: tuple, P: np.ndarray, ledger: bool = True) -> np.ndarray:
+        """Step w = [x, v, u, du, e] by h in place; return the step's (dissipated, work, friction loss).
+
+        Without the ledger the energies are left at 0, which saves the quadratic
+        integrals over each part of a step cut by an event.
+        """
         n = self.system.n
         key, b, b_du = inp
         totals = np.zeros(3)
-        left, forced = h, {}
+        left, forced = h, {}  # time left in the step, and a mass that just broke free
         tries = EVENTS_PER_MASS * n + 1
         for attempt in range(tries):
             stuck, e = self._slip(w, P, forced)
             forced = {}
             w[2 * n + 2 :] = e
             Aw = self._friction_system(key, b, b_du, stuck)
-            Phi, Wd, Ww = self._friction_step_maps(key, Aw, stuck, left, h)
+            Phi, Wd, Ww = self._friction_step_maps(key, Aw, stuck, left, h, ledger)
             w1 = Phi @ w
             event = self._first_event(w, w1, Aw, P, stuck, e, left) if attempt < tries - 1 else None
             s = left
             if event is not None and event[0] < left:
                 s = event[0]
-                Phi, Wd, Ww = self._friction_step_maps(key, Aw, stuck, s, h)
+                Phi, Wd, Ww = self._friction_step_maps(key, Aw, stuck, s, h, ledger)
                 w1 = Phi @ w
-            totals += (w @ Wd @ w, w @ Ww @ w, -e @ (w1[:n] - w[:n]))
+            if ledger:
+                totals += (w @ Wd @ w, w @ Ww @ w, -e @ (w1[:n] - w[:n]))
             # Hold the stuck masses exactly, and stop the one that came to rest; the
             # (tiny) energy this takes out is friction's.
-            st = np.flatnonzero(stuck)
-            if st.size or event is not None:
-                before = self._stored_w(w1)
+            if event is not None or stuck.any():
+                st = np.flatnonzero(stuck)
+                before = self._stored_w(w1) if ledger else 0.0
                 w1[st], w1[n + st] = w[st], 0.0
                 if event is not None:
                     if event[2] == 0.0:
                         w1[n + event[1]] = 0.0
                     else:
                         forced[event[1]] = event[2]
-                totals[2] += before - self._stored_w(w1)
+                if ledger:
+                    totals[2] += before - self._stored_w(w1)
             w[:] = w1
             left -= s
             if event is None or left <= 0.0:
@@ -451,6 +474,52 @@ class Simulator:
             fs[k] = f1
             f0 = f1
         return ts, zs, fs, losses
+
+    def drive(self, f: np.ndarray, h: float) -> tuple[np.ndarray, np.ndarray]:
+        """Step h at a time through given force samples, with friction; for the virtual modal test.
+
+        f[k] (N, on the force's target mass) is the force at the end of step k;
+        the first step starts from the force where the last call ended. The
+        force controller, the clock and the energy ledger are left alone.
+        Returns the state z = [x, v] and the accelerations after each step,
+        shapes (len(f), 2n) and (len(f), n).
+        """
+        n = self.system.n
+        f = np.asarray(f, dtype=float)
+        inp = self._input()
+        P = self._pull_rows(*inp)
+        zs = np.empty((f.size, 2 * n))
+        w = np.zeros(3 * n + 2)
+        w[: 2 * n] = self.state
+        F = self.system.friction
+        f0 = self._u
+        k = 0
+        while k < f.size:
+            f1 = f[k]
+            if f1 == f0 and not w[n : 2 * n].any():
+                w[2 * n], w[2 * n + 1] = f0, 0.0
+                if np.all(np.abs(P @ w[: 2 * n + 2]) <= F):
+                    # At rest, every mass held by its friction (or with no pull on it),
+                    # and the force not changing: nothing moves until it does.
+                    changes = np.flatnonzero(f[k:] != f0)
+                    stop = f.size if not changes.size else k + int(changes[0])
+                    zs[k:stop] = w[: 2 * n]
+                    k = stop
+                    continue
+            w[2 * n], w[2 * n + 1] = f0, (f1 - f0) / h
+            self._friction_step(w, h, inp, P, ledger=False)
+            zs[k] = w[: 2 * n]
+            f0 = f1
+            k += 1
+        if f.size:
+            self.state = zs[-1].copy()
+            self._u = float(f[-1])
+        # The acceleration at each sample: none while stuck, else (pull - friction) / m.
+        v = zs[:, n:]
+        pull = np.column_stack([zs, f, np.zeros(f.size)]) @ P.T  # a force has no slope term (b_du = 0)
+        way = np.where(v != 0.0, np.sign(v), np.sign(pull))
+        stuck = (v == 0.0) & (F > 0) & (np.abs(pull) <= F)
+        return zs, np.where(stuck, 0.0, (pull - F * way) / self.system.masses)
 
     def advance(self, duration: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Advance by approximately `duration` seconds of simulated time.

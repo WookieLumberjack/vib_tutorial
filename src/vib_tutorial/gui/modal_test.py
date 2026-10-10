@@ -49,7 +49,7 @@ from ..core.identification import (
     mode_indicator,
     peak_picking,
 )
-from ..core.measurement import AA_CUTOFF
+from ..core.measurement import AA_CUTOFF, FORCE_RMS, IMPACT_PEAK, SINE_AMPLITUDE
 from .axes import log_axes
 from .modal_extraction import EXTRACTION_THEORY_HTML, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
@@ -109,6 +109,28 @@ WINDOW_TIPS = {
     "it. Exponential on both channels: makes the response die away inside the block, which adds "
     "known extra damping to every mode.",
 }
+
+
+FORCE_LEVEL_TIP = (
+    f"<p>Scales the force. At 100% the hammer hits with a {IMPACT_PEAK:g} N peak, the shaker drives "
+    f"{FORCE_RMS:g} N RMS and the stepped sine has a {SINE_AMPLITUDE:g} N amplitude.</p>"
+    "<p>A linear chain's FRF does not depend on it: the response scales with the force, and so "
+    "does the noise, which is sized to each channel's range. With <b>friction</b> on a mass "
+    "(F<sub>f</sub> on the Simulation page) it does. A lab checks linearity this way: measure at "
+    "two force levels and overlay the FRFs (<i>Hold for comparison</i>).</p>"
+)
+HOLD_TIP = (
+    "<p>Keep the FRF measured now on the plot, in grey, while you change the force level or the "
+    "excitation and measure again. It is drawn while the force is at the same mass and the same "
+    "quantity is measured.</p>"
+    "<p>For a linear chain the two agree, apart from noise. If they differ, the structure is "
+    "nonlinear; friction damps the response to a light force much more than to a strong one.</p>"
+)
+
+
+def friction_masses(system: ChainSystem) -> str:
+    """'m1, m3' for the masses with friction ('' if none)."""
+    return ", ".join(f"m{i + 1}" for i in np.flatnonzero(system.friction > 0))
 
 
 def suggested_fs(result: ModalResult) -> float:
@@ -264,6 +286,7 @@ class FrfView(pg.GraphicsLayoutWidget):
         self._key: tuple | None = None
         self.measured: list[pg.PlotDataItem] = []  # magnitude, phase, coherence
         self.fit_curves: list[pg.PlotDataItem] = []  # magnitude, phase
+        self.held_curves: list[pg.PlotDataItem] = []  # magnitude, phase
         self.fit_region = pg.LinearRegionItem()
         self.fit_region.setZValue(-5)
         self.fit_region.sigRegionChangeFinished.connect(self._on_region)
@@ -310,6 +333,24 @@ class FrfView(pg.GraphicsLayoutWidget):
         phase_curve.setData(freqs, phase_deg(h), connect="finite")
         if not shown:
             legend.addItem(mag_curve, "Fitted modal model")
+
+    def set_held(self, freqs: np.ndarray | None, h: np.ndarray | None, label: str = "") -> None:
+        """An FRF held for comparison (None: hide it)."""
+        if not self.held_curves:
+            return
+        mag_curve, phase_curve = self.held_curves
+        legend = self.mag.legend
+        if legend.getLabel(mag_curve) is not None:
+            legend.removeItem(mag_curve)
+        if h is None:
+            mag_curve.setData([], [])
+            phase_curve.setData([], [])
+            return
+        keep = freqs > 0
+        with np.errstate(invalid="ignore"):
+            mag_curve.setData(freqs[keep], np.where(np.abs(h[keep]) > 0, np.abs(h[keep]), np.nan), connect="finite")
+        phase_curve.setData(freqs[keep], phase_deg(h[keep]), connect="finite")
+        legend.addItem(mag_curve, label)
 
     def set_data(
         self,
@@ -359,7 +400,8 @@ class FrfView(pg.GraphicsLayoutWidget):
         response = settings.response
         exact = from_receptance(f, frf(system, f, settings.input_dof)[:, j], response)
         dash = QtCore.Qt.PenStyle.DashLine
-        self.mag.plot(f, np.abs(exact), pen=pg.mkPen(colors.strong, width=1.5), name="Exact")
+        exact_name = "Exact, without friction" if np.any(system.friction > 0) else "Exact"
+        self.mag.plot(f, np.abs(exact), pen=pg.mkPen(colors.strong, width=1.5), name=exact_name)
         self.phase.plot(f, phase_deg(exact), pen=pg.mkPen(colors.strong, width=1.5))
         if processing.window is Window.FORCE_EXPONENTIAL and processing.exp_end < 1.0 and not stepped:
             s = 1j * 2 * np.pi * f + 1.0 / processing.exp_tau(settings)
@@ -368,6 +410,8 @@ class FrfView(pg.GraphicsLayoutWidget):
             self.mag.plot(f, np.abs(damped), pen=pen, name="Exact + window damping")
             self.phase.plot(f, phase_deg(damped), pen=pen)
 
+        held_pen = pg.mkPen(colors.grey, width=1.5)
+        self.held_curves = [self.mag.plot(pen=held_pen), self.phase.plot(pen=held_pen)]
         color = colors.mass[j]
         symbol = dict(symbol="o", symbolSize=5, symbolPen=None, symbolBrush=color) if stepped else {}
         self.measured = [
@@ -428,6 +472,7 @@ class ModalTestPage(QtWidgets.QWidget):
         self.picked: list[tuple[int, float]] | None = None  # (order, Hz) picked by hand; None: automatic
         self.ident: Identification | None = None
         self._dirty = False
+        self.held: tuple[np.ndarray, np.ndarray, MeasurementSettings] | None = None  # (freqs, H, settings)
         self._timer = QtCore.QTimer(self)
         self._timer.setInterval(FRAME_MS)
         self._timer.timeout.connect(self._measure_some)
@@ -463,6 +508,14 @@ class ModalTestPage(QtWidgets.QWidget):
             "accelerance is divided by −ω² first; that amplifies the low-frequency noise.</p>"
         )
         form.addRow("Response sensor:", self.response)
+        level_row = QtWidgets.QHBoxLayout()
+        self.force_level = spin(1.0, 10000.0, 100.0, 0, " %")
+        self.force_level.setToolTip(FORCE_LEVEL_TIP)
+        self.force_level_info = QtWidgets.QLabel()
+        mute(self.force_level_info)
+        level_row.addWidget(self.force_level, 1)
+        level_row.addWidget(self.force_level_info)
+        form.addRow("Force level:", level_row)
         self.tip = spin(1.0, 2000.0, 50.0, 1, " ms")
         self.tip.setToolTip(
             "<p>Duration of the hammer's half-sine pulse. A hard (metal) tip gives a short pulse, "
@@ -604,6 +657,10 @@ class ModalTestPage(QtWidgets.QWidget):
         self.progress.setWordWrap(True)
         run_row.addWidget(self.again)
         run_row.addWidget(self.progress, 1)
+        self.hold = QtWidgets.QPushButton("Hold for comparison")
+        self.hold.setCheckable(True)
+        self.hold.setToolTip(HOLD_TIP)
+        self.hold.toggled.connect(self._on_hold)
         speed_row = QtWidgets.QHBoxLayout()
         speed_row.addWidget(QtWidgets.QLabel("Playback:"))
         speed_row.addWidget(self.speed, 1)
@@ -615,6 +672,7 @@ class ModalTestPage(QtWidgets.QWidget):
             lv.addWidget(w)
         lv.addLayout(speed_row)
         lv.addLayout(run_row)
+        lv.addWidget(self.hold)
         lv.addWidget(self.extract)
         lv.addStretch(1)
         left_scroll = QtWidgets.QScrollArea()
@@ -668,7 +726,7 @@ class ModalTestPage(QtWidgets.QWidget):
         self.excitation.currentIndexChanged.connect(self._on_excitation)
         for w in (self.input, self.response, self.block, self.overlap):
             w.currentIndexChanged.connect(self.restart)
-        for w in (self.tip, self.burst, self.fs):
+        for w in (self.tip, self.burst, self.fs, self.force_level):
             w.valueChanged.connect(self.restart)
         self.points.valueChanged.connect(self.restart)
         self.anti_alias.toggled.connect(self.restart)
@@ -735,6 +793,7 @@ class ModalTestPage(QtWidgets.QWidget):
             tip_width=self.tip.value() * 1e-3,
             burst=self.burst.value() / 100.0,
             sine_points=self.points.value(),
+            force_level=self.force_level.value() / 100.0,
             seed=self.seed,
         )
 
@@ -746,6 +805,33 @@ class ModalTestPage(QtWidgets.QWidget):
             force_noise=self.force_noise.value() / 100.0,
             response_noise=self.response_noise.value() / 100.0,
         )
+
+    def _on_hold(self, on: bool) -> None:
+        """Hold the finished FRF now shown (or let go of it)."""
+        if on and (self.estimate is None or self.acq is None or not self.acq.done):
+            self.hold.setChecked(False)  # nothing complete to hold yet
+            return
+        self.held = (self.estimate.freqs, self.estimate.H, self.acq.settings) if on else None
+        self.redraw()
+
+    def _held_label(self) -> str:
+        s = self.held[2]
+        return f"Held: {s.excitation.value.lower()}, force level {100 * s.force_level:.0f}%"
+
+    def _show_held(self, j: int) -> None:
+        s = self.acq.settings
+        if self.held is None or (self.held[2].input_dof, self.held[2].response) != (s.input_dof, s.response):
+            self.frf_view.set_held(None, None)
+        else:
+            self.frf_view.set_held(self.held[0], self.held[1][:, j], self._held_label())
+
+    def _level_text(self, s: MeasurementSettings) -> str:
+        e = s.excitation
+        if e is Excitation.IMPACT:
+            return f"{s.force_level * IMPACT_PEAK:.4g} N peak"
+        if e is Excitation.STEPPED_SINE:
+            return f"{s.force_level * SINE_AMPLITUDE:.4g} N amplitude"
+        return f"{s.force_level * FORCE_RMS:.4g} N RMS"
 
     def _on_excitation(self) -> None:
         self._select_window(self.excitation.currentData())
@@ -831,6 +917,7 @@ class ModalTestPage(QtWidgets.QWidget):
         self.acq = Acquisition(system, self.settings(), self.result)
         self.estimator = FrfEstimator(self.acq, self.processing())
         s = self.acq.settings
+        self.force_level_info.setText(self._level_text(s))
         self.extract.set_band(0.0, s.band, top=s.fs / 2)
         self.frf_view.set_fit_band(0.0, s.band)
         self.picked = None
@@ -852,11 +939,18 @@ class ModalTestPage(QtWidgets.QWidget):
             self._play(speed)
             return
         self._clock.start()
-        while not self.acq.done and self._clock.elapsed() < STEP_BUDGET_MS:
-            self.acq.step()
+        before = self.acq.progress[0]
+        while not self.acq.done:
+            left = STEP_BUDGET_MS - self._clock.elapsed()
+            if left <= 0 or not self.acq.work(left * 1e-3):
+                break  # a slow (friction) record carries on next frame
         if self.acq.done:
             self._timer.stop()
-        self.redraw()
+        if self.acq.progress[0] != before or self.acq.done or self.estimate is None:
+            self.redraw()
+        else:
+            done, wanted = self.acq.progress
+            self.progress.setText(f"{done} / {wanted} {self._noun} · measuring {done + 1} …")
 
     def _play(self, speed: float) -> None:
         """Paced playback: measure one record, then draw it over its duration / speed."""
@@ -865,7 +959,10 @@ class ModalTestPage(QtWidgets.QWidget):
                 self._timer.stop()
                 return
             first = self.acq.progress[0] == 0
-            self.acq.step()
+            if not self.acq.work(STEP_BUDGET_MS * 1e-3):  # a slow (friction) record: carry on next frame
+                done, wanted = self.acq.progress
+                self.progress.setText(f"{done} / {wanted} {self._noun} · measuring {done + 1} …")
+                return
             self._live = self.estimator.estimate()
             s = self.acq.settings
             # Continuous random: the part a block shares with the one before was drawn already.
@@ -901,6 +998,7 @@ class ModalTestPage(QtWidgets.QWidget):
         s = self.acq.settings
         self.signals.set_data(est, j, s, self.acq.stepped)
         self.frf_view.set_data(est, j, self.acq.system, self.acq.result, s, self.processing(), self.acq.stepped)
+        self._show_held(j)
         self.estimate = est
         self.identify()
 
@@ -1078,6 +1176,16 @@ class ModalTestPage(QtWidgets.QWidget):
             warnings.append("Continuous random is not periodic in the block: without a window it leaks.")
         if e in (Excitation.PERIODIC_RANDOM, Excitation.CHIRP) and w is not Window.RECTANGULAR:
             warnings.append("The signals are periodic in the block, so no window is needed; one only blurs the peaks.")
+        rubbing = friction_masses(a.system)
+        if rubbing:
+            warnings.append(
+                f"Friction on {rubbing}: the chain is nonlinear, so what is measured is a linear "
+                "approximation that depends on the force level and the excitation. <i>Exact</i> is the "
+                "chain without friction. Friction damps small motions heavily, so a light force gives low, "
+                "flat peaks (or none, if the masses hardly slide); a strong one approaches the exact FRF. "
+                "Measure at two force levels with <i>Hold for comparison</i>, and watch the coherence. "
+                "The response is simulated step by step, so measuring takes longer."
+            )
         warn = "".join(f"<p style='color:{colors.fair}'>{t}</p>" for t in warnings)
         return (
             f"<p><b>{e.value}</b>, force at m{s.input_dof + 1}, {s.response.value.lower()} measured "
@@ -1208,8 +1316,39 @@ at the antiresonances.</li>
 the exponential window fixes the leakage but adds damping (dashed grey curve).</li>
 <li>Turn the anti-alias filter off and raise the stiffness until the top mode is above
 Nyquist: it appears at the wrong frequency.</li>
+<li>Give the masses friction (F<sub>f</sub> = 0.5 N on the Simulation page) and measure with
+the hammer at force levels of 100% and 1000%, holding the first for comparison. See
+<i>Nonlinearity: friction</i> below.</li>
 <li>Add 2% response noise with periodic random excitation: with displacement the top modes
 sink into the noise and LSCF can miss one. Switch the response sensor to <b>Acceleration</b>:
 every mode comes through, but the FRF below the first mode turns to noise.</li>
 </ul>
+
+<h3>Nonlinearity: friction</h3>
+<p>Everything above assumes the structure is <b>linear</b>: double the force and every response
+doubles, so the FRF is a property of the structure alone. Real joints rub, and friction breaks
+this. Give the masses Coulomb friction (F<sub>f</sub> under <i>System parameters</i> on the
+Simulation page) and the test simulates the stick-slip motion step by step. The FRF it
+estimates is then the best <i>linear</i> fit to a nonlinear chain, and it depends on how hard
+and how the chain is driven:</p>
+<ul>
+<li><b>Force level.</b> Friction takes out F<sub>f</sub> times the distance slid, which grows
+only with the amplitude, while the energy a mode stores grows with its square. So friction
+damps small motions heavily and large ones lightly: as the force level rises, the peaks grow
+taller and sharper towards the exact (frictionless) FRF. At a low level the masses spend much
+of the time stuck, the peaks flatten out and can vanish, and the response is barely
+proportional to the force. The frequencies of the peaks hardly move.</li>
+<li><b>The linearity check.</b> In a lab the FRF is measured at two or three force levels and
+overlaid. If the curves differ, the structure is nonlinear and every modal parameter belongs to
+one level only. Use <i>Hold for comparison</i> to do the same here.</li>
+<li><b>Coherence.</b> The part of the response that is not proportional to the force (stick-slip
+distortion, harmonics) looks like noise to the estimator, so the coherence drops below 1 even
+with no noise. Continuous random excitation averages the nonlinearity into a best linear
+estimate; a stepped sine or a hammer each give a different one.</li>
+<li><b>Outside the band.</b> The distortion has frequencies the force does not, such as
+harmonics of a sine, so above the excited band the response is not zero while the force is,
+and the estimate there is meaningless.</li>
+</ul>
+<p>The modal extraction still fits a linear model, so with friction the identified damping
+ratios and frequencies are those of the linear fit at this level, not properties of the chain.</p>
 """
