@@ -1070,6 +1070,27 @@ excites the structure, sensors record the force and the responses, and the FRF i
 from those signals. This page does the same with the simulated chain, so each step of the
 measurement, and each error it can bring in, can be compared with the exact answer.</p>
 
+<h3>What is measured, and where</h3>
+<ul>
+<li><b>Acceleration, not displacement.</b> This page records each mass's displacement, so its
+FRF is the receptance H, as on the other pages. A lab usually measures with accelerometers and
+a force transducer, so the measured FRF is the <b>accelerance</b> A = −ω²H (see <i>Three forms
+of the same FRF</i> on the FRF matrix page). Dividing by −ω² turns it into receptance; the
+poles, shapes and damping do not change, but low-frequency noise is amplified by the division.
+The residuals swap roles too: for accelerance the modes below the band give a constant and
+the modes above a term growing as ω².</li>
+<li><b>One column, or one row.</b> Here one force acts and every mass is measured: one
+<b>column</b> of H, as with a shaker and an accelerometer moved from point to point. An impact
+test usually does the opposite: one accelerometer stays put and the <b>hammer roves</b>,
+measuring one <b>row</b> of H. By reciprocity, H<sub>jk</sub> = H<sub>kj</sub> (FRF matrix
+page), a row holds the same mode shapes as a column, so either gives every mode, as long as
+the fixed point is not at a node of one of them.</li>
+<li><b>The sensor is part of the structure.</b> A real accelerometer adds its mass at the
+point it measures, lowering the frequencies of a light structure. Here the sensors weigh
+nothing, so this error is absent; in practice it is checked by moving or doubling the sensor
+mass.</li>
+</ul>
+
 <h3>Sampling</h3>
 <p>Each channel is sampled at f<sub>s</sub>. Only frequencies up to the <b>Nyquist frequency</b>
 f<sub>s</sub>/2 can be represented; anything above <b>aliases</b>, appearing at
