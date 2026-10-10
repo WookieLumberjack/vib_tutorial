@@ -243,7 +243,9 @@ class ForcePanel(QtWidgets.QGroupBox):
         self.freq = spin(0.001, 1000.0, s.freq_hz, 3, " Hz")
         freq_row.addWidget(self.freq, 1)
         self.tune = QtWidgets.QComboBox()
-        self.tune.setToolTip("Set the drive frequency to a natural frequency (resonance)")
+        self.tune.setToolTip("Set the drive frequency to an undamped natural frequency fₙ (resonance). "
+                             "The response lags the force by 90° there; the displacement peak "
+                             "is slightly lower, at fₙ√(1 − 2ζ²).")
         freq_row.addWidget(self.tune)
         self.freq_label = QtWidgets.QLabel("Frequency:")
         form.addRow(self.freq_label, freq_row)

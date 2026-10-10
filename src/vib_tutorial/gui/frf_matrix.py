@@ -762,6 +762,8 @@ class FrfMatrixPage(QtWidgets.QWidget):
 
 
 THEORY_HTML = """
+<p><i>Before this page: <b>Start with one mass</b>, <b>Undamped normal modes</b> and
+<b>Proportional damping</b> in the Simulation page's Background tab.</i></p>
 <h3>The FRF (receptance) matrix</h3>
 <p>For a harmonic force f(t) = F e<sup>iωt</sup> the steady response is x(t) = X e<sup>iωt</sup> with
 <b>(K − ω²M + iωC) X = F</b>, so</p>
@@ -817,13 +819,19 @@ opposite if its modal constant is negative), above it like a mass (180° further
 upper still spring-like.</li>
 <li>If both modal constants have the <b>same sign</b>, the two terms are in anti-phase there and
 cancel at some frequency: an <b>antiresonance</b> (a sharp dip). With <b>opposite signs</b> they
-add, and the curve just passes through a minimum.</li>
+add, and the curve just passes through a minimum. (This looks at the two neighbouring modes
+only; the others shift the dip, and a large contribution from them can remove it.)</li>
 <li>At a driving point every modal constant φ<sub>jr</sub>² is positive, so there is an
 antiresonance between every pair of resonances: peaks and dips alternate, and (lightly damped)
 the phase swings down by 180° at each resonance and back up at each antiresonance.</li>
 <li>For this chain, the undamped H<sub>jk</sub> (j ≤ k) has (j − 1) + (N − k)
 antiresonances, one for each mass outside the stretch of chain from m<sub>j</sub> to m<sub>k</sub>
-(two can fall at the same frequency, e.g. in a uniform chain). The end-to-end term
+(two can fall at the same frequency, e.g. in a uniform chain). They are exactly the natural
+frequencies of the two pieces of chain outside that stretch, with m<sub>j</sub> and
+m<sub>k</sub> held still: at those frequencies the outer pieces can vibrate on their own and
+absorb the force, as a vibration absorber does. In the undamped uniform 4-mass chain,
+H<sub>22</sub>'s dips are at 1.97 and 5.15 Hz (m3 and m4 with m2 held) and 4.50 Hz (m1
+between the ground and m2). The end-to-end term
 H<sub>1N</sub> has none, so its phase keeps falling by 180° at every resonance.</li>
 </ul>
 

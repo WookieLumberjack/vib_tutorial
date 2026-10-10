@@ -29,6 +29,8 @@ def legend_html() -> str:
     )
 
 THEORY_HTML = """
+<p><i>Before this page: <b>Undamped normal modes</b> in the Simulation page's Background tab,
+and the Modal coupling page's Theory tab, which reduces a split chain to a few modes by hand.</i></p>
 <p><i>Symbols are defined in the <a href="#notation">Notation</a> table at the end.</i></p>
 <h3>Why substructure?</h3>
 <p>Real structures are built from components: an engine on a frame, a wing on a fuselage,
@@ -161,7 +163,7 @@ of the interior drives the component's modes. M̂<sub>qb</sub> is that inertial 
 is how the components talk to each other dynamically. (For C, see <i>Damping</i> under <i>Properties worth knowing</i>.)</li>
 </ul>
 <p>The <i>Basis</i> tab plots every column of the current T as a shape along the chain. For the
-default 8-mass chain cut at m4 with one mode each, there are four: A's first clamped mode (over
+8-mass chain of the <i>Try it</i> steps, cut at m4 with one mode each, there are four: A's first clamped mode (over
 m1–m3, zero elsewhere), B's first clamped mode (over m5–m7), a "tent" for x<sub>4</sub> (rising
 linearly from the ground to m4, falling to m8, the static shape of both components when the
 interface moves) and a ramp for x<sub>8</sub> (zero up to m4, rising to the tip). Every motion
@@ -297,7 +299,8 @@ boundary DOF to the modal motion.</p>
 carry inertia, M̂ = [ I 0 ; 0 0 ]. The boundary DOFs then have no mass: they follow
 the modes statically and are condensed out, so the model has only as many modes as modes kept.
 Dropping mass raises frequencies and adding the residual flexibility lowers them, so there is no
-bound, and the method is not exact even with every mode there is room for.</li>
+bound, and the method is not exact even with every mode there is room for: the boundary DOFs
+take up places in the model, so some modes are always discarded, and their mass with them.</li>
 <li><b>Rubin</b> adds the <i>residual mass</i>: the inertia of the residual attachment modes. Here
 this is done as a full Rayleigh–Ritz projection, M̂ = T<sup>T</sup>MT (the Craig–Chang form of
 Rubin's method). It has all of Craig–Bampton's guarantees: upper bounds that
@@ -392,7 +395,9 @@ one spring with the truth.</p>
 <ul>
 <li><b>No modes kept = Guyan reduction.</b> Only the constraint modes remain, so the model
 is exact statically (at 0 Hz) and good for low modes when little mass is "hidden" in the
-interior.</li>
+interior. Guyan (1965) introduced it as <i>static condensation</i>: keep a set of master DOFs and
+let the rest follow statically. Finite-element codes still offer it, and it is the starting
+point that Craig–Bampton improves on.</li>
 <li><b>All modes kept = exact.</b> T is then square and invertible: nothing is thrown
 away, the problem is only rewritten in new coordinates.</li>
 <li><b>Upper bounds.</b> CB is a Rayleigh–Ritz method: it restricts the motion to a
@@ -443,8 +448,9 @@ Rayleigh's method with a linear shape, ω² = (k/8) / Σ(i/8)²m.</li>
 0.33% and mode 2 is 7.4% high. Keep 2 and mode 3 is 4.4% high; keep all 7 and every error is
 zero.</li>
 <li>Back to Guyan, open <i>Time response</i> and apply the step force. The reduced chain can
-only move in its one straight-line shape, so it rings at the wrong frequency and the error is
-about a third of the tip motion. Add modes and watch the two chains lock together.</li>
+only move in its one straight-line shape, so it rings at the wrong frequency and drifts in
+and out of phase with the full chain: the error swings between a small fraction and most of the
+tip motion. Add modes and watch the two chains lock together.</li>
 <li>Choose <i>Rubin</i> and keep 1 mode. The free-interface modes of the only substructure are
 the chain's own modes, so mode 1 is exact, but mode 2 is 16% high: the residual flexibility
 gets the statics right, not the next mode. Back to <i>Craig–Bampton</i>.</li>
@@ -453,7 +459,7 @@ gets the statics right, not the next mode. Back to <i>Craig–Bampton</i>.</li>
 <ol>
 <li>Click m4 to cut the chain there, and keep 1 mode in each
 substructure. The reduced model has 4 DOF (q<sub>A1</sub>, q<sub>B1</sub>, x<sub>4</sub>,
-x<sub>8</sub>) instead of 8. Mode 1 is within 0.2%, mode 4 is 7% high with MAC 0.84, and
+x<sub>8</sub>) instead of 8. Mode 1 is within 0.03%, mode 4 is 7% high with MAC 0.84, and
 modes 5 to 8 are not in the reduced model at all.</li>
 <li>Scroll down to <i>Substructures on their own</i>. With the interface at m4, A and B are
 identical three-mass pieces, so each has a clamped mode at 2.44 Hz. Coupled, the two split
@@ -504,8 +510,9 @@ modes are added. Craig–Bampton and Rubin reach the exact answer with all modes
 floor); MacNeal is still 0.8% high. For mode 3 Craig–Bampton and Rubin take turns in the lead; select
 mode 1 and Rubin is ahead at every size.</li>
 <li>On <i>Time response</i>, drive at <i>Mode 1 true</i> with MacNeal. Its mode 1 is only 0.6%
-high, but mode 1 is so lightly damped (ζ = 0.009) that the tip error is a quarter of the
-motion. Rubin, with the residual mass, is within 0.2%.</li>
+high, but mode 1 is so lightly damped (ζ = 0.009) that the 0.6% shift matters: as the
+resonance builds up the two responses drift out of phase, and the tip error grows to about half
+the motion. Rubin, with the residual mass, is within 0.2%.</li>
 <li>Set k<sub>1</sub> = k<sub>2</sub> = 0 on the Simulation page, with the interface at m4.
 Craig–Bampton fails (m1 and m2 float when the boundary is held), but the free-interface methods
 simply find more rigid-body modes in A.</li>
