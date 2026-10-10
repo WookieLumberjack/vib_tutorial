@@ -175,3 +175,26 @@ def test_frf_matrix_three_forms_and_residual_mass():
     error = frf(s, f, 3)[:, 3] - without_1
     phi = r.modes[0].shape_mass_normalized[3]
     assert error.real == pytest.approx(-(phi**2) / w**2, rel=0.1)
+
+
+def test_background_rigid_body_root_with_k1_zero():
+    s = ChainSystem.uniform(4)
+    s.stiffness[0] = 0.0
+    roots = modal_analysis(s).overdamped_roots
+    assert min(roots, key=abs) == pytest.approx(0.0, abs=1e-6)
+    second = sorted(roots, key=abs)[1]
+    assert second == pytest.approx(-0.50, abs=0.005)  # close to −c1/(m1 + … + mN)
+
+
+def test_frf_matrix_antiresonances_of_h22():
+    s = ChainSystem.uniform(4)
+    s.damping[:] = 0.0
+    f = np.linspace(0.5, 8.0, 200001)
+    h = np.abs(frf(s, f, 1)[:, 1])
+    dips = [float(f[i]) for i in find_peaks(-np.log(h))[0]]
+    assert dips == pytest.approx([1.97, 4.50, 5.15], abs=0.01)
+
+
+def test_modal_coupling_absorber_damping_is_shared():
+    r = modal_analysis(preset("absorber").system)
+    assert [m.zeta_modal for m in r.modes] == pytest.approx([0.012, 0.012], abs=0.0015)

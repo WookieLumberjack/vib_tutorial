@@ -20,7 +20,7 @@ BY_TYPE_TIP = (
     "<p><b>Since reset:</b> where the energy came from and where it went. <i>In</i>: "
     "energy given by releasing a mode or editing a parameter (a stiffer spring holds more "
     "energy at the same stretch), and the work done by the force, ∫F·ẋ dt, or by the moving "
-    "ground, −∫T<sub>1</sub>ẋ<sub>g</sub> dt (T<sub>1</sub>: tension in element 1). <i>Out</i>: "
+    "ground, −∫N<sub>1</sub>ẋ<sub>g</sub> dt (N<sub>1</sub>: tension in element 1). <i>Out</i>: "
     "the energy stored now, and the energy the dampers turned into heat, "
     "∫ẋ<sup>T</sup>Cẋ dt. Both are integrated exactly, so the two columns always match. "
     "A force that pushes against the motion takes energy out; it then shows in the "

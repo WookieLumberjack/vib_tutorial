@@ -84,7 +84,8 @@ EXCITATION_TIPS = {
     Excitation.IMPACT: "A hammer hit: a short half-sine pulse at the start of each block. Quick, and "
     "no shaker needed. The tip sets how short the pulse is, and so how high it excites.",
     Excitation.RANDOM: "A shaker driven by continuous band-limited noise. Never periodic in the "
-    "block, so it leaks without a window (Hann). Averaging reduces noise and non-linearity.",
+    "block, so it leaks without a window (Hann). Averaging reduces noise, and random excitation averages any non-linearity into a best "
+    "linear estimate.",
     Excitation.BURST_RANDOM: "Noise for the first part of each block, then silence while the "
     "response dies away. If it dies away inside the block, no window is needed.",
     Excitation.PERIODIC_RANDOM: "A random signal exactly one block long, repeated until the "
@@ -447,10 +448,10 @@ class ModalTestPage(QtWidgets.QWidget):
         self.tip.setToolTip(
             "<p>Duration of the hammer's half-sine pulse. A hard (metal) tip gives a short pulse, "
             "a soft (rubber) tip a long one.</p><p>The pulse's spectrum is flat at low frequency, "
-            "rolls off above about 1/τ and first reaches zero at 1.5/τ. Modes above that are "
+            "rolls off above about 1/τ<sub>p</sub> and first reaches zero at 1.5/τ<sub>p</sub>. Modes above that are "
             "barely excited, so noise swamps them.</p>"
         )
-        self.tip_label = QtWidgets.QLabel("Hammer pulse τ:")
+        self.tip_label = QtWidgets.QLabel("Hammer pulse τₚ:")
         form.addRow(self.tip_label, self.tip)
         self.burst = spin(5.0, 100.0, 50.0, 0, " %")
         self.burst.setToolTip("How much of each block the shaker is on. The rest lets the response die away.")
@@ -547,8 +548,8 @@ class ModalTestPage(QtWidgets.QWidget):
         self.exp_end = spin(0.1, 100.0, 100.0, 1, " %")
         self.exp_end.setToolTip(
             "<p>The exponential window's value at the end of the block; 100% = no exponential "
-            "(force window only).</p><p>e<sup>−t/τ</sup> multiplies the response, so every "
-            "pole moves 1/τ to the left: each mode looks more damped by Δζ = 1/(τω). The dashed "
+            "(force window only).</p><p>e<sup>−t/τ<sub>w</sub></sup> multiplies the response, so every "
+            "pole moves 1/τ<sub>w</sub> to the left: each mode looks more damped by Δζ = 1/(τ<sub>w</sub>ω). The dashed "
             "grey curve is the exact FRF with that extra damping.</p>"
         )
         self.exp_label = QtWidgets.QLabel("Exponential at block end:")
@@ -561,7 +562,8 @@ class ModalTestPage(QtWidgets.QWidget):
             "noise on the force inflates G<sub>ff</sub> and biases H1 low.</p>"
             "<p><b>H2</b> = G<sub>xx</sub>/G<sub>fx</sub>: noise on the force averages out; "
             "noise on the response inflates G<sub>xx</sub> and biases H2 high.</p>"
-            "<p>The true FRF lies between them. Where coherence is 1 they agree.</p>"
+            "<p>When uncorrelated noise is the only error, the true FRF lies between them; leakage or "
+            "aliasing can push both the same way. Where coherence is 1 they agree.</p>"
         )
         form.addRow("Estimator:", self.estimator_combo)
 
@@ -1064,6 +1066,8 @@ class ModalTestPage(QtWidgets.QWidget):
 
 
 THEORY_HTML = """
+<p><i>Before this page: <b>Start with one mass</b> and <b>Exact damped modes are complex</b>
+in the Simulation page's Background tab, then the FRF matrix page's Theory tab.</i></p>
 <h3>A virtual modal test</h3>
 <p>In a lab the FRF is not computed from M, C and K: it is <i>measured</i>. A known force
 excites the structure, sensors record the force and the responses, and the FRF is estimated
@@ -1096,7 +1100,8 @@ mass.</li>
 f<sub>s</sub>/2 can be represented; anything above <b>aliases</b>, appearing at
 |f − k f<sub>s</sub>| as if it were real response. So an <b>anti-alias filter</b> removes it
 before sampling. The filter rolls off below Nyquist, so only the lower part of the band
-(here 80%) is usable. The same filter on the force and every response cancels in their ratio.</p>
+(here 80%) is usable. Analyzers usually express the same margin as f<sub>s</sub> ≈ 2.56
+f<sub>max</sub>. The same filter on the force and every response cancels in their ratio.</p>
 
 <h3>Blocks, the DFT and leakage</h3>
 <p>The analyzer takes blocks of N<sub>b</sub> samples, lasting T = N<sub>b</sub>/f<sub>s</sub>,
@@ -1109,7 +1114,8 @@ low and too wide, which looks like too much damping.</p>
 <li><b>Periodic in the block</b> (periodic random, chirp, a hit or burst that dies away inside
 the block): no leakage, no window needed.</li>
 <li><b>Not periodic</b> (continuous random): taper each block with a <b>window</b> (Hann), which
-trades leakage for a slightly wider peak.</li>
+trades leakage for a slightly wider peak. The wider peak still biases the identified damping
+upward, as leakage does, though much less.</li>
 <li><b>Resolution:</b> a peak's half-power bandwidth is 2ζf<sub>n</sub>. A lightly damped mode
 needs a long block to get lines across it.</li>
 </ul>
@@ -1128,12 +1134,15 @@ resonances, where the structure barely resists it, so H2 is used there.</p>
 <p>The <b>coherence</b> γ² = |G<sub>xf</sub>|²/(G<sub>ff</sub>G<sub>xx</sub>) = H1/H2 is between
 0 and 1. It is 1 when the response is entirely explained by the measured force, linearly.
 Noise, leakage and aliasing all lower it. With one average it is always 1, which is why at
-least a few averages are needed.</p>
+least a few averages are needed. In practice a coherence above about 0.9 near the resonances
+is taken as a good measurement.</p>
 
 <h3>Excitation</h3>
 <ul>
-<li><b>Impact hammer:</b> quick and portable. The tip sets the pulse length τ, and the force
-spectrum is flat only up to about 1/τ. A <b>force window</b> keeps the hit and zeroes the noise
+<li><b>Impact hammer:</b> quick and portable. The tip sets the pulse length τ<sub>p</sub>, and
+the force spectrum is flat only up to about 1/τ<sub>p</sub>. Each hit is checked before it is
+averaged: a <b>double hit</b> (the hammer bouncing back onto the structure) puts notches in the
+force spectrum, and an <b>overload</b> clips the force or the response; both are rejected. A <b>force window</b> keeps the hit and zeroes the noise
 after it. An <b>exponential window</b> forces a slowly decaying response to die away inside
 the block. It multiplies the impulse response by e<sup>−t/τ<sub>w</sub></sup>, which moves every
 pole left by 1/τ<sub>w</sub>. So every mode looks more damped, by Δζ = 1/(τ<sub>w</sub>ω), which
@@ -1154,7 +1163,8 @@ fit at a known frequency.</li>
 <h3>Where to look</h3>
 <ul>
 <li>Put the force on a mass at a node of a mode: that mode is not excited and drops out of
-every FRF. In the default uniform 4-mass chain, m3 does not move in mode 2.</li>
+every FRF. In the default uniform 4-mass chain, m3 does not move in mode 2 (and so mode 2
+cannot be extracted either; see <i>Things to try</i> below).</li>
 <li>Add 5% force noise and compare H1 with H2 at the resonances. Add response noise and look
 at the antiresonances.</li>
 <li>Make the block short so a hit is still ringing at the end: the rectangular window leaks,

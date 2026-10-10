@@ -9,13 +9,15 @@ COUPLING_TIP = (
     "matrix C<sub>m</sub> = Φ<sup>T</sup>CΦ, relative to its diagonal:</p>"
     "<p>&nbsp;&nbsp;max<sub>r≠s</sub> |C<sub>m,rs</sub>| / √(C<sub>m,rr</sub> C<sub>m,ss</sub>)</p>"
     "<p>0 means the damping does not couple the undamped modes (proportional damping). "
+    "It can never exceed 1, because C<sub>m</sub> is positive semidefinite. "
     "Values near 1 mean the damping force from one mode's motion drives another mode "
     "about as strongly as it damps its own. How much this matters also depends on how "
     "close the modes' frequencies are. See the Background tab.</p>"
 )
 
 BACKGROUND_HTML = """
-<h3>Start with one mass</h3>
+<p><i>Contents:</i> <a href="#start-with-one-mass">Start with one mass</a> · <a href="#equations-of-motion">Equations of motion</a> · <a href="#undamped-normal-modes-real">Undamped normal modes (real)</a> · <a href="#proportional-damping">Proportional damping</a> · <a href="#non-proportional-damping-and-coupling">Non-proportional damping and "coupling"</a> · <a href="#exact-damped-modes-are-complex">Exact damped modes are complex</a> · <a href="#is-this-an-artifact-of-the-solver">Is this an artifact of the solver?</a> · <a href="#the-state-space-method-2n-eigenvalues">The state-space method: 2N eigenvalues</a> · <a href="#watching-the-modal-coordinates">Watching the modal coordinates</a> · <a href="#energy">Energy</a> · <a href="#sweeps-and-ground-motion">Sweeps and ground motion</a> · <a href="#vibration-absorbers-and-tuned-mass-dampers">Vibration absorbers and tuned mass dampers</a> · <a href="#try-it">Try it</a> · <a href="#notation">Notation</a></p>
+<h3><a name="start-with-one-mass"></a>Start with one mass</h3>
 <p>Everything on these pages is built from the single-degree-of-freedom (SDOF) oscillator:
 one mass m on a spring k and a damper c, <b>m ẍ + c ẋ + k x = f(t)</b>. Set <i>Number of
 masses</i> to 1 to see it on its own (with the defaults m = 1 kg, k = 400 N/m,
@@ -46,12 +48,12 @@ A lightly damped peak is tall and narrow; the measurement pages depend on this.<
 <p>The rest of this tab shows that a chain of N masses is N of these oscillators, one per
 mode, as long as the damping is proportional.</p>
 
-<h3>Equations of motion</h3>
+<h3><a name="equations-of-motion"></a>Equations of motion</h3>
 <p>The chain obeys <b>M ẍ + C ẋ + K x = f(t)</b>: M is diagonal (the masses);
 K and C are tridiagonal (each spring and damper links two neighbouring masses, or a mass
 and the ground).</p>
 
-<h3>Undamped normal modes (real)</h3>
+<h3><a name="undamped-normal-modes-real"></a>Undamped normal modes (real)</h3>
 <p>Ignoring C, free vibration x = φ cos(ωt) requires
 <b>Kφ = ω²Mφ</b>. The N solutions are the natural frequencies
 ω<sub>r</sub> and <b>real</b> mode shapes φ<sub>r</sub>: every mass moves exactly
@@ -70,7 +72,7 @@ equations into <i>modal coordinates</i> q:</p>
 diag(ω<sub>r</sub>²), &nbsp;&nbsp; Φ<sup>T</sup>CΦ = C<sub>m</sub></p>
 <p>M and K always become diagonal. <b>C<sub>m</sub> in general does not.</b></p>
 
-<h3>Proportional damping</h3>
+<h3><a name="proportional-damping"></a>Proportional damping</h3>
 <p>If C<sub>m</sub> <i>is</i> diagonal, every mode obeys its own independent single-DOF
 equation</p>
 <p>&nbsp;&nbsp;q̈<sub>r</sub> + 2ζ<sub>r</sub>ω<sub>r</sub>q̇<sub>r</sub>
@@ -89,13 +91,15 @@ every mass to the ground.) The damped modes then have the same real shapes as th
 ones, and <b>ζ modal is exact</b>. The general condition, Caughey's, is that
 CM<sup>−1</sup>K = KM<sup>−1</sup>C; Rayleigh damping is the most-used case of it.</p>
 
-<h3>Non-proportional damping and "coupling"</h3>
+<h3><a name="non-proportional-damping-and-coupling"></a>Non-proportional damping and "coupling"</h3>
 <p>Otherwise C<sub>m</sub> has off-diagonal terms: damping forces produced by motion in
 mode r push on mode s, so the modal equations are <b>coupled</b>. The <b>coupling
-index</b> in the note is the largest off-diagonal term relative to the diagonal,
-max |C<sub>m,rs</sub>| / √(C<sub>m,rr</sub>C<sub>m,ss</sub>). It is 0 for
+index</b> in the note under the modal table is the largest off-diagonal term relative to
+the diagonal, max |C<sub>m,rs</sub>| / √(C<sub>m,rr</sub>C<sub>m,ss</sub>). It is 0 for
 proportional damping and approaches 1 when cross-coupling is as strong as each mode's own
-damping.</p>
+damping. It cannot exceed 1: dampers only dissipate energy, so C<sub>m</sub> is positive
+semidefinite, and then |C<sub>m,rs</sub>| ≤ √(C<sub>m,rr</sub>C<sub>m,ss</sub>)
+(Cauchy–Schwarz).</p>
 <p>The <b>ζ modal</b> column keeps only the diagonal of C<sub>m</sub> and ignores the
 rest. That is the standard "classical damping" approximation used throughout practice. It
 works well when coupling is modest or the modes are well separated in frequency, and
@@ -109,7 +113,7 @@ c<sub>1</sub> changed:</p>
 <tr><td>50</td><td>0.90</td><td>0.45 vs 0.98 (qualitatively wrong)</td></tr>
 </table>
 
-<h3>Exact damped modes are complex</h3>
+<h3><a name="exact-damped-modes-are-complex"></a>Exact damped modes are complex</h3>
 <p>To solve the damped problem exactly, write it in first-order (state-space) form with
 z = [x, ẋ]:</p>
 <p>&nbsp;&nbsp;ż = A z, &nbsp;&nbsp; A = [ 0 &nbsp;I ; −M<sup>−1</sup>K
@@ -123,7 +127,7 @@ their peaks at <i>different times</i>. The nodes drift and the motion looks part
 wave travelling along the chain, not a pure standing wave. With proportional damping all
 phases are 0° or 180° and ψ reduces to the real φ.</p>
 
-<h3>Is this an artifact of the solver?</h3>
+<h3><a name="is-this-an-artifact-of-the-solver"></a>Is this an artifact of the solver?</h3>
 <p><b>No, it is physics.</b> Both calculations are exact for the problem they solve:</p>
 <ul>
 <li><b>Undamped modes:</b> symmetric generalized eigenproblem Kφ = ω²Mφ
@@ -136,7 +140,7 @@ the damped system using the <i>undamped</i> mode shapes. When damping is proport
 two methods agree to machine precision, as the table shows. The time simulation uses the
 full M, C, K, so it always shows the true behaviour.</p>
 
-<h3>The state-space method: 2N eigenvalues</h3>
+<h3><a name="the-state-space-method-2n-eigenvalues"></a>The state-space method: 2N eigenvalues</h3>
 <p>Choose <i>Method → State-space</i> on the Modal analysis tab to see the full damped
 solution directly. Writing the N second-order equations as 2N first-order ones doubles
 the size of the eigenproblem, so there are <b>2N eigenvalues</b> and 2N eigenvectors:</p>
@@ -150,8 +154,13 @@ real parts, the displacements, are identical. Each oscillatory mode of the class
 table corresponds to one pair.</li>
 <li><b>Real eigenvalues.</b> A heavily damped (overdamped) mode gives two real
 eigenvalues instead of a pair: pure exponential decays with time constant
-τ = −1/λ and no oscillation. A chain that is free to slide (k<sub>1</sub> = 0)
-has λ = 0: rigid-body motion.</li>
+τ = −1/λ and no oscillation. A chain with no spring to the ground (k<sub>1</sub> = 0)
+has λ = 0: rigid-body motion, a position it keeps. With the damper c<sub>1</sub> still
+there, a second real root goes with it, close to −c<sub>1</sub>/(m<sub>1</sub> + … + m<sub>N</sub>)
+(−0.50 s<sup>−1</sup> for the default chain): a push slides the whole chain to a new position
+as its velocity dies away through c<sub>1</sub>. With
+c<sub>1</sub> = 0 too, λ = 0 is a repeated root with only one eigenvector (defective): the
+chain can drift at constant velocity, which no pair of exponentials describes.</li>
 <li><b>The eigenvector includes velocities.</b> The state eigenvector is
 [ψ ; λψ]. To start the chain in exactly one mode you must set the displacements
 <i>and</i> the velocities: x(0) = Re(ψ), ẋ(0) = Re(λψ). That is what <i>Release
@@ -168,7 +177,7 @@ or nearly proportional.</li>
 relative to the largest one. With proportional damping every phase is 0° or 180°
 (a real mode); otherwise the masses reach their peaks at different times.</p>
 
-<h3>Watching the modal coordinates</h3>
+<h3><a name="watching-the-modal-coordinates"></a>Watching the modal coordinates</h3>
 <p>Set <i>Plot coordinates</i> (above the time histories) to <i>Modal</i> to plot the
 motion in modal coordinates instead of mass displacements: one curve per mode, in the mode
 colors. Each curve is scaled to metres: it is that mode's share of the displacement of
@@ -184,10 +193,16 @@ are conjugates, so each pair is one curve, 2 Re(η). These are independent for
 <i>any</i> damping: each one is a pure decaying oscillation (or decay) unless the force
 drives it.</li>
 </ul>
+<p>This is also how any free vibration is worked out by hand: project the starting state
+onto the modes, q<sub>r</sub>(0) = φ<sub>r</sub><sup>T</sup>Mx(0) and
+q̇<sub>r</sub>(0) = φ<sub>r</sub><sup>T</sup>Mẋ(0), let each q<sub>r</sub> decay as its own
+single-mass oscillator, and add them back, x(t) = Σ φ<sub>r</sub>q<sub>r</sub>(t) (exact for
+proportional damping). A mode release starts with one q<sub>r</sub> only; a pluck starts
+with all of them.</p>
 <p>Under a harmonic force tuned to a natural frequency, the modal view shows which mode
 takes up the energy. The physical view shows the same motion as a mix of all of them.</p>
 
-<h3>Energy</h3>
+<h3><a name="energy"></a>Energy</h3>
 <p>The panel beside the animation tracks the energy. The stored energy is kinetic plus
 potential, T + V = ½ẋ<sup>T</sup>Mẋ + ½x<sup>T</sup>Kx. Multiplying the equations of
 motion by ẋ<sup>T</sup> gives the power balance</p>
@@ -210,7 +225,7 @@ another. The complex modes do not split the energy this way: they are not orthog
 with respect to M and K, so their energies have cross terms. The panel always uses the
 classical modes.</p>
 
-<h3>Sweeps and ground motion</h3>
+<h3><a name="sweeps-and-ground-motion"></a>Sweeps and ground motion</h3>
 <p>A <b>chirp</b> is a sine whose frequency sweeps from a start to an end frequency. Each
 mode swells as the sweep passes its natural frequency, so a slow sweep traces the
 frequency response out in time. A sweep that is fast compared with a mode's decay
@@ -230,11 +245,12 @@ resonant peak; above it more damping makes the isolation <i>worse</i>, which is 
 trade-off in choosing an isolator. In the chain each mass has its own crossover, and some
 masses fall below 1 well before the highest mode (in the default chain, m3 above 1.65 Hz). The damper c<sub>1</sub> passes on the ground's velocity, so at high frequency
 x<sub>1</sub> falls only as 1/ω rather than 1/ω². The work the ground does is the tension
-in element 1 times the ground's velocity, with a minus sign: −∫T<sub>1</sub>ẋ<sub>g</sub> dt.
+N<sub>1</sub> in element 1 times the ground's velocity, with a minus sign:
+−∫N<sub>1</sub>ẋ<sub>g</sub> dt.
 While the ground moves, the modal coordinates and the energy by mode use the motion
 relative to it, x − x<sub>g</sub>.</p>
 
-<h3>Vibration absorbers and tuned mass dampers</h3>
+<h3><a name="vibration-absorbers-and-tuned-mass-dampers"></a>Vibration absorbers and tuned mass dampers</h3>
 <p>A machine or structure that resonates near its operating frequency can be fixed by
 hanging a small mass m<sub>a</sub> on it with a spring k<sub>a</sub> (and perhaps a damper
 c<sub>a</sub>). In this app that is one more mass on the end of the chain
@@ -272,9 +288,9 @@ and the mode's frequency. The other modes are hardly changed.</p>
 <p>Tick <i>Compare with the chain without its last mass</i> on the <i>Frequency
 response</i> tab to see the structure before the absorber was added, dashed.</p>
 
-<h3>Try it</h3>
+<h3><a name="try-it"></a>Try it</h3>
 <ol>
-<li>Set c<sub>1</sub> = 15 and leave the other dampers at 2. The note switches to
+<li>Set c<sub>1</sub> = 15 and leave the other dampers at 2. The note under the modal table switches to
 non-proportional, and ζ modal and ζ exact separate.</li>
 <li>Select mode 3 and click <i>Release selected mode</i> (use 0.25× speed). The
 masses start in the real mode shape, but because that is not an exact mode of the damped
@@ -308,6 +324,30 @@ dashed primary alone peaks at 40 times its static deflection, the damped system 
 two sharp peaks. Set it to 5: the damper locks the absorber to m1 and one tall peak comes
 back. Every curve passes close to the same two fixed points.</li>
 </ol>
+
+<h3><a name="notation"></a>Notation</h3>
+<table border="1" cellspacing="0" cellpadding="3">
+<tr><th>Symbol</th><th>Meaning</th><th>Units</th></tr>
+<tr><td>m, k, c</td><td>mass, spring stiffness, damper coefficient (one element)</td><td>kg, N/m, N·s/m</td></tr>
+<tr><td>M, C, K</td><td>mass, damping and stiffness matrices of the chain</td><td>kg, N·s/m, N/m</td></tr>
+<tr><td>x, ẋ, ẍ; x<sub>g</sub></td><td>mass displacements, velocities, accelerations; ground displacement</td><td>m, m/s, m/s²</td></tr>
+<tr><td>f, F</td><td>applied force (vector), its amplitude</td><td>N</td></tr>
+<tr><td>ω<sub>n</sub>, f<sub>n</sub>; ω<sub>d</sub>, f<sub>d</sub></td><td>undamped and damped natural frequency</td><td>rad/s, Hz</td></tr>
+<tr><td>ζ</td><td>damping ratio: <i>modal</i> φ<sup>T</sup>Cφ/2ω, or <i>exact</i> −Re λ/|λ|</td><td>—</td></tr>
+<tr><td>φ<sub>r</sub>, Φ</td><td>undamped mode shape r, mass-normalized (φ<sup>T</sup>Mφ = 1); all of them as columns</td><td>1/√kg</td></tr>
+<tr><td>q<sub>r</sub></td><td>modal coordinate of mode r, x = Φq</td><td>m·√kg</td></tr>
+<tr><td>C<sub>m</sub></td><td>modal damping matrix Φ<sup>T</sup>CΦ</td><td>1/s</td></tr>
+<tr><td>A, z</td><td>state matrix and state vector [x; ẋ] of the first-order form ż = Az</td><td>—</td></tr>
+<tr><td>λ, λ*</td><td>eigenvalue of A and its complex conjugate</td><td>1/s</td></tr>
+<tr><td>ψ</td><td>complex (damped) mode shape, the displacement part of A's eigenvector</td><td>—</td></tr>
+<tr><td>V, η</td><td>eigenvectors [ψ; λψ] of A as columns; state-space modal coordinates η = V<sup>−1</sup>z</td><td>—</td></tr>
+<tr><td>H(ω)</td><td>receptance X/F</td><td>m/N</td></tr>
+<tr><td>T, V; E<sub>0</sub>, W, D</td><td>kinetic and potential energy; energy given, work done, energy dissipated</td><td>J</td></tr>
+<tr><td>N<sub>1</sub></td><td>tension in element 1 (spring plus damper)</td><td>N</td></tr>
+<tr><td>τ</td><td>time constant of a decay: 1/(ζω<sub>n</sub>), or −1/λ for a real root. The Virtual test page uses τ<sub>p</sub> for the hammer pulse and τ<sub>w</sub> for the exponential window</td><td>s</td></tr>
+<tr><td>μ</td><td>mass ratio of an absorber, m<sub>a</sub>/m<sub>1</sub> (or to the modal mass)</td><td>—</td></tr>
+<tr><td>α, β</td><td>Rayleigh damping coefficients, C = αM + βK</td><td>1/s, s</td></tr>
+</table>
 """
 
 

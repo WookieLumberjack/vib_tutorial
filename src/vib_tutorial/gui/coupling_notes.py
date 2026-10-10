@@ -42,6 +42,8 @@ NOTATION_HTML = """
 """
 
 THEORY_HTML = """
+<p><i>Before this page: <b>Undamped normal modes</b> (mass normalization) and <b>Vibration
+absorbers and tuned mass dampers</b> in the Simulation page's Background tab.</i></p>
 <p><i>Symbols are defined in the <a href="#notation">Notation</a> table at the end. The
 <i>Matrices (step by step)</i> tab works every formula below through with the current
 numbers.</i></p>
@@ -52,7 +54,10 @@ parts are joined? If the parts' frequencies are far apart, not much: each keeps 
 mode, shifted a little. If two of them are close, and the masses involved are not too
 different, the two modes <b>split</b>: neither frequency survives, and two new modes
 appear either side, each a mix of both parts. A vibration absorber does this on purpose.
-Most of the time it is not the intent, and it is worth being able to see it coming.</p>
+Most of the time it is not the intent, and it is worth being able to see it coming. A
+useful screening rule, derived below: with μ the ratio of the two modal masses, the modes
+stay apart, each little changed, when their frequencies differ by much more than √μ (as a
+fraction), and they split when they are closer than that.</p>
 <p>This page takes the chain on the Simulation page and splits it into two
 <i>subsystems</i>:</p>
 <ul>
@@ -224,7 +229,9 @@ of modes of A and B.</p>
 exact for the 2-DOF model. Where the modes split, each coupled mode is a mix of both, and
 its damping is roughly the energy-weighted mix of the two. A lightly damped part joined to
 a well-damped one at the same frequency shares its damping: that is how a tuned mass damper
-works. Far apart, each keeps its own.</p>
+works. At exact tuning the two coupled modes each get about the <b>average</b> of the two
+damping ratios: in the <i>Vibration absorber</i> preset the machine alone has ζ = 0.025 and
+the absorber none, and both coupled modes come out at 0.012. Far apart, each keeps its own.</p>
 
 <h3>What is left out</h3>
 <ul>

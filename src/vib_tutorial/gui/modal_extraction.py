@@ -31,7 +31,7 @@ METHOD_TIPS = {
     "fit around the peak, with a constant for the other modes.</p>"
     "<p>More accurate than peak picking, but still one mode at a time: it needs a few lines across "
     "each peak and well-separated modes.</p>",
-    Method.LSCF: "<p><b>LSCF</b> (least-squares complex frequency, as in PolyMAX) fits one rational "
+    Method.LSCF: "<p><b>LSCF</b> (least-squares complex frequency; here the single-reference form, which PolyMAX extends to several references) fits one rational "
     "fraction with a common denominator to every response at once, at every model order up to the "
     "maximum. The denominator's roots are the poles.</p><p>Physical poles come back at the same "
     "frequency and damping as the order rises; poles that only fit noise wander. The "
@@ -98,7 +98,7 @@ class ExtractionControls(QtWidgets.QGroupBox):
         form.addRow(self.pole_row)
         self.correct = QtWidgets.QCheckBox("Remove the exponential window's damping")
         self.correct.setChecked(True)
-        self.correct.setToolTip("The exponential window moves every pole 1/τ to the left. Moving the "
+        self.correct.setToolTip("The exponential window moves every pole 1/τ<sub>w</sub> to the left. Moving the "
                                 "identified poles back gives the structure's own damping.")
         form.addRow(self.correct)
         self.show_fit = QtWidgets.QCheckBox("Draw the fitted FRF")
@@ -381,7 +381,8 @@ high. Lengthen the block, or switch to the circle fit or LSCF.</li>
 <li>Add noise and watch the stabilization diagram: the weak, well-damped high modes lose
 their columns first. More averages bring them back.</li>
 <li>Use the exponential window and untick <i>Remove the exponential window's damping</i>:
-every ζ is too high by 1/(τω<sub>n</sub>).</li>
-<li>Put the force at m3 of the default chain (a node of mode 2): mode 2 cannot be found at all.</li>
+every ζ is too high by 1/(τ<sub>w</sub>ω<sub>n</sub>).</li>
+<li>Put the force at m3 of the default chain (a node of mode 2, as in <i>Where to look</i>
+above): mode 2 is missing from every FRF, so no method can find it.</li>
 </ul>
 """
