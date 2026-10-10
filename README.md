@@ -63,8 +63,12 @@ legible on its background. The choice is remembered.
   floor, the force μN opposing the sliding. This makes the chain nonlinear. Released from
   rest, a single mass still swings at its undamped natural frequency, but loses a fixed
   4F<sub>f</sub>/k of amplitude per cycle (a straight-line decay, not an exponential one) and
-  sticks for good at the first turn within F<sub>f</sub>/k of rest. Only the simulation
-  includes friction; the modes and frequency responses use the linear chain.
+  sticks for good at the first turn within F<sub>s</sub>/k of rest, F<sub>s</sub> being the
+  static friction. *Static / sliding friction* (one ratio for the whole floor) sets
+  F<sub>s</sub> above F<sub>f</sub>: a stuck mass then holds until its springs pull harder
+  than F<sub>s</sub>, and lurches off against the smaller F<sub>f</sub>, which gives
+  stick-slip under a slow pull. Only the simulation includes friction; the modes and
+  frequency responses use the linear chain.
 - **Apply a force to any mass**: a step, a harmonic `F sin(2πft)`, a rectangular pulse, or a
   chirp (a frequency sweep). Press **Space** (or the button) to switch it on and off, and
   watch the transients as it starts and stops.
@@ -560,9 +564,9 @@ mass keeps sliding the same way or stays stuck, friction is a constant force on 
 sliding mass, and a stuck mass's row of $A$ is zeroed. Adding the friction forces to the
 state again gives a linear system, stepped exactly. Within each step the simulator finds
 the first moment a sliding mass stops or a stuck one breaks free (the pull of its
-springs, dampers and the force exceeds $F_f$), on a cubic through the step's ends, steps
-exactly to it and updates which masses stick. A mass that stops sticks if the pull on it
-is at most $F_f$ and slides back otherwise. Over each piece friction takes out exactly
+springs, dampers and the force exceeds the static friction $F_s \ge F_f$), on a cubic
+through the step's ends, steps exactly to it and updates which masses stick. A mass that
+stops sticks if the pull on it is at most $F_s$ and slides back otherwise. Over each piece friction takes out exactly
 $F_f$ times the distance slid, so the energy balance still closes.
 
 ## Code layout

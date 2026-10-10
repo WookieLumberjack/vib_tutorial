@@ -664,6 +664,23 @@ def test_energy_time_history(app):
     w.close()
 
 
+def test_static_friction_ratio_reaches_the_simulator(app):
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    params = w.params
+    params.static_ratio.setValue(1.8)
+    assert w.sim.system.static_ratio == 1.8
+    params.dof.setValue(3)  # kept when the chain is resized
+    assert w.sim.system.static_ratio == 1.8 and w.sim.system.n == 3
+    params.rows[0][4].setValue(0.4)
+    params._copy_first_row()
+    assert list(w.sim.system.friction) == [0.4] * 3 and w.sim.system.static_ratio == 1.8
+    params._reset_defaults()
+    assert w.sim.system.static_ratio == 1.0 and not w.sim.system.friction.any()
+    w.close()
+
+
 def test_element_forces_view(app):
     import numpy as np
 

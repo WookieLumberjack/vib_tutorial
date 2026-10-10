@@ -220,7 +220,10 @@ slid. A stuck mass does not move, so its friction does no work. The balance beco
 <b>energy given + work = stored + dissipated by the dampers + by friction</b>. Friction is
 not linear: it does not grow with the motion, so small vibrations die out sooner, relative
 to their size, than large ones, and a mass comes to rest wherever its springs can no longer
-pull it free, not at the rest position. The simulator steps the chain exactly between the
+pull it free, not at the rest position. Static friction F<sub>s</sub> (the <i>Static /
+sliding</i> ratio times F<sub>f</sub>) can hold more than sliding friction resists: a stuck
+mass waits until the pull exceeds F<sub>s</sub>, then lurches off, which is what makes
+stick-slip (a squeaking hinge, a bowed string). The simulator steps the chain exactly between the
 moments a mass stops or breaks free; the modes and frequency responses leave friction
 out.</p>
 <p><b>By mode.</b> Because Φ<sup>T</sup>MΦ = I and Φ<sup>T</sup>KΦ = diag(ω<sub>r</sub>²),
