@@ -39,7 +39,7 @@ from .axes import log_axes
 from .coupling_notes import THEORY_HTML, matrices_html
 from .style import MAX_DOF, colors, text_on
 from .substructuring import error_color, zeta_text
-from .theming import mute
+from .theming import add_legend, mute
 
 DASH = QtCore.Qt.PenStyle.DashLine
 DOT = QtCore.Qt.PenStyle.DotLine
@@ -294,7 +294,7 @@ class VeeringPlot(QtWidgets.QWidget):
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.plot.setLabel("left", "Natural frequency", units="Hz")
         self.plot.setMouseEnabled(x=False, y=False)
-        self.legend = self.plot.addLegend(offset=(5, 5))
+        self.legend = add_legend(self.plot, offset=(5, 5))
         self.note = QtWidgets.QLabel()
         self.note.setWordWrap(True)
         mute(self.note)
@@ -396,7 +396,7 @@ class ShapePlots(pg.GraphicsLayoutWidget):
             p.getAxis("left").setTicks([[(v, f"{v:g}") for v in (-1, -0.5, 0, 0.5, 1)]])
             p.setLabel("left", "Normalized amplitude")
             self.plots.append(p)
-            self.legends.append(p.addLegend(offset=(5, 2), colCount=2))
+            self.legends.append(add_legend(p, offset=(5, 2), colCount=2))
         self.plots[1].setLabel("bottom", "Position along chain (0 = ground)")
         self.apply_theme()
 
@@ -461,7 +461,7 @@ class DrivePointFrf(QtWidgets.QWidget):
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.plot.setLabel("left", "|X / F|  [m/N]")
         self.plot.setLabel("bottom", "Frequency", units="Hz")
-        self.legend = self.plot.addLegend(offset=(-5, 5))
+        self.legend = add_legend(self.plot, offset=(-5, 5))
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(top)
         layout.addWidget(self.plot, 1)

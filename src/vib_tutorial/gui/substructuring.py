@@ -40,7 +40,7 @@ from .cms_notes import THEORY_HTML, matrices_html
 from .cms_recovery import BackExpansionView
 from .cms_time import CMSTimeView
 from .style import MAX_DOF, colors, current, text_on
-from .theming import mute, restyle_plot_item
+from .theming import add_legend, mute, restyle_plot_item
 
 SUB_NAMES = SUBSTRUCTURE_NAMES
 INTERFACE_TIP = (
@@ -334,13 +334,13 @@ class ComparisonPlots(pg.GraphicsLayoutWidget):
         # Headroom above +1 for a one-row legend, so it never covers a shape.
         self.shape.setYRange(-1.15, 1.5, padding=0)
         self.shape.getAxis("left").setTicks([[(v, f"{v:g}") for v in (-1, -0.5, 0, 0.5, 1)]])
-        self.shape_legend = self.shape.addLegend(offset=(5, 2), colCount=3)
+        self.shape_legend = add_legend(self.shape, offset=(5, 2), colCount=3)
         self.frf = self.addPlot(row=1, col=0, axisItems=log_axes())
         self.frf.setLogMode(x=True, y=True)
         self.frf.setLabel("left", "|X / F|  [m/N]")
         self.frf.setLabel("bottom", "Frequency", units="Hz")
         self.frf.showGrid(x=True, y=True, alpha=0.3)
-        self.frf_legend = self.frf.addLegend(offset=(-5, 5), colCount=2)
+        self.frf_legend = add_legend(self.frf, offset=(-5, 5), colCount=2)
         self.ci.layout.setRowStretchFactor(0, 2)
         self.ci.layout.setRowStretchFactor(1, 3)
         self._shape_items: list = []
@@ -620,7 +620,7 @@ class MethodComparison(QtWidgets.QWidget):
         self.plot.setLabel("bottom", "Reduced-model coordinates (modes kept + boundary DOFs)")
         self.plot.setLabel("left", "|frequency error|  [%]")
         self.plot.setMouseEnabled(x=False, y=False)
-        self.legend = self.plot.addLegend(offset=(-5, 5))
+        self.legend = add_legend(self.plot, offset=(-5, 5))
         self.note = QtWidgets.QLabel()
         self.note.setWordWrap(True)
         mute(self.note)

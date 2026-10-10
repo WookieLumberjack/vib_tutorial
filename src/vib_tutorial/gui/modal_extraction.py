@@ -17,6 +17,7 @@ from PySide6 import QtCore, QtWidgets
 from ..core.identification import Method, ModeMatch, Stabilization, Stability
 from .panels import spin
 from .style import colors, text_on
+from .theming import add_legend
 
 METHOD_TIPS = {
     Method.PEAK: "<p>One mode per peak of the summed FRF magnitude. f<sub>n</sub> is the frequency "
@@ -154,7 +155,7 @@ class StabilizationPlot(pg.PlotWidget):
         self.showGrid(x=True, y=True, alpha=0.2)
         self.setMouseEnabled(x=False, y=False)
         self.hideButtons()
-        self.legend = self.addLegend(offset=(-5, -5))
+        self.legend = add_legend(self, offset=(-5, -5))
         self.mif = self.plot()
         self.scatter = {
             Stability.NEW: pg.ScatterPlotItem(symbol="o", size=4, pen=None),

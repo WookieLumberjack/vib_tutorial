@@ -29,6 +29,7 @@ from ..core import (
     Response,
     Window,
     frf,
+    friction_frf,
     from_receptance,
     impact_spectrum,
     modal_analysis,
@@ -54,7 +55,7 @@ from .axes import log_axes
 from .modal_extraction import EXTRACTION_THEORY_HTML, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
 from .style import MAX_DOF, colors
-from .theming import SETTINGS, mute
+from .theming import SETTINGS, add_legend, mute
 
 FRAME_MS = 30
 STEP_BUDGET_MS = 25  # measuring per frame, so the page stays responsive
@@ -118,6 +119,12 @@ FORCE_LEVEL_TIP = (
     "does the noise, which is sized to each channel's range. With <b>friction</b> on a mass "
     "(F<sub>f</sub> on the Simulation page) it does. A lab checks linearity this way: measure at "
     "two force levels and overlay the FRFs (<i>Hold for comparison</i>).</p>"
+    "<p>With friction and a stepped sine, the plot also shows the describing-function FRF at "
+    "this level (dash-dot): the frequency response worked out with each friction force "
+    "replaced by its first harmonic, the same approximation as the dash-dot curves on the "
+    "Simulation page's Frequency response tab. A stepped sine reads that first harmonic, so "
+    "the two should agree while every mass slides; a random or impact test has no single "
+    "amplitude to compare with.</p>"
 )
 HOLD_TIP = (
     "<p>Keep the FRF measured now on the plot, in grey, while you change the force level or the "
@@ -218,11 +225,13 @@ class SignalView(pg.GraphicsLayoutWidget):
                 curve.setData(est.t[:n], y[:n], pen=None, symbol="o", symbolSize=4, symbolPen=None, symbolBrush=color)
                 m = est.fit[0].size if shown is None else int(np.searchsorted(est.fit[0], shown, side="right"))
                 fit.setData(est.fit[0][:m], y_fit[:m])
+            # Time spans the record. (Auto-ranging it padded by the widget's size when the range was
+            # worked out, which could be before the layout settled.)
+            plot.setXRange(0.0, float(est.t[-1]), padding=0.02)
             if shown is None:
-                plot.enableAutoRange()
+                plot.enableAutoRange(axis="y")
             else:  # the whole record's range, so the axes hold still while it is drawn
-                lo, hi = float(np.min(y)), float(np.max(y))
-                plot.setRange(xRange=(0.0, float(est.t[-1])), yRange=(lo, hi))
+                plot.setYRange(float(np.min(y)), float(np.max(y)))
         self.x_fit.setPen(pg.mkPen(colors.mass[j], width=1))
         self.response.setLabel("left", f"{est.response.symbol}{j + 1}", units=est.response.unit)
         for curve, window, signal in ((self.f_window, est.force_window, est.f), (self.x_window, est.response_window, est.x[:, j])):
@@ -267,7 +276,7 @@ class FrfView(pg.GraphicsLayoutWidget):
         self.mag = self.addPlot(row=0, col=0, axisItems=log_axes())
         self.mag.setLogMode(x=False, y=True)
         self.mag.setLabel("left", "|H|  [m/N]")
-        self.mag.addLegend(offset=(-5, 5))
+        add_legend(self.mag, offset=(-5, 5))
         self.phase = self.addPlot(row=1, col=0)
         self.phase.setLabel("left", "Phase", units="deg")
         self.phase.getAxis("left").setTickSpacing(90.0, 45.0)
@@ -365,7 +374,7 @@ class FrfView(pg.GraphicsLayoutWidget):
         # The exact curves, mode lines and bands change only with the test; while it runs,
         # only the measured curves are updated.
         key = (id(system), id(result), settings.fs, settings.input_dof, settings.response, j, stepped,
-               processing.window, processing.exp_end, processing.estimator)
+               processing.window, processing.exp_end, processing.estimator, settings.force_level)
         if key != self._key:
             self._key = key
             self._draw_reference(j, system, result, settings, processing, stepped)
@@ -409,6 +418,19 @@ class FrfView(pg.GraphicsLayoutWidget):
             pen = pg.mkPen(colors.grey, width=1, style=dash)
             self.mag.plot(f, np.abs(damped), pen=pen, name="Exact + window damping")
             self.phase.plot(f, phase_deg(damped), pen=pen)
+        if stepped and np.any(system.friction > 0):
+            # A stepped sine reads the first harmonic at each frequency, which is what the
+            # describing function approximates. A mass held by friction leaves a gap.
+            amplitude = settings.force_level * SINE_AMPLITUDE
+            fd = np.unique(np.concatenate([np.linspace(nyq / 600, nyq, 600), peaks]))
+            rf = friction_frf(system, fd, settings.input_dof, amplitude)
+            h = rf.X[:, j] / amplitude
+            h[rf.stuck[:, j]] = np.nan
+            described = from_receptance(fd, h, response)
+            pen = pg.mkPen(colors.strong, width=1.5, style=QtCore.Qt.PenStyle.DashDotLine)
+            self.mag.plot(fd, np.abs(described), pen=pen, connect="finite",
+                          name=f"Describing function at {amplitude:.3g} N")
+            self.phase.plot(fd, phase_deg(described), pen=pen, connect="finite")
 
         held_pen = pg.mkPen(colors.grey, width=1.5)
         self.held_curves = [self.mag.plot(pen=held_pen), self.phase.plot(pen=held_pen)]

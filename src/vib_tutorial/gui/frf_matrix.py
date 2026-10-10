@@ -19,7 +19,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from ..core import ChainSystem, ModalResult, ModalTerm, frf_matrix, modal_analysis, modal_frf_terms
 from .plots import frequency_grid
 from .style import MAX_DOF, colors
-from .theming import mute
+from .theming import add_legend, mute
 
 # Colours: the full solution in colors.strong; the sum of the modal terms, the
 # selected cells and the worst band in colors.force.
@@ -277,7 +277,7 @@ class FrfDetail(QtWidgets.QWidget):
         for p in (self.top, self.bottom):
             p.showGrid(x=True, y=True, alpha=0.3)
             p.getAxis("left").enableAutoSIPrefix(False)
-        self.legend = self.top.addLegend(offset=(-5, 5))
+        self.legend = add_legend(self.top, offset=(-5, 5))
         self.plots.ci.layout.setRowStretchFactor(0, 3)
         self.plots.ci.layout.setRowStretchFactor(1, 2)
         layout = QtWidgets.QVBoxLayout(self)
