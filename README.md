@@ -497,13 +497,25 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   so the phase lag can be read off it: 0° below the critical speed, 90° at it, 180° above.
 - **Speed**: a target and a ramp rate, for run-ups and coast-downs through the criticals.
   Tapping the disc rings every mode, forward and backward.
+- **Run-up and coast-down**: one button ramps to a starting speed, lets the start-up transient
+  die away, then runs up to a second speed and back at the ramp rate. Once per revolution a
+  keyphasor-triggered DFT takes the 1X vector (a tracking filter), along with the largest
+  displacement over the revolution. Each leg becomes its own trace; earlier sweeps can be held
+  to compare ramp rates, and a table gives each one's peak and the speed it came at against
+  the steady state.
+- **Bode and polar plots**: the steady-state 1X amplitude and phase lag against speed at
+  either bearing, the disc or midspan, read by an x or a y probe or as the orbit's major axis,
+  with the tracked sweeps over it and a marker at the current speed. On the polar plot the
+  steady-state vector traces its circle through each critical speed.
 - **Campbell diagram**: the damped natural frequencies against speed, coloured by whirl
   direction, with the 1X line and the critical speeds. Drag the speed line to set the target.
 - **Equations & matrices**: M, C, G and K with the current numbers, the shaft's condensed
   beam stiffness, the state matrix A(Ω), and the modes at the current speed. G is
   skew-symmetric: it sits beside C but does no work.
 - **Theory**: the classic case, heavy and high spot, the gyroscopic effect, forward and
-  backward whirl, anisotropic supports, and why the solution uses state space.
+  backward whirl, anisotropic supports, run-ups through a critical speed (why a fast ramp
+  peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²), and why
+  the solution uses state space.
 
 The default is the classic case: the disc at midspan on identical, isotropic supports, so its
 translation and tilt are uncoupled, and the first critical speed is the textbook
@@ -513,6 +525,14 @@ first mode. Different vertical and horizontal stiffness splits the critical spee
 with backward whirl between them.
 
 ![Jeffcott rotor at 1400 rpm, just below its 1584 rpm critical speed: the disc whirls 67 µm from centre and its heavy spot leads the high spot by 20°](docs/images/jeffcott_rotor.png)
+
+A ramp through a critical speed gives the whirl no time to build up to its steady-state peak.
+The faster the ramp, the lower the peak, and the further past the critical speed it comes: after
+it on a run-up, before it on a coast-down. Whether a ramp counts as slow depends on
+α/ω<sub>c</sub>² against ζ². Once past the critical, the free vibration left over at the natural
+frequency beats with the 1X response.
+
+![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1932 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
 
 ## The math, briefly
 
@@ -647,6 +667,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/rotor.py`: the Jeffcott rotor: shaft (beam elements, condensed), disc, bearings and the
   gyroscopic matrix; whirl modes, the Campbell diagram and critical speeds, the steady
   unbalance response, and an exact FOH time stepper that follows a speed ramp.
+- `core/rotor_sweep.py`: run-up and coast-down: the steady-state 1X vectors at each station,
+  once-per-revolution tracking of the 1X vector and peak (`RevolutionTracker`), and
+  `RunUpCoastDown`, which drives the stepper through a sweep and records each leg.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and
@@ -751,6 +774,14 @@ Q = unbalance_response(rotor, np.array([150.0]))               # steady whirl at
 spin = RotorSimulator(rotor)
 spin.target = 3000 / RPM                                       # ramps at spin.accel (rad/s²)
 r = spin.advance(0.25)                                         # r.t, r.q (steps, 8), r.omega, r.phase
+
+from vib_tutorial.core.rotor_sweep import RunUpCoastDown, probe, steady_vectors
+
+V = steady_vectors(rotor, np.linspace(10.0, 300.0, 500))       # 1X vectors (500, 4 stations, x/y), complex
+spin.accel = 1000 / RPM                                        # 1000 rpm/s
+up, down = RunUpCoastDown(spin, 800 / RPM, 2400 / RPM).run()   # each leg tracked once per revolution
+w, v, peak = up.trace(1, "x")                                  # disc, x probe: speed, 1X vector, max |x|
+up.peak(1, "orbit")                                            # (largest 1X major axis, speed it came at)
 ```
 
 ## Ideas for extension

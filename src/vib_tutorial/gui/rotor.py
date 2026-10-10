@@ -1,10 +1,11 @@
 """Jeffcott rotor page: a disc on a flexible shaft in flexible bearings, spun up through its criticals.
 
-Left: the rotor's parameters and the speed controls. Centre: a 3D view of the
-whirling shaft (projected onto a 2D pyqtgraph scene, no OpenGL), the orbits at
-the bearings, the disc and midspan, and a strip chart. Right: the Campbell
-diagram, the matrices of the equations of motion at the current speed, and the
-theory notes.
+Left: the speed controls, the run-up and coast-down sweep, and the rotor's
+parameters. Centre: a 3D view of the whirling shaft (projected onto a 2D
+pyqtgraph scene, no OpenGL), the orbits at the bearings, the disc and midspan,
+and a strip chart. Right: the Campbell diagram, the Bode and polar plots of the
+1X response (steady state and tracked sweeps), the matrices of the equations of
+motion at the current speed, and the theory notes.
 """
 
 from __future__ import annotations
@@ -29,16 +30,26 @@ from ..core.rotor import (
     RotorSystem,
     campbell,
 )
+from ..core.rotor_sweep import (
+    DIRECTIONS,
+    STATIONS,
+    RunUpCoastDown,
+    TrackedSweep,
+    lag_degrees,
+    probe,
+    steady_vectors,
+)
 from .cms_time import SampleBuffer
 from .panels import spin
+from .rotor_bode import SWEEP_COLORS, BodePlots, PolarPlot, SweepPlots, nice_marks
 from .rotor_notes import THEORY_HTML, matrices_html, whirl_name
 from .style import colors
 from .theming import add_legend, mute
 
 FRAME_MS = 16
-SPEEDS = (0.1, 0.25, 0.5, 1.0)  # simulation speed, × real time
+SPEEDS = (0.1, 0.25, 0.5, 1.0, 2.0)  # simulation speed, × real time
 MAX_RPM = 10_000.0
-STATIONS = ("Bearing A", "Disc", "Midspan", "Bearing B")
+DIRECTION_NAMES = ("x (horizontal probe)", "y (vertical probe)", "Orbit (major axis)")
 # Columns of the history: (x, y) at each station, then the unbalance's angle φ and the speed Ω.
 PHASE, OMEGA = 8, 9
 STORE_DT = 2.5e-4  # s; samples kept for the plots are at least this far apart
@@ -52,11 +63,23 @@ GROUND = 1.1  # display units from the shaft's axis to the supports
 DAMPED = 0.3  # modes with more damping than this are drawn hollow and are not called critical
 DASH = QtCore.Qt.PenStyle.DashLine
 DOT = QtCore.Qt.PenStyle.DotLine
+STEADY_POINTS = 2000  # speeds on the steady-state curve, plus as many again around the criticals
 
 SPEED_TIP = (
     "<p>The speed the rotor ramps toward, at the ramp rate. Drag the red line on the Campbell diagram "
     "to set it too.</p><p>Ramp slowly through a critical speed and the whirl builds up to its "
     "steady-state peak; ramp quickly and it passes before the whirl can grow.</p>"
+)
+SWEEP_TIP = (
+    "<p>Ramp to the first speed and let the start-up transient die away, then run up to the second "
+    "speed and coast back down, at the ramp rate above. Once per revolution the 1X vector is measured "
+    "at the chosen station, and drawn over the steady-state curve on the Bode and polar plots.</p>"
+    "<p>Run it again at another ramp rate to compare: the faster the ramp, the lower the peak, and the "
+    "further past the critical speed it comes.</p>"
+)
+HOLD_SWEEPS_TIP = (
+    "<p>Keep the earlier sweeps on the plots when a new one starts, to compare ramp rates. Unticked, a "
+    "new sweep replaces them. Changing the rotor clears them, since the steady-state curve changes.</p>"
 )
 TAP_TIP = (
     "<p>Hit the disc downward (an impulse of 5 mN·s). The tap sets every mode ringing at its own "
@@ -565,6 +588,11 @@ class RotorPage(QtWidgets.QWidget):
         self._stride = 1
         self._carry = 0  # steps since the last stored sample
         self._matrices_speed = -1.0  # rpm the matrices were drawn at
+        self.run_up: RunUpCoastDown | None = None  # the sweep running, if any
+        self.sweeps: list[TrackedSweep] = []  # every leg on the plots, the running one's too
+        self._sweep_pairs = 0  # sweeps started since the plots were cleared (each pair's colour)
+        self._steady_rpm = np.empty(0)  # the steady-state curve: speeds (rpm)
+        self._steady_vectors = np.empty((0, len(STATIONS), 2), dtype=complex)  # and 1X vectors there
 
         # --- parameters
         left = QtWidgets.QWidget()
@@ -574,6 +602,7 @@ class RotorPage(QtWidgets.QWidget):
         self.readout.setWordWrap(True)
         self.readout.setTextFormat(QtCore.Qt.TextFormat.RichText)
         lv.addWidget(self.readout)
+        lv.addWidget(self._sweep_box())
         lv.addWidget(self._rotor_box())
         lv.addWidget(self._bearing_box())
         self.crit_label = QtWidgets.QLabel()
@@ -623,11 +652,34 @@ class RotorPage(QtWidgets.QWidget):
         ct = QtWidgets.QVBoxLayout(campbell_tab)
         ct.addWidget(self.campbell_plot, 1)
         ct.addWidget(self.campbell_note)
+        self.bode = BodePlots()
+        self.polar = PolarPlot()
+        self.sweep_plots = SweepPlots(self.bode, self.polar)
+        self.sweep_summary = QtWidgets.QLabel()
+        self.sweep_summary.setWordWrap(True)
+        self.sweep_summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        bode_tab = QtWidgets.QWidget()
+        bt = QtWidgets.QVBoxLayout(bode_tab)
+        bt.addWidget(self.bode, 1)
+        bt.addWidget(self.sweep_summary)
+        self.polar_note = QtWidgets.QLabel(
+            "The 1X vector at the chosen station: its length is the amplitude, its angle clockwise from "
+            "the right the phase lag. Through a lightly damped critical speed the steady-state vector "
+            "traces a circle, lagging 90° at its lowest point. The labels give the speed in rpm."
+        )
+        self.polar_note.setWordWrap(True)
+        mute(self.polar_note)
+        polar_tab = QtWidgets.QWidget()
+        pt = QtWidgets.QVBoxLayout(polar_tab)
+        pt.addWidget(self.polar, 1)
+        pt.addWidget(self.polar_note)
         self.matrices = QtWidgets.QTextBrowser()
         self.theory = QtWidgets.QTextBrowser()
         self.theory.setHtml(THEORY_HTML)
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(campbell_tab, "Campbell diagram")
+        self.tabs.addTab(bode_tab, "Bode plot")
+        self.tabs.addTab(polar_tab, "Polar plot")
         self.tabs.addTab(self.matrices, "Equations && matrices")
         self.tabs.addTab(self.theory, "Theory")
         self.tabs.currentChanged.connect(lambda _: self._refresh_matrices())
@@ -697,6 +749,65 @@ class RotorPage(QtWidgets.QWidget):
         for b in (self.run_button, self.reset_button, self.tap_button):
             buttons.addWidget(b)
         form.addRow(buttons)
+        return box
+
+    def _sweep_box(self) -> QtWidgets.QGroupBox:
+        box = QtWidgets.QGroupBox("Run-up and coast-down")
+        form = QtWidgets.QFormLayout(box)
+        self.sweep_from = spin(60.0, MAX_RPM, 800.0, 0, " rpm")
+        self.sweep_to = spin(60.0, MAX_RPM, 2400.0, 0, " rpm")
+        for w in (self.sweep_from, self.sweep_to):
+            w.setToolTip(SWEEP_TIP)
+            w.valueChanged.connect(self._fit_tracking_range)
+        speeds = QtWidgets.QHBoxLayout()
+        speeds.addWidget(self.sweep_from, 1)
+        speeds.addWidget(QtWidgets.QLabel("to"))
+        speeds.addWidget(self.sweep_to, 1)
+        form.addRow("From:", speeds)
+        buttons = QtWidgets.QHBoxLayout()
+        self.sweep_button = QtWidgets.QPushButton("Run up and coast down")
+        self.sweep_button.setToolTip(SWEEP_TIP)
+        self.sweep_button.clicked.connect(self._on_sweep_button)
+        self.clear_sweeps_button = QtWidgets.QPushButton("Clear")
+        self.clear_sweeps_button.setToolTip("Take every sweep off the Bode and polar plots")
+        self.clear_sweeps_button.clicked.connect(self.clear_sweeps)
+        buttons.addWidget(self.sweep_button, 2)
+        buttons.addWidget(self.clear_sweeps_button, 1)
+        form.addRow(buttons)
+        self.hold_sweeps = QtWidgets.QCheckBox("Hold earlier sweeps for comparison")
+        self.hold_sweeps.setChecked(True)
+        self.hold_sweeps.setToolTip(HOLD_SWEEPS_TIP)
+        form.addRow(self.hold_sweeps)
+        self.probe_station = QtWidgets.QComboBox()
+        self.probe_station.addItems(STATIONS)
+        self.probe_station.setCurrentIndex(1)
+        self.probe_direction = QtWidgets.QComboBox()
+        self.probe_direction.addItems(DIRECTION_NAMES)
+        self.probe_direction.setToolTip(
+            "<p>What the Bode and polar plots show: a probe reading x or y, or the orbit's major axis. "
+            "The phase lag is the angle the shaft turns from the keyphasor (the heavy spot passing +x) "
+            "to the probe's positive peak, so on a circular orbit the y probe reads 90° more than the x "
+            "probe. For the orbit, it is the angle from the heavy spot back to the high spot.</p>"
+        )
+        for c in (self.probe_station, self.probe_direction):
+            c.currentIndexChanged.connect(self._on_probe)
+        probe_row = QtWidgets.QHBoxLayout()
+        probe_row.addWidget(self.probe_station, 1)
+        probe_row.addWidget(self.probe_direction, 2)
+        form.addRow("Plot:", probe_row)
+        self.show_peaks = QtWidgets.QCheckBox("Per-revolution peaks (dots)")
+        self.show_peaks.setChecked(True)
+        self.show_peaks.setToolTip(
+            "<p>Also draw the largest displacement over each revolution (the largest orbit radius, for the "
+            "orbit). Unlike the 1X vector it includes the free vibration at the natural frequency, so "
+            "just past the critical speed it shows the beating.</p>"
+        )
+        self.show_peaks.toggled.connect(self._on_show_peaks)
+        form.addRow(self.show_peaks)
+        self.sweep_status = QtWidgets.QLabel()
+        self.sweep_status.setWordWrap(True)
+        mute(self.sweep_status)
+        form.addRow(self.sweep_status)
         return box
 
     def _rotor_box(self) -> QtWidgets.QGroupBox:
@@ -842,6 +953,8 @@ class RotorPage(QtWidgets.QWidget):
 
     def _on_params(self) -> None:
         system = self.system()
+        if self.sweeps or self.run_up is not None:
+            self.clear_sweeps()  # their steady-state curve is about to change
         self.sim.set_system(system)
         self.view.set_system(system)
         self.orbits.set_midspan_shown(abs(system.position - 0.5) > 1e-9)
@@ -880,6 +993,17 @@ class RotorPage(QtWidgets.QWidget):
         )
         self._matrices_speed = -1.0
         self._refresh_matrices()
+        self._refresh_steady()
+
+    def _refresh_steady(self) -> None:
+        """The steady-state 1X vectors at every station, finely around each critical speed."""
+        w = [np.linspace(MAX_RPM / STEADY_POINTS, MAX_RPM, STEADY_POINTS) / RPM]
+        crits = [c for c, _, _ in self.campbell.criticals] if self.campbell else []
+        w += [np.linspace(0.8 * c, 1.2 * c, STEADY_POINTS // max(len(crits), 1)) for c in crits]
+        w = np.unique(np.concatenate(w))
+        self._steady_rpm = w * RPM
+        self._steady_vectors = steady_vectors(self.sim.system, w)
+        self._draw_tracking(full=True)
 
     def _refresh_matrices(self) -> None:
         rpm = self.sim.omega * RPM
@@ -895,6 +1019,10 @@ class RotorPage(QtWidgets.QWidget):
         self.orbits.apply_theme()
         self.time.apply_theme()
         self.campbell_plot.apply_theme()
+        self.bode.apply_theme()
+        self.polar.apply_theme()
+        self.sweep_plots.apply_theme()
+        self._draw_tracking(full=True)
         scroll = self.theory.verticalScrollBar().value()
         self.theory.setHtml(THEORY_HTML)
         self.theory.verticalScrollBar().setValue(scroll)
@@ -907,6 +1035,7 @@ class RotorPage(QtWidgets.QWidget):
         self.target_rpm.setValue(min(max(rpm, 0.0), MAX_RPM))
 
     def _on_target(self, rpm: float) -> None:
+        self.stop_sweep(hold_speed=False)  # the user took over the speed
         self.sim.target = rpm / RPM
         self.speed_slider.blockSignals(True)
         self.speed_slider.setValue(round(rpm))
@@ -927,6 +1056,7 @@ class RotorPage(QtWidgets.QWidget):
         self._draw()
 
     def reset(self) -> None:
+        self.stop_sweep()
         self.sim.reset()
         self.history.clear()
         self._target_t = 0.0
@@ -935,6 +1065,185 @@ class RotorPage(QtWidgets.QWidget):
 
     def tap(self) -> None:
         self.sim.tap(0.0, -TAP_IMPULSE)
+
+    # ------------------------------------------------------------- run-up and coast-down
+    def _on_sweep_button(self) -> None:
+        if self.run_up is None:
+            self.start_sweep()
+        else:
+            self.stop_sweep()
+
+    def start_sweep(self) -> None:
+        """Ramp to From, settle, run up to To and coast back down, tracking the 1X vector."""
+        start, turn = self.sweep_from.value() / RPM, self.sweep_to.value() / RPM
+        if start == turn:
+            self.sweep_status.setText("Pick two different speeds.")
+            return
+        self.stop_sweep()
+        if not self.hold_sweeps.isChecked():
+            self.clear_sweeps()
+        self.run_up = RunUpCoastDown(self.sim, start, turn)
+        self._sync_target()
+        self._sweep_pairs += 1
+        self.sweep_button.setText("Stop sweep")
+        self.ramp.setEnabled(False)  # each sweep is labelled with its rate
+        if self.tabs.currentWidget() is not self.polar.parentWidget():
+            self.tabs.setCurrentWidget(self.bode.parentWidget())
+        self._fit_tracking_range()
+        self._update_sweep_status()
+        self._start_timer()
+
+    def stop_sweep(self, hold_speed: bool = True) -> None:
+        """Stop the sweep running (its legs so far stay on the plots), holding the speed it got to."""
+        if self.run_up is None:
+            return
+        self.run_up = None
+        self.sweep_button.setText("Run up and coast down")
+        self.ramp.setEnabled(True)
+        if hold_speed:
+            self.sim.target = self.sim.omega
+            self._sync_target()
+        self._update_sweep_status()
+
+    def clear_sweeps(self) -> None:
+        self.stop_sweep()
+        self.sweeps = []
+        self._sweep_pairs = 0
+        self.sweep_plots.clear()
+        self._update_sweep_status()
+        self._draw_tracking(full=True)
+
+    def _sync_target(self) -> None:
+        """Show the simulator's target speed (set by the sweep) in the speed box, without acting on it."""
+        rpm = self.sim.target * RPM
+        for w in (self.target_rpm, self.speed_slider):
+            w.blockSignals(True)
+        self.target_rpm.setValue(rpm)
+        self.speed_slider.setValue(round(rpm))
+        for w in (self.target_rpm, self.speed_slider):
+            w.blockSignals(False)
+        self._stride = max(1, round(STORE_DT / self.sim.step_size()))
+
+    def _advance_sweep(self, duration: float):
+        run_up = self.run_up
+        before = len(run_up.sweeps)
+        r = run_up.advance(duration)
+        for sweep in run_up.sweeps[before:]:
+            self.sweeps.append(sweep)
+            self.sweep_plots.add(sweep, self._sweep_pairs - 1)
+        if run_up.sim.target * RPM != self.target_rpm.value():
+            self._sync_target()
+        if run_up.done:
+            self.run_up = None
+            self.sweep_button.setText("Run up and coast down")
+            self.ramp.setEnabled(True)
+        self._update_sweep_status()
+        return r
+
+    def _update_sweep_status(self) -> None:
+        r = self.run_up
+        if r is None:
+            n = len(self.sweeps)
+            text = f"{n} sweep{'s' if n != 1 else ''} on the Bode and polar plots." if n else ""
+        elif r.stage == "approach":
+            text = f"Going to {r.start * RPM:,.0f} rpm…"
+        elif r.stage == "settle":
+            text = f"Settling at {r.start * RPM:,.0f} rpm…"
+        else:
+            leg = r.sweeps[-1]
+            text = f"{leg.label}: {self.sim.omega * RPM:,.0f} rpm, {len(leg)} revolutions tracked"
+        self.sweep_status.setText(text)
+
+    def _on_probe(self) -> None:
+        self._fit_tracking_range()
+        self._draw_tracking(full=True)
+
+    def _on_show_peaks(self, on: bool) -> None:
+        self.sweep_plots.set_show_peaks(on)
+
+    def _probe(self) -> tuple[int, str]:
+        return self.probe_station.currentIndex(), DIRECTIONS[self.probe_direction.currentIndex()]
+
+    def _tracking_range(self) -> tuple[float, float]:
+        """Speeds (rpm) the Bode and polar plots show: the sweep's, and those of the sweeps on them."""
+        speeds = [self.sweep_from.value(), self.sweep_to.value()]
+        for sweep in self.sweeps:
+            if len(sweep):
+                speeds += [min(sweep.speed) * RPM, max(sweep.speed) * RPM]
+        return min(speeds), max(speeds)
+
+    def _fit_tracking_range(self) -> None:
+        lo, hi = self._tracking_range()
+        pad = 0.04 * max(hi - lo, 1.0)
+        self.bode.amp.setXRange(max(lo - pad, 0.0), hi + pad, padding=0)
+        self._draw_tracking(full=True)
+        self.polar.getPlotItem().enableAutoRange()
+
+    def _steady_probe(self) -> tuple[np.ndarray, np.ndarray]:
+        """The steady-state 1X values at the chosen station and direction, and their unwrapped lag."""
+        station, direction = self._probe()
+        values = probe(self._steady_vectors[:, station], direction)
+        return values, lag_degrees(values)
+
+    def _draw_tracking(self, full: bool = False) -> None:
+        """The Bode and polar plots: the steady-state curve and summary (if `full`), the sweeps, the marker."""
+        if not self._steady_rpm.size:
+            return
+        rpm = self._steady_rpm
+        values, lag = self._steady_probe()
+        if full:
+            self.bode.set_steady(rpm, values, lag)
+            lo, hi = self._tracking_range()
+            shown = (rpm >= lo) & (rpm <= hi)
+            self.polar.set_steady(rpm[shown], values[shown], nice_marks(lo, hi))
+        self.sweep_plots.redraw(*self._probe(), rpm, lag, full)
+        here = self.sim.omega * RPM
+        v = complex(np.interp(here, rpm, values.real), np.interp(here, rpm, values.imag))
+        self.bode.set_here(here, abs(v), float(np.interp(here, rpm, lag)))
+        self.polar.set_here(v)
+        if full or (self.run_up is not None and self.run_up.stage in ("out", "back")):
+            text = self._summary_html(rpm, values)
+            if text != self.sweep_summary.text():
+                self.sweep_summary.setText(text)
+
+    def _summary_html(self, rpm: np.ndarray, values: np.ndarray) -> str:
+        """The steady-state peak over the sweeps' speeds, and each sweep's peak against it."""
+        station, direction = self._probe()
+        lo, hi = self._tracking_range()
+        inside = np.flatnonzero((rpm >= lo) & (rpm <= hi))
+        if not inside.size:
+            return ""
+        i = inside[np.argmax(np.abs(values[inside]))]
+        ss_amp, ss_rpm = float(abs(values[i])), float(rpm[i])
+        wc = ss_rpm / RPM
+        where = f"{STATIONS[station].lower()}, {DIRECTION_NAMES[self.probe_direction.currentIndex()].lower()}"
+        head = f"<b>Steady state</b> ({where}): peak {_fmt_len(ss_amp)} at {ss_rpm:,.0f} rpm"
+        zetas = [(abs(w - wc), z) for w, _, z in (self.campbell.criticals if self.campbell else [])]
+        if zetas and min(zetas)[0] < 0.05 * wc:
+            z = min(zetas)[1]
+            head += f"; its mode has ζ = {z:.3g}, ζ² = {z * z:.2g}"
+        if not self.sweeps:
+            return head + ("<br><small>Run up and coast down to track the 1X response over this curve.</small>")
+        rows = []
+        for c in self.sweep_plots.curves:
+            sweep = c.sweep
+            amp, w = sweep.peak(station, direction)
+            if not len(sweep):
+                continue
+            color = colors.mode[SWEEP_COLORS[c.color % len(SWEEP_COLORS)]]
+            line = "━━" if sweep.up else "╍╍"
+            alpha = sweep.rate / RPM
+            rows.append(
+                f"<tr><td><span style='color:{color}'><b>{line}</b></span> {sweep.label}</td>"
+                f"<td align='right'>{alpha / wc**2:.2g}</td><td align='right'>{_fmt_len(amp)}</td>"
+                f"<td align='right'>{100 * amp / ss_amp:.0f}%</td><td align='right'>{w * RPM:,.0f}</td>"
+                f"<td align='right'>{(w - wc) * RPM:+,.0f}</td></tr>"
+            )
+        return (
+            head + "<table cellspacing='0' cellpadding='2'><tr><th align='left'>Sweep</th>"
+            "<th>α/ω<sub>c</sub>²</th><th>1X peak</th><th>of steady</th><th>at rpm</th><th>vs steady</th></tr>"
+            + "".join(rows) + "</table>"
+        )
 
     # ------------------------------------------------------------- loop
     def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
@@ -963,7 +1272,10 @@ class RotorPage(QtWidgets.QWidget):
     def step(self, duration: float) -> None:
         """Advance by `duration` s of simulated time and redraw."""
         self._target_t = min(self._target_t + duration, self.sim.t + 0.1 + duration)
-        r = self.sim.advance(self._target_t - self.sim.t)
+        if self.run_up is not None:
+            r = self._advance_sweep(self._target_t - self.sim.t)
+        else:
+            r = self.sim.advance(self._target_t - self.sim.t)
         if r.t.size:
             # Keep every stride-th sample, continuing the stride across advances.
             first = (self._stride - self._carry - 1) % self._stride
@@ -1001,6 +1313,7 @@ class RotorPage(QtWidgets.QWidget):
         st = self.station.currentIndex()
         self.time.update_curves(t, hist[:, 2 * st : 2 * st + 2], hist[:, OMEGA] * RPM, self.window.value())
         self.campbell_plot.set_speed(sim.omega * RPM)
+        self._draw_tracking()
 
         # Readout.
         rpm = sim.omega * RPM

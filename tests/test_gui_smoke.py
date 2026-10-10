@@ -1564,6 +1564,46 @@ def test_rotor_page(app):
     assert "1,584 rpm" in p.crit_label.text() and "forward" in p.crit_label.text()
     assert not p.orbits.plots[2].isVisible()  # midspan is the disc
 
+    # A run-up and coast-down, tracked once per revolution onto the Bode and polar plots.
+    p.ramp.setValue(5000.0)
+    p.sweep_from.setValue(1200.0)
+    p.sweep_to.setValue(2000.0)
+    p.start_sweep()
+    assert p.tabs.currentWidget() is p.bode.parentWidget() and not p.ramp.isEnabled()
+    assert p.sweep_button.text() == "Stop sweep"
+    for _ in range(100):
+        if p.run_up is None:
+            break
+        p.step(0.05)
+    assert p.run_up is None and len(p.sweeps) == 2 and p.ramp.isEnabled()
+    assert p.target_rpm.value() == pytest.approx(1200.0) and p.sim.omega == pytest.approx(1200.0 / RPM)
+    assert p.sweep_plots.curves[0].amp.getData()[0].size > 3
+    summary = p.sweep_summary.text()
+    assert "Run-up 5,000 rpm/s" in summary and "Coast-down 5,000 rpm/s" in summary and "1,590 rpm" in summary
+    # Another station and direction redraw the same sweeps.
+    p.probe_station.setCurrentIndex(0)
+    p.probe_direction.setCurrentIndex(2)
+    assert "bearing a, orbit" in p.sweep_summary.text()
+    assert p.polar.steady.getData()[0].size > 0 and p.polar.mark_labels
+    # Held, a second sweep adds to the first; taking over the speed stops it, its legs so far kept.
+    p.start_sweep()
+    for _ in range(30):
+        if len(p.sweeps) == 3:
+            break
+        p.step(0.02)
+    assert p.run_up is not None and len(p.sweeps) == 3
+    p.set_target_rpm(1500.0)
+    assert p.run_up is None and len(p.sweeps) == 3 and p.sim.target == pytest.approx(1500.0 / RPM)
+    assert p.target_rpm.value() == 1500.0
+    # Not held, a new sweep replaces them; Clear takes them all off.
+    p.hold_sweeps.setChecked(False)
+    p.start_sweep()
+    assert p.sweeps == [] and len(p.sweep_plots.curves) == 0
+    p.step(0.05)
+    p.clear_sweeps()
+    assert p.run_up is None and not p.sweeps and "sweep" not in p.sweep_status.text()
+    p.ramp.setValue(500.0)
+
     # Off centre, anisotropic, different bearings: the panels describe it and the analysis follows.
     p.position.setValue(0.3)
     p.isotropic.setChecked(False)
