@@ -609,21 +609,23 @@ def test_dissipation_matches_quadrature():
     assert sim.work == pytest.approx(np.trapezoid(f * v[:, 2], dx=dt), rel=1e-4)
 
 
-def test_ledger_balances_at_every_sample():
+@pytest.mark.parametrize("friction", [None, [0.3, 0.0, 0.5]])
+def test_ledger_balances_at_every_sample(friction):
     from vib_tutorial.core import kinetic_energy, potential_energy
 
-    s = ChainSystem.uniform(3, damping=5.0)
+    s = ChainSystem([1.0] * 3, [400.0] * 3, [5.0] * 3, friction)
     force = ForceController(ForceSettings(target=2, kind=ForceKind.HARMONIC, amplitude=5.0, freq_hz=1.5))
     sim = Simulator(s, force)
     sim.set_displacement(np.array([0.01, 0.0, -0.01]))
     force.switch_on()
     for _ in range(2):  # the second call continues the running totals
         _, xs, vs, _ = sim.advance(1.0)
-        added, work, dissipated = sim.ledger.T
+        added, work, dissipated, rubbed = sim.ledger.T
         stored = kinetic_energy(s, vs).sum(axis=1) + potential_energy(s, xs).sum(axis=1)
-        np.testing.assert_allclose(added + work - dissipated, stored, rtol=0, atol=1e-12)
-    assert (work[-1], dissipated[-1]) == (sim.work, sim.dissipated)
-    assert sim.advance(0.0)[0].size == 0 and sim.ledger.shape == (0, 3)
+        np.testing.assert_allclose(added + work - dissipated - rubbed, stored, rtol=0, atol=1e-12)
+    assert (work[-1], dissipated[-1], rubbed[-1]) == (sim.work, sim.dissipated, sim.friction_loss)
+    assert (rubbed[-1] > 0) == (friction is not None)
+    assert sim.advance(0.0)[0].size == 0 and sim.ledger.shape == (0, 4)
 
 
 def test_element_forces_carry_a_static_load_and_balance_each_mass():
@@ -751,7 +753,7 @@ def test_energy_balance_with_base_excitation():
     sim.set_displacement(np.array([0.01, -0.02, 0.03]))
     force.switch_on()
     _, xs, vs, fs = sim.advance(1.0)
-    added, work, dissipated = sim.ledger.T
+    added, work, dissipated, _ = sim.ledger.T
     xr, vr = xs - fs[:, None], vs - sim.ground_velocity[:, None]
     stored = kinetic_energy(s, vs).sum(axis=1) + potential_energy(s, xr).sum(axis=1)
     np.testing.assert_allclose(added + work - dissipated, stored, rtol=0, atol=1e-12)
@@ -909,3 +911,77 @@ def test_back_expansion_of_a_reduced_model():
         np.testing.assert_allclose(smp.x_full[-1], static, rtol=1e-6)
         np.testing.assert_allclose(rec.boundary_only(smp.r)[-1], static, rtol=1e-6)
         np.testing.assert_allclose(smp.x_enhanced[-1], rec.boundary_only(smp.r)[-1], rtol=1e-6)
+
+
+def run_for(sim, duration):
+    """Advance by `duration`, past MAX_STEPS_PER_ADVANCE; return the samples (t, x, v) stacked."""
+    end = sim.t + duration
+    out = []
+    while sim.t < end - 1e-12:
+        out.append(sim.advance(end - sim.t)[:3])
+    return tuple(np.concatenate(a) for a in zip(*out))
+
+
+def test_coulomb_friction_decays_linearly_and_stops_in_the_dead_band():
+    # Single mass, no damping: each half cycle (at the undamped w_n) loses 2F/k of
+    # amplitude; it stops at the first turn within |x| <= F/k.
+    m, k, F = 1.0, 400.0, 4.0
+    sim = Simulator(ChainSystem([m], [k], [0.0], [F]))
+    sim.set_displacement(np.array([0.105]))
+    t, x, v = run_for(sim, 1.5)
+    x, v = x[:, 0], v[:, 0]
+    turns = np.flatnonzero(v[:-1] * v[1:] < 0) + 1  # one sample after each reversal
+    half = math.pi * math.sqrt(m / k)
+    np.testing.assert_allclose(t[turns], half * np.arange(1, turns.size + 1), atol=sim.step_size())
+    np.testing.assert_allclose(np.abs(x[turns]), [0.085, 0.065, 0.045, 0.025], atol=2e-4)
+    moving = np.flatnonzero(v != 0)
+    assert t[moving[-1]] == pytest.approx(5 * half, abs=sim.step_size())
+    assert np.all(x[moving[-1] + 1 :] == x[-1]) and x[-1] == pytest.approx(-0.005, abs=1e-12)
+    # All the energy released went into friction: F times the distance slid.
+    assert sim.friction_loss == pytest.approx(F * (0.105 + 2 * (0.085 + 0.065 + 0.045 + 0.025) + 0.005))
+    assert sim.dissipated == 0.0
+
+
+def test_mass_sticks_while_the_pull_is_within_friction():
+    s = ChainSystem([1.0], [400.0], [1.0], [4.0])  # holds |x| <= 1 cm against the spring
+    sim = Simulator(s)
+    sim.set_displacement(np.array([0.0099]))
+    _, x, v = run_for(sim, 0.5)
+    assert np.all(x == 0.0099) and np.all(v == 0.0)
+    # A steady push that, with the spring, stays under 4 N keeps it stuck; more breaks it free.
+    for amplitude, sticks in ((-0.05, True), (-0.1, False)):  # adds to the spring's 3.92 N pull
+        force = ForceController(ForceSettings(kind=ForceKind.STEP, amplitude=amplitude))
+        sim = Simulator(s, force)
+        sim.set_displacement(np.array([0.0098]))
+        force.switch_on()
+        _, x, _ = run_for(sim, 0.5)
+        assert np.all(x == 0.0098) == sticks
+
+
+def test_friction_steps_converge_and_balance_with_ground_motion():
+    from vib_tutorial.core import kinetic_energy, potential_energy
+
+    s = ChainSystem([1.0, 0.5, 2.0, 1.0], [400.0, 300.0, 500.0, 200.0], [0.5, 0.0, 1.0, 0.2], [3.0, 0.0, 8.0, 1.0])
+
+    def run(divide):
+        force = ForceController(ForceSettings(kind=ForceKind.HARMONIC, freq_hz=3.0, base=True, base_amplitude=0.02))
+        sim = Simulator(s, force)
+        h = sim.step_size() / divide
+        sim.step_size = lambda: h
+        sim.set_state(np.array([0.05, -0.02, 0.01, 0.03]), np.array([0.0, 0.3, 0.0, 0.0]))
+        force.switch_on()
+        stuck = False
+        while sim.t < 1.0 - 1e-12:
+            _, xs, vs, fs = sim.advance(1.0 - sim.t)
+            added, work, dissipated, rubbed = sim.ledger.T
+            xr = xs - fs[:, None]
+            stored = kinetic_energy(s, vs).sum(axis=1) + potential_energy(s, xr).sum(axis=1)
+            np.testing.assert_allclose(added + work - dissipated - rubbed, stored, rtol=0, atol=1e-12)
+            stuck |= bool((vs == 0).any())
+        assert stuck  # some masses stuck for a while
+        return sim.state
+
+    # Second order in h, like the first-order hold of the input.
+    ref = run(32)
+    e1, e2 = (np.abs(run(d) - ref).max() for d in (1, 2))
+    assert e1 < 1e-4 and 3.0 < e1 / e2 < 5.0

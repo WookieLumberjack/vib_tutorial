@@ -7,9 +7,13 @@ Topology (N masses, N spring/damper elements)::
 Element 1 ties mass 1 to ground; element i (i >= 2) ties mass i-1 to mass i.
 The equations of motion are
 
-    M x'' + C x' + K x = f(t)
+    M x'' + C x' + K x = f(t) + f_friction
 
-with diagonal M and tridiagonal C, K assembled element by element.
+with diagonal M and tridiagonal C, K assembled element by element. Each
+mass may also slide with Coulomb friction against the fixed floor: a force of
+size friction_i (N, mu N) opposing its velocity, or anything up to that size
+while it sticks. Friction makes the chain nonlinear; everything built on M, C
+and K (modes, FRFs, substructuring) ignores it, and only the simulator applies it.
 All quantities are SI: kg, N/m, N*s/m, m, N.
 """
 
@@ -29,6 +33,7 @@ class ChainSystem:
     masses: np.ndarray
     stiffness: np.ndarray
     damping: np.ndarray
+    friction: np.ndarray | None = None  # N, Coulomb friction on each mass; zeros if None
     _matrices: tuple[np.ndarray, np.ndarray, np.ndarray] | None = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -38,12 +43,13 @@ class ChainSystem:
         self.stiffness = np.asarray(self.stiffness, dtype=float).copy()
         self.damping = np.asarray(self.damping, dtype=float).copy()
         n = self.masses.size
-        if not (self.stiffness.size == self.damping.size == n) or n == 0:
-            raise ValueError("masses, stiffness and damping must have the same nonzero length")
+        self.friction = np.zeros(n) if self.friction is None else np.asarray(self.friction, dtype=float).copy()
+        if not (self.stiffness.size == self.damping.size == self.friction.size == n) or n == 0:
+            raise ValueError("masses, stiffness, damping and friction must have the same nonzero length")
         if np.any(self.masses <= 0):
             raise ValueError("masses must be positive")
-        if np.any(self.stiffness < 0) or np.any(self.damping < 0):
-            raise ValueError("stiffness and damping must be non-negative")
+        if np.any(self.stiffness < 0) or np.any(self.damping < 0) or np.any(self.friction < 0):
+            raise ValueError("stiffness, damping and friction must be non-negative")
 
     @classmethod
     def uniform(
@@ -52,15 +58,16 @@ class ChainSystem:
         mass: float = DEFAULT_MASS,
         stiffness: float = DEFAULT_STIFFNESS,
         damping: float = DEFAULT_DAMPING,
+        friction: float = 0.0,
     ) -> ChainSystem:
-        return cls(np.full(n, mass), np.full(n, stiffness), np.full(n, damping))
+        return cls(np.full(n, mass), np.full(n, stiffness), np.full(n, damping), np.full(n, friction))
 
     @property
     def n(self) -> int:
         return self.masses.size
 
     def copy(self) -> ChainSystem:
-        return ChainSystem(self.masses, self.stiffness, self.damping)
+        return ChainSystem(self.masses, self.stiffness, self.damping, self.friction)
 
     def resized(self, n: int) -> ChainSystem:
         """Return a copy with n masses, padding with the last element's values."""
@@ -68,7 +75,7 @@ class ChainSystem:
         def fit(a: np.ndarray) -> np.ndarray:
             return a[:n] if n <= a.size else np.concatenate([a, np.full(n - a.size, a[-1])])
 
-        return ChainSystem(fit(self.masses), fit(self.stiffness), fit(self.damping))
+        return ChainSystem(fit(self.masses), fit(self.stiffness), fit(self.damping), fit(self.friction))
 
     def matrices(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return (M, C, K). Cached; treat the arrays as read-only."""

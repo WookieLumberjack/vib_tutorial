@@ -46,7 +46,7 @@ class Theme:
     sub: tuple[str, ...] = ()  # substructures A, B, C, ... in turn (bands, springs, labels)
     roots: tuple[str, ...] = ()  # non-oscillatory (overdamped) roots in the FRF matrix
     force: str = "#c1121f"  # the force, and anything drawn to stand out (selection, sums)
-    energy: dict[str, str] = field(default_factory=dict)  # kinetic, potential, stored, added, dissipated
+    energy: dict[str, str] = field(default_factory=dict)  # kinetic, potential, stored, added, dissipated, friction
     fit: str = "#2a9d8f"  # fitted modal model and its band
     good: str = "#2a7d2a"
     fair: str = "#b36b00"
@@ -82,7 +82,7 @@ LIGHT = Theme(
     sub=("#3a6ea5", "#d17a00", "#4f8f3a", "#8a4fa8"),
     roots=("#888888", "#b0b0b0", "#606060"),
     energy={"kinetic": "#1982c4", "potential": "#2a9d8f", "stored": "#7b889e", "added": "#6a4c93",
-            "dissipated": "#e76f51"},
+            "dissipated": "#e76f51", "friction": "#9a6a1f"},
     block_tints={("i", "i"): "#dbe8f5", ("b", "b"): "#dcefd8", ("b", "i"): "#fbe7d3",
                  ("q", "q"): "#ebe2f5", ("b", "q"): "#f6efcc", ("i", "q"): "#efe6f7"},
 )
@@ -115,7 +115,7 @@ DARK = Theme(
     roots=("#9a9a9a", "#6f6f6f", "#c4c4c4"),
     force="#ff4f5e",
     energy={"kinetic": "#4fb3f5", "potential": "#3ccab8", "stored": "#a9b4c6", "added": "#a88cf0",
-            "dissipated": "#f58f70"},
+            "dissipated": "#f58f70", "friction": "#d9a95b"},
     fit="#3ccab8",
     good="#62c962",
     fair="#eaa53e",
@@ -159,7 +159,7 @@ SOLARIZED = Theme(
     roots=("#93a1a1", "#b4bcb6", "#657b83"),
     force="#dc322f",
     energy={"kinetic": "#1d6fa5", "potential": "#1f8a82", "stored": "#7f8f8f", "added": "#6c71c4",
-            "dissipated": "#cb4b16"},
+            "dissipated": "#cb4b16", "friction": "#9a7500"},
     fit="#1f8a82",
     good="#5f7000",
     fair="#a05000",
@@ -202,7 +202,7 @@ NORD = Theme(
     roots=("#8e99ae", "#6b758a", "#b8c0cf"),
     force="#ef6f7a",
     energy={"kinetic": "#6fb7e6", "potential": "#8fbcbb", "stored": "#aab3c5", "added": "#c3a0d9",
-            "dissipated": "#e5957a"},
+            "dissipated": "#e5957a", "friction": "#ebcb8b"},
     fit="#8fbcbb",
     good="#a3be8c",
     fair="#ebcb8b",

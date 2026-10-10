@@ -34,7 +34,7 @@ uv run pytest         # run the tests
 
 | Area | What it holds |
 |---|---|
-| **Left** | System parameters (m, k, c for each element, 1 to 8 masses), the excitation (a force on a mass, or motion of the ground), and simulation controls (run/pause, speed, plot window, auto-scale) |
+| **Left** | System parameters (m, k, c for each element and friction F<sub>f</sub> for each mass, 1 to 8 masses), the excitation (a force on a mass, or motion of the ground), and simulation controls (run/pause, speed, plot window, auto-scale) |
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
@@ -59,6 +59,12 @@ legible on its background. The choice is remembered.
 
 - **Edit any mass, stiffness, or damping value while the simulation runs.** The state is
   kept, so you see the system respond to the change.
+- **Give a mass friction** (*System parameters → F<sub>f</sub>*): Coulomb friction against the
+  floor, the force μN opposing the sliding. This makes the chain nonlinear. Released from
+  rest, a single mass still swings at its undamped natural frequency, but loses a fixed
+  4F<sub>f</sub>/k of amplitude per cycle (a straight-line decay, not an exponential one) and
+  sticks for good at the first turn within F<sub>f</sub>/k of rest. Only the simulation
+  includes friction; the modes and frequency responses use the linear chain.
 - **Apply a force to any mass**: a step, a harmonic `F sin(2πft)`, a rectangular pulse, or a
   chirp (a frequency sweep). Press **Space** (or the button) to switch it on and off, and
   watch the transients as it starts and stops.
@@ -190,8 +196,8 @@ The panel beside the animation has two views:
 - **Stored and balance**: kinetic energy T, potential energy V and their sum, then a ledger
   since the last reset. *In* is the energy given by a release or a parameter edit plus the
   work done by the force. *Out* is the energy stored now plus the energy dissipated by the
-  dampers. The simulator integrates the work and the dissipation exactly, so the columns
-  always match.
+  dampers and by friction. The simulator integrates the work and the dissipation exactly, so
+  the columns always match.
 - **By mode**: each undamped mode's share of the stored energy,
   ½(q̇<sub>r</sub>² + ω<sub>r</sub>²q<sub>r</sub>²). The shares always add up to T + V. With
   non-proportional damping the dampers move energy between modes. Release mode 3 with
@@ -201,7 +207,8 @@ The panel beside the animation has two views:
 
 *Plot coordinates → Energy* draws the ledger as time histories: T, V and T + V, the energy
 given by releases and edits E<sub>0</sub>, the work done by the force W, and the energy
-dissipated D. At every sample E<sub>0</sub> + W = T + V + D. Release a mode and T and V
+dissipated by the dampers D and by friction D<sub>f</sub>. At every sample
+E<sub>0</sub> + W = T + V + D + D<sub>f</sub>. Release a mode and T and V
 swap twice per cycle while T + V decays and D rises towards E<sub>0</sub>. Drive the
 chain just below a natural frequency and the stored energy beats. W falls whenever the
 force pushes against the motion, and D keeps rising.
@@ -542,13 +549,23 @@ force. Adding the force and its slope to the state makes the step a linear syste
 $\dot{w} = A_w w$. Van Loan's matrix exponential then gives each integral exactly as
 $w_k^T W w_k$, so the energy balance closes to rounding error.
 
+**Friction.** Coulomb friction makes the chain nonlinear, but only piecewise: while each
+mass keeps sliding the same way or stays stuck, friction is a constant force on each
+sliding mass, and a stuck mass's row of $A$ is zeroed. Adding the friction forces to the
+state again gives a linear system, stepped exactly. Within each step the simulator finds
+the first moment a sliding mass stops or a stuck one breaks free (the pull of its
+springs, dampers and the force exceeds $F_f$), on a cubic through the step's ends, steps
+exactly to it and updates which masses stick. A mass that stops sticks if the pull on it
+is at most $F_f$ and slides back otherwise. Over each piece friction takes out exactly
+$F_f$ times the distance slid, so the energy balance still closes.
+
 ## Code layout
 
 - `core/model.py`: assembles $M$, $C$, $K$ and the state-space matrices, and the force in each element.
 - `core/modal.py`: classical modes (`scipy.linalg.eigh`), all 2N state-space eigenpairs
   (`scipy.linalg.eig`), the MAC pairing, the modal-coordinate map, and the frequency response.
 - `core/frf_matrix.py`: the full receptance matrix and its modal (pole–residue) terms.
-- `core/simulator.py`: the exact first-order-hold time stepper and its exact energy ledger.
+- `core/simulator.py`: the exact first-order-hold time stepper (piecewise, with stick-slip friction) and its exact energy ledger.
 - `core/presets.py`: the preset chains, vibration absorbers and Den Hartog's tuning.
 - `core/energy.py`: kinetic, potential and stored energy, and the energy in each mode.
 - `core/measurement.py`: the virtual modal test: excitation signals, a fast exact response

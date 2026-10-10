@@ -216,7 +216,7 @@ def test_decimator_cache_matches_a_fresh_pass():
 def test_history_offset_numbers_samples():
     import numpy as np
 
-    from vib_tutorial.gui.history import History
+    from vib_tutorial.gui.history import ENERGY_COLUMNS, History
 
     h = History(1, capacity=100)
     count = 0
@@ -224,7 +224,8 @@ def test_history_offset_numbers_samples():
     def extend(k):
         nonlocal count
         ts = np.arange(count, count + k, dtype=float)  # t is the sample's number
-        h.extend(ts, np.zeros((k, 1)), np.zeros((k, 1)), np.zeros(k), np.zeros((k, 5)), np.zeros((k, 2)))
+        e = np.zeros((k, len(ENERGY_COLUMNS)))
+        h.extend(ts, np.zeros((k, 1)), np.zeros((k, 1)), np.zeros(k), e, np.zeros((k, 2)))
         count += k
         assert h.t[0] == h.offset and h.offset + h.size == count
 
@@ -642,15 +643,20 @@ def test_energy_time_history(app):
     for _ in range(5):
         w._sim_target = w.sim.t + 0.2
         w._tick()
-    T, V, stored, added, work, dissipated = (c.getData()[1] for c in w.time_plot.x_curves)
-    assert added.max() > 0 and np.abs(work).max() == 0.0 and dissipated[-1] > 0
+    T, V, stored, added, work, dissipated, rubbed = (c.getData()[1] for c in w.time_plot.x_curves)
+    assert added.max() > 0 and np.abs(work).max() == 0.0 and dissipated[-1] > 0 and rubbed.max() == 0.0
     np.testing.assert_allclose(added + work, stored + dissipated, rtol=0, atol=1e-12)
-    # The balance still closes across a parameter edit (T, V use the parameters of the time).
+    # The balance still closes across a parameter edit (T, V use the parameters of the time),
+    # and with friction.
     w.params.rows[0][2].setValue(800.0)
-    w._sim_target = w.sim.t + 0.2
-    w._tick()
-    T, V, stored, added, work, dissipated = (c.getData()[1] for c in w.time_plot.x_curves)
-    np.testing.assert_allclose(added + work, stored + dissipated, rtol=0, atol=1e-12)
+    w.params.rows[1][4].setValue(0.05)
+    for _ in range(3):
+        w._sim_target = w.sim.t + 0.2
+        w._tick()
+    assert w.sim.system.friction[1] == 0.05
+    T, V, stored, added, work, dissipated, rubbed = (c.getData()[1] for c in w.time_plot.x_curves)
+    assert rubbed[-1] > 0
+    np.testing.assert_allclose(added + work, stored + dissipated + rubbed, rtol=0, atol=1e-12)
     # Changing the number of masses keeps the energy curves.
     w.params.dof.setValue(6)
     w._tick()
