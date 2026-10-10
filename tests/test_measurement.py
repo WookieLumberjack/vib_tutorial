@@ -10,12 +10,15 @@ from vib_tutorial.core import (
     FrfEstimator,
     Processing,
     MeasurementSettings,
+    Response,
     Window,
     foh_discretize,
     frf,
+    from_receptance,
     impact_spectrum,
     modal_analysis,
     state_space,
+    to_receptance,
     transfer,
 )
 
@@ -68,6 +71,45 @@ def test_fast_response_of_a_free_chain(h):
         ref.append(z[:3])
         f0 = f1
     np.testing.assert_allclose(x, ref, atol=1e-8 * np.abs(ref).max())
+
+
+@pytest.mark.parametrize("system", [SYSTEM, ChainSystem([1.0] * 3, [0.0, 400.0, 400.0], [0.0, 2.0, 2.0])])
+def test_acceleration_is_the_equation_of_motion_at_each_sample(system):
+    # a = M^-1 (f - C v - K x) from the same states: exact, not a difference of displacements.
+    h, j = 1 / 160, system.n - 1
+    f = np.random.default_rng(0).standard_normal(2000)
+    a = ChainResponse(system, h, j, Response.ACCELERATION).run(f)
+    A, B = state_space(system)
+    Phi, G0, G1 = foh_discretize(A, B, h)
+    n = system.n
+    z, f0, ref = np.zeros(2 * n), 0.0, []
+    for f1 in f:
+        z = Phi @ z + G0[:, j] * f0 + G1[:, j] * f1
+        ref.append(A[n:] @ z + B[n:, j] * f1)
+        f0 = f1
+    np.testing.assert_allclose(a, ref, atol=1e-8 * np.abs(ref).max())
+
+
+def test_accelerance_and_receptance_convert_both_ways():
+    f = np.linspace(0.0, 8.0, 41)
+    H = frf(SYSTEM, f, 1)
+    A = from_receptance(f, H, Response.ACCELERATION)
+    np.testing.assert_allclose(A[1:], -((2 * np.pi * f[1:]) ** 2)[:, None] * H[1:], rtol=1e-12)
+    back = to_receptance(f, A, Response.ACCELERATION)
+    assert np.isnan(back[0]).all()  # 0 Hz: an accelerance says nothing about the static receptance
+    np.testing.assert_allclose(back[1:], H[1:], rtol=1e-12)
+    assert to_receptance(f, H, Response.DISPLACEMENT) is H
+
+
+@pytest.mark.parametrize("excitation", [Excitation.PERIODIC_RANDOM, Excitation.STEPPED_SINE, Excitation.IMPACT])
+def test_noise_free_acceleration_measurement_recovers_the_accelerance(excitation):
+    acq = measure(SYSTEM, excitation=excitation, input_dof=3, averages=3, sine_points=30,
+                  response=Response.ACCELERATION)
+    est = FrfEstimator(acq, Processing(window=Window.RECTANGULAR)).estimate()
+    assert est.response is Response.ACCELERATION
+    err = band_error(SYSTEM, acq, Processing(window=Window.RECTANGULAR),
+                     lambda f: from_receptance(f, frf(SYSTEM, f, 3), Response.ACCELERATION))
+    assert err < 5e-3
 
 
 @pytest.mark.parametrize(

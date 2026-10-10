@@ -26,10 +26,13 @@ from ..core import (
     ModalResult,
     Processing,
     MeasurementSettings,
+    Response,
     Window,
     frf,
+    from_receptance,
     impact_spectrum,
     modal_analysis,
+    to_receptance,
     transfer,
 )
 from ..core.identification import (
@@ -199,7 +202,7 @@ class SignalView(pg.GraphicsLayoutWidget):
                 lo, hi = float(np.min(y)), float(np.max(y))
                 plot.setRange(xRange=(0.0, float(est.t[-1])), yRange=(lo, hi))
         self.x_fit.setPen(pg.mkPen(colors.mass[j], width=1))
-        self.response.setLabel("left", f"x{j + 1}", units="m")
+        self.response.setLabel("left", f"{est.response.symbol}{j + 1}", units=est.response.unit)
         for curve, window, signal in ((self.f_window, est.force_window, est.f), (self.x_window, est.response_window, est.x[:, j])):
             if window is None:
                 curve.setData([], [])
@@ -320,7 +323,7 @@ class FrfView(pg.GraphicsLayoutWidget):
     ) -> None:
         # The exact curves, mode lines and bands change only with the test; while it runs,
         # only the measured curves are updated.
-        key = (id(system), id(result), settings.fs, settings.input_dof, j, stepped,
+        key = (id(system), id(result), settings.fs, settings.input_dof, settings.response, j, stepped,
                processing.window, processing.exp_end, processing.estimator)
         if key != self._key:
             self._key = key
@@ -353,12 +356,14 @@ class FrfView(pg.GraphicsLayoutWidget):
         f = np.linspace(nyq / 2000, nyq, 2000)
         peaks = [m.damped.fd_hz for m in result.modes if m.damped is not None and m.damped.fd_hz < nyq]
         f = np.unique(np.concatenate([f, peaks]))
-        exact = frf(system, f, settings.input_dof)[:, j]
+        response = settings.response
+        exact = from_receptance(f, frf(system, f, settings.input_dof)[:, j], response)
         dash = QtCore.Qt.PenStyle.DashLine
         self.mag.plot(f, np.abs(exact), pen=pg.mkPen(colors.strong, width=1.5), name="Exact")
         self.phase.plot(f, phase_deg(exact), pen=pg.mkPen(colors.strong, width=1.5))
         if processing.window is Window.FORCE_EXPONENTIAL and processing.exp_end < 1.0 and not stepped:
-            damped = transfer(system, 1j * 2 * np.pi * f + 1.0 / processing.exp_tau(settings), settings.input_dof)[:, j]
+            s = 1j * 2 * np.pi * f + 1.0 / processing.exp_tau(settings)
+            damped = s**response.power * transfer(system, s, settings.input_dof)[:, j]
             pen = pg.mkPen(colors.grey, width=1, style=dash)
             self.mag.plot(f, np.abs(damped), pen=pen, name="Exact + window damping")
             self.phase.plot(f, phase_deg(damped), pen=pen)
@@ -389,15 +394,19 @@ class FrfView(pg.GraphicsLayoutWidget):
                                        pen=pg.mkPen(None))
             band.setZValue(-10)
             p.addItem(band)
-        finite = np.abs(exact[np.isfinite(exact)])
+        # An accelerance falls as ω² towards 0 Hz: range it on the band, not on the first lines.
+        shown = np.isfinite(exact) & ((f >= 0.02 * nyq) if response is Response.ACCELERATION else True)
+        finite = np.abs(exact[shown])
         if finite.size:
             lo, hi = math.log10(finite.min()), math.log10(finite.max())
             self.mag.setYRange(lo - 1.0, hi + 0.5, padding=0)
         self.mag.setXRange(0.0, nyq, padding=0)
-        drive = "driving point" if j == settings.input_dof else "transfer"
-        self.mag.setTitle(f"H<sub>{j + 1}{settings.input_dof + 1}</sub> = x{j + 1} / F at m{settings.input_dof + 1} "
-                          f"({drive}) · dotted: damped natural frequencies · grey: above the "
-                          "anti-alias passband · green: fit band (drag it)", size="9pt")
+        drive = "driving-point" if j == settings.input_dof else "transfer"
+        name, unit = ("H", "m/N") if response is Response.DISPLACEMENT else ("A", "(m/s²)/N")
+        self.mag.setLabel("left", f"|{name}|  [{unit}]")
+        self.mag.setTitle(f"{name}<sub>{j + 1}{settings.input_dof + 1}</sub> = {response.symbol}{j + 1} / F "
+                          f"at m{settings.input_dof + 1} ({drive} {response.frf_name}) · dotted: f<sub>d</sub> of "
+                          "each mode · grey: above the passband · green: fit band (drag it)", size="9pt")
 
 
 class ModalTestPage(QtWidgets.QWidget):
@@ -442,8 +451,18 @@ class ModalTestPage(QtWidgets.QWidget):
             self.excitation.setItemData(i, EXCITATION_TIPS[e], QtCore.Qt.ItemDataRole.ToolTipRole)
         form.addRow("Excitation:", self.excitation)
         self.input = QtWidgets.QComboBox()
-        self.input.setToolTip("Where the force is applied. Every mass's displacement is measured.")
+        self.input.setToolTip("Where the force is applied. Every mass's response is measured.")
         form.addRow("Force at:", self.input)
+        self.response = QtWidgets.QComboBox()
+        for r in Response:
+            self.response.addItem(f"{r.value} ({r.frf_name})", r)
+        self.response.setToolTip(
+            "<p>What the sensor on each mass measures. <b>Displacement</b> gives the receptance "
+            "H = X/F directly. <b>Acceleration</b>, as with the accelerometers of a real test, gives "
+            "the accelerance A = −ω²H.</p><p>Modes are extracted from the receptance, so an "
+            "accelerance is divided by −ω² first; that amplifies the low-frequency noise.</p>"
+        )
+        form.addRow("Response sensor:", self.response)
         self.tip = spin(1.0, 2000.0, 50.0, 1, " ms")
         self.tip.setToolTip(
             "<p>Duration of the hammer's half-sine pulse. A hard (metal) tip gives a short pulse, "
@@ -647,7 +666,7 @@ class ModalTestPage(QtWidgets.QWidget):
 
         # --- wiring: test settings measure again; processing and noise reuse the data.
         self.excitation.currentIndexChanged.connect(self._on_excitation)
-        for w in (self.input, self.block, self.overlap):
+        for w in (self.input, self.response, self.block, self.overlap):
             w.currentIndexChanged.connect(self.restart)
         for w in (self.tip, self.burst, self.fs):
             w.valueChanged.connect(self.restart)
@@ -707,6 +726,7 @@ class ModalTestPage(QtWidgets.QWidget):
         return MeasurementSettings(
             excitation=self.excitation.currentData(),
             input_dof=min(max(0, self.input.currentIndex()), n - 1),
+            response=self.response.currentData(),
             fs=self.fs.value(),
             block=self.block.currentData(),
             averages=self.averages.value(),
@@ -945,17 +965,21 @@ class ModalTestPage(QtWidgets.QWidget):
         method = self.extract.current
         band = self.extract.band
         n = acq.n
+        response = acq.settings.response
+        H = to_receptance(est.freqs, est.H, response)  # the methods fit receptance
         self.stab, self.poles = None, []
         if method is Method.PEAK:
-            ident = peak_picking(est.freqs, est.H, band, n)
+            ident = peak_picking(est.freqs, H, band, n)
         elif method is Method.CIRCLE:
-            ident = circle_fit(est.freqs, est.H, band, n)
+            ident = circle_fit(est.freqs, H, band, n)
         else:
-            self.stab = lscf(est.freqs, est.H, band, self.extract.order.value())
+            self.stab = lscf(est.freqs, H, band, self.extract.order.value())
             self.poles = self._pick(self.stab)
-            ident = lsfd(est.freqs, est.H, band, [self.stab.pole(o, i) for o, i in self.poles])
+            ident = lsfd(est.freqs, H, band, [self.stab.pole(o, i) for o, i in self.poles])
         self.ident = ident
         notes = list(ident.notes)
+        if response is Response.ACCELERATION:
+            notes.append("Fitted to the receptance: the measured accelerance divided by −ω².")
         reported = ident
         if exp_window and self.extract.correct.isChecked():
             sigma = 1.0 / p.exp_tau(acq.settings)
@@ -978,11 +1002,11 @@ class ModalTestPage(QtWidgets.QWidget):
         lo, hi = band
         if self.extract.show_fit.isChecked() and ident.modes:
             f = np.linspace(max(lo, hi / 1000), hi, 800)
-            self.frf_view.set_fit(f, ident.synthesize(f)[:, j])
+            self.frf_view.set_fit(f, from_receptance(f, ident.synthesize(f)[:, j], response))
         else:
             self.frf_view.set_fit(None, None)
         mask = band_mask(est.freqs, band)
-        self.stab_plot.set_data(self.stab, self.poles, est.freqs[mask], mode_indicator(est.H[mask]),
+        self.stab_plot.set_data(self.stab, self.poles, est.freqs[mask], mode_indicator(H[mask]),
                                 [m.damped.fn_hz for m in exact])
 
     # -------------------------------------------------------------- text
@@ -1056,7 +1080,8 @@ class ModalTestPage(QtWidgets.QWidget):
             warnings.append("The signals are periodic in the block, so no window is needed; one only blurs the peaks.")
         warn = "".join(f"<p style='color:{colors.fair}'>{t}</p>" for t in warnings)
         return (
-            f"<p><b>{e.value}</b>, force at m{s.input_dof + 1}. {EXCITATION_TIPS[e]}</p>{warn}"
+            f"<p><b>{e.value}</b>, force at m{s.input_dof + 1}, {s.response.value.lower()} measured "
+            f"({s.response.frf_name}). {EXCITATION_TIPS[e]}</p>{warn}"
             f"<table border='1' cellspacing='0' cellpadding='3' width='100%'>{head}{''.join(rows)}</table>"
             f"<p style='color:{colors.muted}'>2ζf<sub>n</sub> is the half-power bandwidth of each peak; "
             "with fewer than about 2 lines (Δf apart, or stepped-sine frequencies) across it, the peak is missed. "
@@ -1076,13 +1101,24 @@ measurement, and each error it can bring in, can be compared with the exact answ
 
 <h3>What is measured, and where</h3>
 <ul>
-<li><b>Acceleration, not displacement.</b> This page records each mass's displacement, so its
-FRF is the receptance H, as on the other pages. A lab usually measures with accelerometers and
-a force transducer, so the measured FRF is the <b>accelerance</b> A = −ω²H (see <i>Three forms
-of the same FRF</i> on the FRF matrix page). Dividing by −ω² turns it into receptance; the
-poles, shapes and damping do not change, but low-frequency noise is amplified by the division.
-The residuals swap roles too: for accelerance the modes below the band give a constant and
-the modes above a term growing as ω².</li>
+<li><b>Displacement or acceleration.</b> The <i>Response sensor</i> setting picks what is
+recorded at each mass. <b>Displacement</b> gives the receptance H = X/F directly, as on the
+other pages. A lab usually measures with accelerometers and a force transducer, so its FRF is
+the <b>accelerance</b> A = −ω²H (see <i>Three forms of the same FRF</i> on the FRF matrix
+page); pick <b>Acceleration</b> to measure that way. The acceleration is that of the simulated
+chain, a = M<sup>−1</sup>(f − Cv − Kx), not a converted displacement, so it passes through
+the same filter, sampling and noise as a real accelerometer signal. The plots then show
+accelerances: towards 0 Hz they fall as ω² (or, for a free chain, level off at 1/total
+mass), and above the modes the driving point levels off at 1/m.</li>
+<li><b>What the choice changes.</b> The poles, shapes and damping are the same in either
+form; only the weighting of low and high frequencies changes. Displacement is dominated by
+the lowest mode, so noise sized to the channel's peak swamps the high modes. Acceleration
+weights each mode by ω², which evens the modes out, but makes a mode above Nyquist alias
+more strongly when the anti-alias filter is off. The extraction methods here fit receptance,
+so a measured accelerance is divided by −ω² first: the poles do not move, but the noise below
+the first mode, where the acceleration is tiny, is amplified enormously. An analyzer that fits accelerance directly
+swaps the residuals' roles: the modes below the band give a constant and the modes above a
+term growing as ω².</li>
 <li><b>One column, or one row.</b> Here one force acts and every mass is measured: one
 <b>column</b> of H, as with a shaker and an accelerometer moved from point to point. An impact
 test usually does the opposite: one accelerometer stays put and the <b>hammer roves</b>,
@@ -1121,7 +1157,8 @@ needs a long block to get lines across it.</li>
 </ul>
 
 <h3>Averaging and estimators</h3>
-<p>With F and X the spectra of a block, averaging over blocks gives the auto-spectra
+<p>With F and X the spectra of a block (X of the response, displacement or acceleration;
+the estimators are the same for either), averaging over blocks gives the auto-spectra
 G<sub>ff</sub> = ⟨|F|²⟩, G<sub>xx</sub> = ⟨|X|²⟩ and the cross-spectrum
 G<sub>xf</sub> = ⟨X F*⟩. Then</p>
 <p>&nbsp;&nbsp;<b>H1 = G<sub>xf</sub>/G<sub>ff</sub></b>, &nbsp;&nbsp;
@@ -1171,5 +1208,8 @@ at the antiresonances.</li>
 the exponential window fixes the leakage but adds damping (dashed grey curve).</li>
 <li>Turn the anti-alias filter off and raise the stiffness until the top mode is above
 Nyquist: it appears at the wrong frequency.</li>
+<li>Add 2% response noise with periodic random excitation: with displacement the top modes
+sink into the noise and LSCF can miss one. Switch the response sensor to <b>Acceleration</b>:
+every mode comes through, but the FRF below the first mode turns to noise.</li>
 </ul>
 """
