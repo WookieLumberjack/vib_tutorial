@@ -214,8 +214,9 @@ already splits them by 10%.</li>
 </ul>
 <p>In between, the <i>Veering &amp; splitting</i> tab shows the two frequencies as B is made
 stiffer. They approach each other but never cross: they <b>veer</b> apart, and the mode
-shapes swap over through the veering. The closer the frequencies and the heavier B, the
-wider the veering. The chain's own frequencies do the same, and so does every other pair
+shapes swap over through the veering. The heavier B (the larger μ), the wider the
+veering: the two curves stay apart over a band of f<sub>B</sub>/f<sub>A</sub> roughly √μ
+wide. The chain's own frequencies do the same, and so does every other pair
 of modes of A and B.</p>
 
 <h3>Damping</h3>

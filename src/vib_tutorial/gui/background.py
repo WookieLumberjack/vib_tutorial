@@ -201,15 +201,20 @@ further apart the heavier the absorber (mass ratio μ = m<sub>a</sub>/m<sub>1</s
 works at one frequency: a machine whose speed drifts, or starts up through the peaks,
 needs damping.</p>
 <p><b>Tuned mass damper.</b> Add a damper c<sub>a</sub> and the peaks come down, but too
-much locks the absorber to m<sub>1</sub> and the old resonance comes back. Every curve of
-|X<sub>1</sub>/F|, whatever c<sub>a</sub>, passes through the same two <i>fixed points</i>.
-Den Hartog's optimum tunes the absorber so the fixed points are equally high, then picks
-the damping that puts the peaks on them:</p>
+much locks the absorber to m<sub>1</sub> and the old resonance comes back. If the primary
+itself is undamped, every curve of |X<sub>1</sub>/F|, whatever c<sub>a</sub>, passes through
+the same two <i>fixed points</i>. Den Hartog's optimum tunes the absorber so the fixed points
+are equally high, then picks the damping that puts the peaks on them (strictly, Brock's
+average of the two values that each put one peak on its fixed point):</p>
 <p>&nbsp;&nbsp;f<sub>a</sub>/f<sub>1</sub> = 1/(1 + μ), &nbsp;&nbsp;
 ζ<sub>a</sub> = √(3μ / 8(1 + μ)³), &nbsp;&nbsp; peak |X<sub>1</sub>|k<sub>1</sub>/F =
 √(1 + 2/μ)</p>
-<p>(ζ<sub>a</sub> = c<sub>a</sub> / 2m<sub>a</sub>ω<sub>a</sub>.) With μ = 5% the peak is
-about 6.4 times the static deflection, whatever the primary's own damping was.</p>
+<p>Here ζ<sub>a</sub> = c<sub>a</sub> / 2m<sub>a</sub>ω<sub>1</sub>, measured against the
+<i>primary's</i> frequency ω<sub>1</sub> = √(k<sub>1</sub>/m<sub>1</sub>), as in Den Hartog's
+derivation. (Some textbooks use the absorber's own ω<sub>a</sub> instead; the two differ by
+the factor 1 + μ, so check which one a formula assumes.) With μ = 5% and an undamped primary
+both peaks are about 6.4 times the static deflection. Damping in the primary lowers them
+further, and the fixed points are then only approximate.</p>
 <p><b>On a chain</b>, such as a building, a damper on the roof is tuned to one mode. Near
 that mode the structure behaves like a single mass on a spring whose <i>modal mass</i> at
 the roof is 1/φ<sub>roof</sub>² (φ mass-normalized), so μ and the tuning use that mass
@@ -249,8 +254,9 @@ forces</i>: spring k2 carries the applied force. Change the drive frequency a li
 m1 starts moving again.</li>
 <li>Load <i>Tuned mass damper (Den Hartog)</i>. On the <i>Frequency response</i> tab the
 dashed primary alone peaks at 40 times its static deflection, the damped system at under
-6. Set c2 to 0: two sharp peaks. Set it to 5: the damper locks the absorber to m1 and one
-tall peak comes back. Every curve passes through the same two fixed points.</li>
+6 (its primary is lightly damped, so lower than the 6.4 of an undamped one). Set c2 to 0:
+two sharp peaks. Set it to 5: the damper locks the absorber to m1 and one tall peak comes
+back. Every curve passes close to the same two fixed points.</li>
 </ol>
 """
 

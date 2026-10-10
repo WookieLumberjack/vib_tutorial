@@ -33,11 +33,11 @@ def test_den_hartog_equal_peaks_at_the_fixed_points():
     assert s.masses[1] == pytest.approx(0.05)
     f = np.linspace(2.0, 4.5, 20001)
     x1 = np.abs(frf(s, f, 0)[:, 0]) * 400.0  # dynamic amplification
-    # Den Hartog's peak sqrt(1 + 2/mu) (his damping puts the peaks near, not exactly on, the fixed points).
-    assert x1.max() == pytest.approx(math.sqrt(1 + 2 / mu), rel=0.03)
+    # Den Hartog's peak sqrt(1 + 2/mu); with his damping (on the primary's frequency) the peaks are equal.
+    assert x1.max() == pytest.approx(math.sqrt(1 + 2 / mu), rel=0.002)
     fn = 400.0**0.5 / (2 * math.pi)
     lo, hi = x1[f < fn].max(), x1[f > fn].max()
-    assert lo == pytest.approx(hi, rel=0.05)
+    assert lo == pytest.approx(hi, rel=0.002)
 
 
 def test_modal_mass_at_the_tip_of_a_uniform_chain():
