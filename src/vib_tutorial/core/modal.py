@@ -236,6 +236,41 @@ def modal_coordinate_map(system: ChainSystem, result: ModalResult, complex_modes
     return np.column_stack(cols)
 
 
+def friction_decay(system: ChainSystem, result: ModalResult) -> np.ndarray:
+    """Amplitude each undamped mode loses per cycle to Coulomb friction (m), shape (N,).
+
+    Vibrating in mode r with amplitude A at its largest entry (shape psi, largest
+    |entry| 1), mass i slides 4 A |psi_i| per cycle against F_i, so friction takes
+    out 4 A sum F_i |psi_i| while the mode stores 1/2 w_r^2 A^2 psi^T M psi.
+    Losing that energy takes the amplitude down by
+
+        dA = 4 sum F_i |psi_i| / (w_r^2 psi^T M psi)   per cycle,
+
+    the same at any amplitude: the straight-line decay of a mass with friction
+    (4F/k for a single one). It assumes the motion stays in the mode, which
+    friction (being nonlinear) only roughly allows. NaN for a rigid-body mode.
+    """
+    M = system.matrices()[0]
+    out = np.full(len(result.modes), np.nan)
+    for r, mode in enumerate(result.modes):
+        psi = mode.shape
+        if mode.omega_n > 1e-9:
+            out[r] = 4.0 * float(system.friction @ np.abs(psi)) / (mode.omega_n**2 * float(psi @ M @ psi))
+    return out
+
+
+def friction_zeta(system: ChainSystem, result: ModalResult, amplitude: float) -> np.ndarray:
+    """Equivalent viscous damping ratio of friction for each mode at `amplitude` (m), shape (N,).
+
+    A viscous damper with ratio zeta takes 2 pi zeta of the amplitude out per
+    cycle (for light damping), so friction's dA per cycle matches
+    zeta = dA / (2 pi A). It falls as the amplitude grows: friction damps small
+    motions heavily. This is c_eq = 4F / (pi w X), the describing-function
+    equivalent, mode by mode.
+    """
+    return friction_decay(system, result) / (2.0 * np.pi * amplitude)
+
+
 def _mac(real_shape: np.ndarray, complex_shape: np.ndarray) -> float:
     num = abs(np.vdot(real_shape, complex_shape)) ** 2
     den = np.vdot(real_shape, real_shape).real * np.vdot(complex_shape, complex_shape).real

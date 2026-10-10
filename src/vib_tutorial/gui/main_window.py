@@ -15,6 +15,7 @@ from ..core import (
     ForceSettings,
     Simulator,
     element_forces,
+    friction_zeta,
     kinetic_energy,
     modal_analysis,
     modal_coordinate_map,
@@ -270,11 +271,15 @@ class MainWindow(QtWidgets.QMainWindow):
         amp_tip = (
             "<p>Starting displacement of the mass that moves most when a mode is released. "
             "The other masses are scaled by the mode shape.</p>"
-            "<p>The system is linear, so this changes the size of the motion but not how fast "
-            "it decays; the decay rate is set by the mode's damping ratio ζ. To watch a "
-            "well-damped mode, slow the simulation down (Simulation → Speed).</p>"
+            "<p>Without friction the system is linear, so this changes the size of the motion but "
+            "not how fast it decays; the decay rate is set by the mode's damping ratio ζ. To watch "
+            "a well-damped mode, slow the simulation down (Simulation → Speed).</p>"
+            "<p>With friction it does matter: friction takes a fixed amplitude out per cycle, so a "
+            "small release dies out sooner. The table's <i>ζ friction</i> column is worked out at "
+            "this amplitude.</p>"
         )
         self.release_amp.setToolTip(amp_tip)
+        self.release_amp.valueChanged.connect(self._refresh_table)
         amp_label = QtWidgets.QLabel("Initial displacement:")
         amp_label.setToolTip(amp_tip)
         self.release_button = release = QtWidgets.QPushButton("Release selected mode")
@@ -480,7 +485,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Show the current modal result using the selected method."""
         self.entries = mode_entries(self.modal, self.method)
         state_space = self.method is Method.STATE_SPACE
-        self.table.set_result(self.modal, self.method, self.entries)
+        self._refresh_table()
         self.mode_plot.set_entries(self.entries, show_envelope=state_space)
         self.phasor_plot.setVisible(state_space)
         self.phasor_plot.set_entries(self.entries)
@@ -494,6 +499,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_plot_curves()
         self.modal_note.setText(self._modal_note())
         self._on_force_changed()
+
+    def _refresh_table(self) -> None:
+        system = self.sim.system
+        zf = friction_zeta(system, self.modal, self.release_amp.value() * 1e-3) if system.friction.any() else None
+        self.table.set_result(self.modal, self.method, self.entries, zf)
 
     def _modal_note(self) -> str:
         notes = []
@@ -521,6 +531,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Damping is <b>non-proportional</b>: it couples the undamped modes "
                 f"(coupling index {self.modal.coupling:.2f}; 0 = none, 1 = strong). The exact damped "
                 "modes are complex (masses peak at different times) and ζ modal is an approximation."
+            )
+        if self.method is Method.CLASSICAL and self.sim.system.friction.any():
+            notes.append(
+                "Friction is nonlinear, so the modes leave it out; <i>ζ friction</i> is its "
+                "equivalent damping at the initial displacement below, larger for smaller motions."
             )
         notes.append("<a href='#background'>Why?</a>")
         if self.method is Method.CLASSICAL and self.modal.overdamped_roots:

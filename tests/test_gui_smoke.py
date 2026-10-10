@@ -681,6 +681,27 @@ def test_static_friction_ratio_reaches_the_simulator(app):
     w.close()
 
 
+def test_modal_table_friction_column(app):
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.modes import Method
+
+    w = MainWindow()
+    table, column = w.table, w.table.FRICTION_COLUMN
+    assert table.isColumnHidden(column)  # no friction by default
+    w.params.rows[0][4].setValue(0.5)
+    w.params._copy_first_row()
+    assert not table.isColumnHidden(column)
+    zeta = float(table.item(0, column).text())
+    w.release_amp.setValue(2 * w.release_amp.value())  # twice the amplitude, half the damping
+    assert float(table.item(0, column).text()) == pytest.approx(zeta / 2, abs=1e-4)
+    # The state-space table has one column fewer; coming back restores the friction column.
+    w.method_combo.setCurrentIndex(list(Method).index(Method.STATE_SPACE))
+    assert table.columnCount() == len(table.STATE_SPACE_HEADERS)
+    w.method_combo.setCurrentIndex(list(Method).index(Method.CLASSICAL))
+    assert table.columnCount() == len(table.CLASSICAL_HEADERS) and not table.isColumnHidden(column)
+    w.close()
+
+
 def test_element_forces_view(app):
     import numpy as np
 
