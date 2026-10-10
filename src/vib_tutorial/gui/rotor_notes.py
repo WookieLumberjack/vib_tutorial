@@ -214,6 +214,48 @@ one does not yet, and the shaft whirls <b>backward</b>, against its spin, while 
 turns forward. A shaft whirling backward is bent back and forth once per revolution as it spins:
 fatigue loading a forward synchronous whirl does not cause.</p>
 
+<h3>Run-up and coast-down: Bode and polar plots</h3>
+<p>On a real machine the response is measured as the speed changes. A <b>keyphasor</b> (a once-per-turn
+mark on the shaft; here, the heavy spot passing +x) starts each revolution, and a <b>tracking
+filter</b> takes the 1X component: over one revolution,</p>
+<p align='center'>V = (1/π) ∫ x(φ) e<sup>−iφ</sup> dφ, &nbsp; x ≈ |V| cos(φ − lag)</p>
+<p>|V| is the 1X amplitude and the <b>phase lag</b> is the angle the shaft turns from the keyphasor to the
+probe's positive peak. The <b>Bode plot</b> draws both against speed; the <b>polar plot</b> draws V as a
+point, its angle the lag (clockwise, against the rotation). In steady state, through a lightly damped
+critical speed V traces a circle, lowest (lagging 90°) at the critical. A probe in y reads 90° more lag
+than one in x on a circular orbit, since the shaft turns 90° more before the high spot reaches it.</p>
+<p>The <i>Run up and coast down</i> button ramps to the first speed, waits for the start-up transient to
+die away, then runs up to the second speed and back at the ramp rate, tracking each revolution. Held
+side by side, sweeps at different rates show:</p>
+<ul>
+<li><b>The transient peak is lower than the steady-state one, and lower the faster the ramp.</b> The
+whirl builds up with the time constant 1/(ζω<sub>c</sub>) of the mode; a ramp at α (rad/s²) crosses
+the half-power band 2ζω<sub>c</sub> in 2ζω<sub>c</sub>/α. So the ramp is slow, and reaches the
+steady-state peak, only when α/ω<sub>c</sub>² is well below 2ζ². With the defaults (ζ = 0.046,
+2ζ² = 0.0043, the peak 217 µm at 1590 rpm, sweeping 800 to 2400 rpm), a run-up at 100 rpm/s
+(α/ω<sub>c</sub>² = 0.0004) peaks at 100%, at 500 rpm/s (0.0019) at 95%, at 2000 rpm/s at 78% and at
+5000 rpm/s (0.019) at about 60%.</li>
+<li><b>The peak comes after the critical speed on a run-up and before it on a coast-down.</b> The
+response lags the sweep: at 500 rpm/s the run-up peaks at 1672 rpm (82 rpm late) and the coast-down
+at 1498 rpm (92 rpm early); at 5000 rpm/s, some 350 rpm late and 250 to 350 rpm early. (That fast, the
+speed changes by 160 rpm in one revolution near the critical, so the tracked curve is coarse: one point
+per revolution.) The coast-down peaks lower, 87% of the steady-state peak at 500 rpm/s and about 50% at
+5000 rpm/s: its peak comes at a lower speed, where the unbalance force UΩ² is smaller.</li>
+<li><b>Beating just past the critical.</b> The whirl built up at the critical speed rings on at the
+natural frequency ω<sub>c</sub> as free vibration, while the unbalance keeps driving at Ω. The two beat
+at Ω − ω<sub>c</sub>, faster as the speed moves on: the 1X amplitude wobbles after the peak, and the
+largest displacement over each revolution (the dots) wobbles more, since it includes the free vibration
+in full. On the polar plot the tracked vector loops around the steady-state circle.</li>
+<li><b>The parameter that matters is α/ω<sub>c</sub>², against ζ.</b> Measure time in periods of the
+critical speed (τ = ω<sub>c</sub>t) and a single mode accelerated through resonance has only two
+parameters left: ζ and the dimensionless acceleration α/ω<sub>c</sub>². So the ratio of the transient
+peak to the steady-state one, and how far the peak is shifted, depend on these alone. F. M. Lewis
+(1932, <i>Vibration during acceleration through a critical speed</i>) first worked this out, and much
+later work on passage through resonance builds on it.</li>
+</ul>
+<p>The summary under the Bode plot gives each sweep's peak against the steady-state one, and how many
+rpm away from it the peak came.</p>
+
 <h3>Why state space</h3>
 <p>Undamped modes and modal superposition need symmetric M, C and K, and real modes that do not change.
 Here ΩG is skew-symmetric and changes with the speed, and support damping is not proportional, so the
@@ -229,6 +271,11 @@ simulated time and the unbalance force follows the exact angle φ, including the
 <li>Ramp from 1000 to 3000 rpm at 500 rpm/s and watch the disc's orbit grow through 1584 rpm and shrink
 again to about the 20 µm eccentricity, while the heavy spot swings round to the opposite side of the
 orbit. Then try 5000 rpm/s: the whirl has no time to build, and the peak is much lower.</li>
+<li>Run up and coast down from 800 to 2400 rpm at 500 rpm/s, then again at 5000 rpm/s with <i>Hold
+earlier sweeps</i> ticked, and compare them with the steady-state curve on the Bode and polar plots.
+Then raise the support damping to 400 N·s/m (ζ = 0.089, and the peak moves up to 1758 rpm): at
+500 rpm/s the sweeps now come within a few percent of the steady-state peak (101% up, 96% down), since
+2ζ² has grown fourfold.</li>
 <li>Set the target to 1584 rpm and read the phase: the heavy spot leads the high spot by about 90°.</li>
 <li>Untick <i>Isotropic</i> and set k<sub>x</sub> = 20,000 N/m and k<sub>y</sub> = 80,000 N/m on A
 (B follows). The critical splits into 1365 rpm (horizontal) and 1668 rpm (vertical); run between them,
@@ -259,5 +306,7 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>A(Ω), B</td><td>state matrix (16 × 16) and input matrix</td><td>—</td></tr>
 <tr><td>ω<sub>c</sub></td><td>critical speed</td><td>rad/s (rpm)</td></tr>
 <tr><td>ζ</td><td>damping ratio of a mode, −Re λ / |λ|</td><td>—</td></tr>
+<tr><td>α</td><td>angular acceleration of a ramp, Ω'</td><td>rad/s² (rpm/s)</td></tr>
+<tr><td>V</td><td>1X vector: amplitude |V|, phase lag −arg V</td><td>m</td></tr>
 </table>
 """

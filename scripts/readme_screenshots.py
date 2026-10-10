@@ -389,11 +389,28 @@ def jeffcott_rotor():
     save(w, "jeffcott_rotor")
 
 
+def jeffcott_run_up():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.sweep_from.setValue(800.0)
+    page.sweep_to.setValue(2400.0)
+    for rate in (500.0, 5000.0):  # held side by side
+        page.ramp.setValue(rate)
+        page.start_sweep()
+        while page.run_up is not None:
+            page.step(0.02)
+    save(w, "jeffcott_run_up")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
-         virtual_modal_test, modal_extraction, jeffcott_rotor]
+         virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up]
 
 
 def main(names: list[str]) -> None:
