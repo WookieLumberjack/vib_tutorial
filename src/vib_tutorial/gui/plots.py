@@ -9,7 +9,15 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from ..core import ChainSystem, ModalResult, frf, modal_analysis, transmissibility
+from ..core import (
+    ChainSystem,
+    ModalResult,
+    frf,
+    friction_frf,
+    friction_transmissibility,
+    modal_analysis,
+    transmissibility,
+)
 from .axes import log_axes
 from .modes import Method, ModeEntry, time_constant_text
 from .style import colors
@@ -535,6 +543,9 @@ def frequency_grid(result: ModalResult, points: int) -> np.ndarray:
     return np.unique(np.concatenate([f, peaks, freqs_n]))
 
 
+FRICTION_POINTS = 600  # describing-function curves: friction rounds the peaks, so fewer points do
+
+
 class FrfPlot(pg.GraphicsLayoutWidget):
     """Receptance |X_i / F| and phase for a force at the target mass, or transmissibility |X_i / X_g|."""
 
@@ -556,6 +567,8 @@ class FrfPlot(pg.GraphicsLayoutWidget):
         self.mag_curves: list[pg.PlotDataItem] = []
         self.phase_curves: list[pg.PlotDataItem] = []
         self.mode_lines: list[pg.InfiniteLine] = []
+        self.friction_curves: list[tuple[pg.PlotItem, pg.PlotDataItem]] = []
+        self._friction_args: tuple | None = None  # what the friction curves need; drawn when shown
         self.drive_lines = [pg.InfiniteLine(angle=90) for _ in range(2)]
         self.mag.addItem(self.drive_lines[0])
         self.phase.addItem(self.drive_lines[1])
@@ -573,11 +586,14 @@ class FrfPlot(pg.GraphicsLayoutWidget):
         input_dof: int,
         base: bool = False,
         reference: ChainSystem | None = None,
+        friction_amplitude: float | None = None,
     ) -> None:
         """Receptance for a force at input_dof, or with base=True the transmissibility from the ground.
 
         A reference system (fewer masses: the chain without its absorber) is drawn thin and dashed,
-        unless the force is on a mass it lacks.
+        unless the force is on a mass it lacks. With friction_amplitude (the force in N, or the
+        ground motion in m) and friction on the chain, the describing-function response at that
+        amplitude is drawn dash-dot; it takes a while, so only when the plot is on screen.
         """
         f = frequency_grid(result, 1500)
         lo, hi = f[0], f[-1]
@@ -620,8 +636,41 @@ class FrfPlot(pg.GraphicsLayoutWidget):
             self.mode_lines.append(line)
         source = "Ground motion" if base else f"Force at m{input_dof + 1}"
         without = f" · thin dashed: without m{system.n}" if reference is not None else ""
-        self.mag.setTitle(f"{source} · dotted: fₙ · dashed: drive{without}", size="10pt")
+        with_friction = ""
+        self._friction_args = None
+        if friction_amplitude and system.friction.any():
+            amount = f"{1e3 * friction_amplitude:.3g} mm" if base else f"{friction_amplitude:.3g} N"
+            with_friction = f" · dash-dot: friction at {amount}"
+            self._friction_args = (system, frequency_grid(result, FRICTION_POINTS), input_dof, base, friction_amplitude)
+        self.mag.setTitle(f"{source} · dotted: fₙ · dashed: drive{without}{with_friction}", size="10pt")
         self.mag.setXRange(math.log10(lo), math.log10(hi), padding=0)
+        self._draw_friction()
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        super().showEvent(event)
+        self._draw_friction()
+
+    def _draw_friction(self) -> None:
+        """The describing-function curves, if they're wanted, out of date and the plot is on screen."""
+        for plot, curve in self.friction_curves:
+            plot.removeItem(curve)
+        self.friction_curves = []
+        if self._friction_args is None or not self.isVisible():
+            return
+        system, f, input_dof, base, amplitude = self._friction_args
+        response = (
+            friction_transmissibility(system, f, amplitude) if base else friction_frf(system, f, input_dof, amplitude)
+        )
+        H = response.X / amplitude
+        H[response.stuck] = np.nan  # a mass held by friction: no point on log axes
+        for i in range(system.n):
+            pen = pg.mkPen(colors.mass[i], width=2, style=QtCore.Qt.PenStyle.DashDotLine)
+            mag = np.abs(H[:, i])
+            ph = np.degrees(np.angle(H[:, i]))
+            ok = np.isfinite(ph)
+            ph[ok] = np.degrees(np.unwrap(np.radians(ph[ok])))
+            for plot, y in ((self.mag, mag), (self.phase, ph)):
+                self.friction_curves.append((plot, plot.plot(f, y, pen=pen, connect="finite")))
 
     def set_drive(self, freq_hz: float | None) -> None:
         for line in self.drive_lines:

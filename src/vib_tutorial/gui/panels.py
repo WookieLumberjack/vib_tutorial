@@ -58,8 +58,10 @@ FRICTION_TIP = (
     "and stops for good at the first turn within F<sub>s</sub>/k of its rest position, "
     "F<sub>s</sub> being the static friction (see <i>Static / sliding</i> below).</p>"
     "<p>Only the simulation includes friction. The modes, frequency responses and the other "
-    "pages use M, C and K, the linear part of the chain; the modal table's <i>ζ friction</i> "
-    "column gives friction's equivalent viscous damping at a chosen amplitude.</p>"
+    "pages use M, C and K, the linear part of the chain. Two approximations bring it back: the "
+    "modal table's <i>ζ friction</i> column, friction's equivalent viscous damping at a chosen "
+    "amplitude, and the dash-dot curves on the Frequency response tab, the response at the "
+    "Excitation panel's amplitude.</p>"
 )
 
 
