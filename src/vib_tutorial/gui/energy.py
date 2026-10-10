@@ -22,7 +22,8 @@ BY_TYPE_TIP = (
     "energy at the same stretch), and the work done by the force, ∫F·ẋ dt, or by the moving "
     "ground, −∫N<sub>1</sub>ẋ<sub>g</sub> dt (N<sub>1</sub>: tension in element 1). <i>Out</i>: "
     "the energy stored now, and the energy the dampers turned into heat, "
-    "∫ẋ<sup>T</sup>Cẋ dt. Both are integrated exactly, so the two columns always match. "
+    "∫ẋ<sup>T</sup>Cẋ dt, and friction, Σ F<sub>f,i</sub> × (distance mass i slid). All are "
+    "integrated exactly, so the two columns always match. "
     "A force that pushes against the motion takes energy out; it then shows in the "
     "<i>Out</i> column.</p>"
     "<p>The stored-energy bars are scaled to the largest stored energy in the plot window "
@@ -61,6 +62,7 @@ class EnergyState:
     added: float = 0.0
     work: float = 0.0
     dissipated: float = 0.0
+    friction: float = 0.0
     relative: bool = False  # modal holds the energy of the motion relative to a moving ground
 
     @property
@@ -148,6 +150,7 @@ class EnergyBars(QtWidgets.QWidget):
             (s.work, c["work"], True),
             (s.stored, c["stored"], False),
             (s.dissipated, c["dissipated"], False),
+            (s.friction, c["friction"], False),
         ]
         cols: dict[bool, list[tuple[float, str]]] = {True: [], False: []}
         for value, color, is_in in terms:
@@ -254,7 +257,8 @@ class EnergyPanel(QtWidgets.QWidget):
                     ("stored", e["stored"]),
                     ("release or edit", e["added"]),
                     ("work by force or ground", e["work"]),
-                    ("dissipated", e["dissipated"]),
+                    ("dampers", e["dissipated"]),
+                    ("friction", e["friction"]),
                 )
             )
         )

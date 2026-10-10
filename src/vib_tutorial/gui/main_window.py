@@ -115,8 +115,9 @@ ENERGY_COORDS_TIP = (
     "Kinetic energy T, potential energy V and the stored energy T + V; the energy given "
     "by a release or a parameter edit E<sub>0</sub>, the work done by the force (or the moving "
     "ground) W and "
-    "the energy dissipated by the dampers D, all since the last reset. At every instant</p>"
-    "<p>&nbsp;&nbsp;E<sub>0</sub> + W = T + V + D.</p>"
+    "the energy dissipated by the dampers D and by friction D<sub>f</sub>, all since the last "
+    "reset. At every instant</p>"
+    "<p>&nbsp;&nbsp;E<sub>0</sub> + W = T + V + D + D<sub>f</sub>.</p>"
     "<p>Release a mode: T and V swap twice per cycle while T + V decays and D rises to "
     "E<sub>0</sub>. Drive at resonance: W and D climb together once T + V has built up.</p>"
 )
@@ -128,6 +129,7 @@ ENERGY_CURVES = [
     ("E₀", "added"),
     ("W", "work"),
     ("D", "dissipated"),
+    ("D<sub>f</sub>", "friction"),
 ]
 MIN_ENERGY_SPAN = 1e-9  # J; smaller energies are the float noise of decayed motion
 FORCES_COORDS_TIP = (
@@ -673,6 +675,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 added=self.sim.energy_added,
                 work=self.sim.work,
                 dissipated=self.sim.dissipated,
+                friction=self.sim.friction_loss,
                 relative=bool(self.sim.ground or self._ground_velocity),
             ),
             self._energy_scale,
@@ -742,5 +745,5 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 def energy_curves(e: np.ndarray) -> np.ndarray:
-    """History energy columns (T, V, E0, W, D) -> the ENERGY_CURVES (T, V, T + V, E0, W, D)."""
+    """History energy columns (T, V, E0, W, D, D_f) -> the ENERGY_CURVES (T, V, T + V, E0, W, D, D_f)."""
     return np.column_stack([e[:, :2], e[:, 0] + e[:, 1], e[:, 2:]])

@@ -213,6 +213,16 @@ reset: <b>energy given + work by the force = stored + dissipated</b>. The simula
 integrates both terms exactly over every step, so the <i>In</i> and <i>Out</i> columns
 match to rounding error. "Energy given" counts the jumps when a mode is released or a
 parameter is edited.</p>
+<p><b>Friction.</b> A mass given friction F<sub>f</sub> (under <i>System parameters</i>)
+feels a force of that size against its velocity while it slides, and none of its energy
+comes back: friction takes out F<sub>f</sub>|ẋ<sub>i</sub>|, F<sub>f</sub> times the distance
+slid. A stuck mass does not move, so its friction does no work. The balance becomes
+<b>energy given + work = stored + dissipated by the dampers + by friction</b>. Friction is
+not linear: it does not grow with the motion, so small vibrations die out sooner, relative
+to their size, than large ones, and a mass comes to rest wherever its springs can no longer
+pull it free, not at the rest position. The simulator steps the chain exactly between the
+moments a mass stops or breaks free; the modes and frequency responses leave friction
+out.</p>
 <p><b>By mode.</b> Because Φ<sup>T</sup>MΦ = I and Φ<sup>T</sup>KΦ = diag(ω<sub>r</sub>²),
 the stored energy splits exactly into one term per undamped mode,
 T + V = Σ ½(q̇<sub>r</sub>² + ω<sub>r</sub>²q<sub>r</sub>²), whatever the damping. Each mode's

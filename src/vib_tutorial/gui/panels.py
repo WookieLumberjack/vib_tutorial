@@ -45,6 +45,22 @@ PRESET_TIP = (
 )
 
 
+SPIN_MIN_WIDTH = 64  # px, for the parameter table's spin boxes
+FRICTION_TIP = (
+    "<p><b>Coulomb friction</b> between mass i and the floor: a force of size "
+    "F<sub>f</sub> = μN (N) against the mass's velocity while it slides. At rest it holds "
+    "the mass still as long as the pull of the springs, dampers and force on it is no more "
+    "than F<sub>f</sub>. 0 means no friction.</p>"
+    "<p>Friction makes the chain <b>nonlinear</b>: the force does not grow with the motion, "
+    "so doubling the input does not double the response. Released from rest, a single mass "
+    "still swings at its undamped natural frequency, but loses a fixed 4F<sub>f</sub>/k of "
+    "amplitude per cycle (a straight-line decay rather than viscous damping's exponential) "
+    "and stops for good at the first turn within F<sub>f</sub>/k of its rest position.</p>"
+    "<p>Only the simulation includes friction. The modes, frequency responses and the other "
+    "pages use M, C and K, the linear part of the chain.</p>"
+)
+
+
 class ParameterPanel(QtWidgets.QGroupBox):
     """Mass, spring and damper values for each element of the chain."""
 
@@ -81,7 +97,7 @@ class ParameterPanel(QtWidgets.QGroupBox):
         top.addWidget(self.dof)
         top.addStretch(1)
         reset = QtWidgets.QPushButton("Defaults")
-        reset.setToolTip("Reset every mass, spring and damper to its default value")
+        reset.setToolTip("Reset every mass, spring and damper to its default value, without friction")
         reset.clicked.connect(self._reset_defaults)
         top.addWidget(reset)
         uniform = QtWidgets.QPushButton("Copy row 1 → all")
@@ -91,17 +107,22 @@ class ParameterPanel(QtWidgets.QGroupBox):
         layout.addLayout(top)
 
         self.grid = QtWidgets.QGridLayout()
-        for col, text in enumerate(["", "m [kg]", "k [N/m]", "c [N·s/m]"]):
+        for col, text in enumerate(["", "m [kg]", "k [N/m]", "c [N·s/m]", "F<sub>f</sub> [N]"]):
             lbl = QtWidgets.QLabel(f"<b>{text}</b>")
             lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            if col == 4:
+                lbl.setToolTip(FRICTION_TIP)
             self.grid.addWidget(lbl, 0, col)
         layout.addLayout(self.grid)
-        note = QtWidgets.QLabel("kᵢ, cᵢ connect mᵢ₋₁ to mᵢ (k₁, c₁ connect m₁ to ground).")
+        note = QtWidgets.QLabel(
+            "kᵢ, cᵢ connect mᵢ₋₁ to mᵢ (k₁, c₁ connect m₁ to ground). "
+            "F<sub>f</sub>: friction between mᵢ and the floor."
+        )
         note.setWordWrap(True)
         mute(note)
         layout.addWidget(note)
 
-        self.rows: list[tuple[QtWidgets.QWidget, ...]] = []  # (label, m, k, c)
+        self.rows: list[tuple[QtWidgets.QWidget, ...]] = []  # (label, m, k, c, friction)
         self._build_rows(system)
 
     def _build_rows(self, system: ChainSystem) -> None:
@@ -115,11 +136,16 @@ class ParameterPanel(QtWidgets.QGroupBox):
             m = spin(1e-3, 1e4, system.masses[i], 3)
             k = spin(0.0, 1e7, system.stiffness[i], 2)
             c = spin(0.0, 1e5, system.damping[i], 3)
-            for col, w in enumerate((label, m, k, c)):
+            f = spin(0.0, 1e5, system.friction[i], 3)
+            f.setToolTip(FRICTION_TIP)
+            for col, w in enumerate((label, m, k, c, f)):
                 self.grid.addWidget(w, i + 1, col)
-            for box in (m, k, c):
+            for box in (m, k, c, f):
+                # Their size hint fits the largest value allowed; let the four columns
+                # share the panel's width instead, which fits the usual values.
+                box.setMinimumWidth(SPIN_MIN_WIDTH)
                 box.valueChanged.connect(self._emit)
-            self.rows.append((label, m, k, c))
+            self.rows.append((label, m, k, c, f))
         self.apply_theme()
 
     def apply_theme(self) -> None:
@@ -132,6 +158,7 @@ class ParameterPanel(QtWidgets.QGroupBox):
             [r[1].value() for r in self.rows],
             [r[2].value() for r in self.rows],
             [r[3].value() for r in self.rows],
+            [r[4].value() for r in self.rows],
         )
 
     def _emit(self) -> None:
@@ -142,8 +169,9 @@ class ParameterPanel(QtWidgets.QGroupBox):
         self._emit()
 
     def _set_all(self, system: ChainSystem) -> None:
-        for (_, m, k, c), mv, kv, cv in zip(self.rows, system.masses, system.stiffness, system.damping):
-            for box, v in ((m, mv), (k, kv), (c, cv)):
+        values = zip(system.masses, system.stiffness, system.damping, system.friction)
+        for row, vals in zip(self.rows, values):
+            for box, v in zip(row[1:], vals):
                 box.blockSignals(True)
                 box.setValue(v)
                 box.blockSignals(False)
@@ -177,7 +205,7 @@ class ParameterPanel(QtWidgets.QGroupBox):
 
     def _copy_first_row(self) -> None:
         s = self.system()
-        self._set_all(ChainSystem.uniform(s.n, s.masses[0], s.stiffness[0], s.damping[0]))
+        self._set_all(ChainSystem.uniform(s.n, s.masses[0], s.stiffness[0], s.damping[0], s.friction[0]))
 
 
 BASE_TIP = (

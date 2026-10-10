@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 # Columns of History.e: stored energy (with the parameters of the time) and the ledger.
-ENERGY_COLUMNS = ("kinetic", "potential", "added", "work", "dissipated")
+ENERGY_COLUMNS = ("kinetic", "potential", "added", "work", "dissipated", "friction")
 # History.s holds the element forces (with the parameters of the time): n springs, then n dampers.
 # History.g holds the ground displacement and velocity (0 unless the input is a ground motion).
 # History.offset numbers the samples: t[i] is sample offset + i of every sample ever stored.
