@@ -1010,3 +1010,29 @@ def test_a_stuck_mass_breaks_free_at_static_friction_and_slides_against_sliding_
     np.testing.assert_allclose(np.diff(v[:, 0])[5:] / sim.step_size(), 1.1, rtol=1e-9)
     with pytest.raises(ValueError):
         ChainSystem([1.0], [1.0], [0.0], [1.0], 0.5)
+
+
+def test_drag_shape_lets_friction_hold_the_other_masses():
+    from vib_tutorial.core import drag_shape
+
+    smooth = ChainSystem.uniform(4)
+    np.testing.assert_array_equal(drag_shape(smooth, np.full(4, 0.3), 3, 0.05), pluck_shape(smooth, 3, 0.05))
+    # Friction too strong for the springs: nothing else moves.
+    grippy = ChainSystem.uniform(4, friction=100.0)
+    np.testing.assert_array_equal(drag_shape(grippy, np.zeros(4), 3, 0.05), [0.0, 0.0, 0.0, 0.05])
+
+    s = ChainSystem.uniform(4, friction=2.0, static_ratio=1.5)  # slides at 2 N, holds up to 3 N
+    K = s.matrices()[2]
+    x = np.zeros(4)
+    for target in np.linspace(0.0, 0.05, 26):
+        x = drag_shape(s, x, 3, target)
+    pull = -(K @ x)[:3]
+    # The masses still sliding at the last step end with the pull at the sliding friction,
+    # the others stuck within static friction.
+    np.testing.assert_allclose(pull, [2.0, 2.0, 2.8], rtol=1e-9)
+    assert np.all(x[:3] < pluck_shape(s, 3, 0.05)[:3])  # friction holds them back
+    # Back to the start: the others do not come back with it (hysteresis).
+    for target in np.linspace(0.05, 0.0, 26):
+        x = drag_shape(s, x, 3, target)
+    assert x[3] == 0.0 and np.all(x[:3] > 0.0)
+    assert np.all(np.abs(-(K @ x)[:3]) <= 3.0 + 1e-12)

@@ -148,6 +148,49 @@ def pluck_shape(system: ChainSystem, dof: int, x_dof: float) -> np.ndarray:
     return x
 
 
+def drag_shape(system: ChainSystem, x: np.ndarray, dof: int, x_dof: float) -> np.ndarray:
+    """Displacements (m) after mass `dof` is moved slowly from `x` (at rest) to `x_dof`.
+
+    Without friction this is ``pluck_shape``. With friction the chain's shape
+    depends on how it got there: each other mass stays where it is while the
+    pull of its springs is within its static friction, and one pulled harder
+    slides until the pull has fallen to its sliding friction (moved slowly, it
+    has no speed to carry it further). Several masses can slide at once, each
+    against the pull of the others, so the sliding set is found by trial: solve
+    with the masses that slip, let go of any that would have to slide against
+    its pull, add any stuck one now pulled too hard, until nothing changes.
+    """
+    if not np.any(system.friction > 0):
+        return pluck_shape(system, dof, x_dof)
+    K = system.matrices()[2]
+    Fk, Fs = system.friction, system.static_friction
+    old = np.asarray(x, dtype=float).copy()
+    old[dof] = x_dof
+    others = np.arange(system.n) != dof
+    sliding = np.zeros(system.n, dtype=bool)
+    way = np.zeros(system.n)  # the way each sliding mass moves (and its springs pull)
+    y = old.copy()
+    for _ in range(4 * system.n + 4):
+        y = old.copy()
+        s = np.flatnonzero(sliding)
+        if s.size:
+            # Sliding: spring pull -(K y)_j = Fk_j way_j. Solve for the change from where
+            # they were (least squares), so a part held by no spring stays put.
+            rhs = -Fk[s] * way[s] - K[s] @ old
+            y[s] += np.linalg.lstsq(K[np.ix_(s, s)], rhs, rcond=None)[0]
+        backwards = sliding & (Fk > 0) & (way * (y - old) < 0)
+        if backwards.any():
+            sliding &= ~backwards  # it would have to slide against its pull: it sticks
+            continue
+        pull = -(K @ y)
+        slips = others & ~sliding & (np.abs(pull) > Fs)
+        if not slips.any():
+            break
+        way[slips] = np.sign(pull[slips])
+        sliding |= slips
+    return y
+
+
 def state_space(system: ChainSystem) -> tuple[np.ndarray, np.ndarray]:
     """First-order form z' = A z + B f with z = [x, v].
 

@@ -34,7 +34,7 @@ from .modal import (
     transmissibility,
 )
 from .modal_coupling import CoupledModel, compare_coupled, coupled_model, subsystems
-from .model import ChainSystem, assemble_chain, element_forces, pluck_shape, state_space
+from .model import ChainSystem, assemble_chain, drag_shape, element_forces, pluck_shape, state_space
 from .simulator import Simulator, foh_discretize, foh_quadratic_integrals
 from .substructure import (
     METHOD_NAMES,
@@ -108,6 +108,7 @@ __all__ = [
     "modal_analysis",
     "modal_coordinate_map",
     "modal_energies",
+    "drag_shape",
     "pluck_shape",
     "potential_energy",
     "modal_frf_terms",
