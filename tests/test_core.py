@@ -11,6 +11,8 @@ from vib_tutorial.core import (
     Simulator,
     frf,
     frf_matrix,
+    friction_decay,
+    friction_zeta,
     modal_analysis,
     modal_frf_terms,
     pluck_shape,
@@ -919,6 +921,8 @@ def run_for(sim, duration):
     out = []
     while sim.t < end - 1e-12:
         out.append(sim.advance(end - sim.t)[:3])
+        if not out[-1][0].size:  # under half a step left: advance rounds it to none
+            break
     return tuple(np.concatenate(a) for a in zip(*out))
 
 
@@ -940,6 +944,35 @@ def test_coulomb_friction_decays_linearly_and_stops_in_the_dead_band():
     # All the energy released went into friction: F times the distance slid.
     assert sim.friction_loss == pytest.approx(F * (0.105 + 2 * (0.085 + 0.065 + 0.045 + 0.025) + 0.005))
     assert sim.dissipated == 0.0
+
+
+def test_friction_zeta_of_one_mass_is_the_describing_function_damper():
+    # dA = 4F/k per cycle, and zeta = c_eq / 2 m w with c_eq = 4F / (pi w X).
+    m, k, F, X = 2.0, 800.0, 3.0, 0.04
+    s = ChainSystem([m], [k], [0.0], [F])
+    res = modal_analysis(s)
+    assert friction_decay(s, res)[0] == pytest.approx(4 * F / k)
+    w = math.sqrt(k / m)
+    assert friction_zeta(s, res, X)[0] == pytest.approx(4 * F / (math.pi * w * X) / (2 * m * w))
+    assert friction_zeta(s, res, 2 * X)[0] == pytest.approx(friction_zeta(s, res, X)[0] / 2)
+
+
+@pytest.mark.parametrize("r", [0, 1, 2])
+def test_friction_decay_predicts_a_released_mode(r):
+    # Released in mode r, the chain's modal amplitude (from q and its rate) falls by
+    # friction_decay per cycle while every mass keeps sliding.
+    s = ChainSystem([1.0] * 3, [400.0] * 3, [0.0] * 3, [0.5, 0.2, 0.4])
+    res = modal_analysis(s)
+    mode = res.modes[r]
+    M = s.matrices()[0]
+    phi, psi = mode.shape_mass_normalized, mode.shape
+    sim = Simulator(s)
+    sim.set_displacement(0.05 * psi)
+    period = 2 * math.pi / mode.omega_n
+    t, x, v = run_for(sim, 2.5 * period)
+    amp = np.hypot(x @ M @ phi, v @ M @ phi / mode.omega_n) / (phi @ M @ psi)
+    drops = -np.diff(amp[np.searchsorted(t, [0, period, 2 * period])])
+    np.testing.assert_allclose(drops, friction_decay(s, res)[r], rtol=0.03)
 
 
 def test_mass_sticks_while_the_pull_is_within_friction():

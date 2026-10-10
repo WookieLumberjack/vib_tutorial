@@ -200,7 +200,7 @@ class Decimator:
 
 
 class ModalTable(QtWidgets.QTableWidget):
-    CLASSICAL_HEADERS = ["Mode", "fₙ [Hz]", "ζ modal", "ζ exact", "f_d [Hz]"]
+    CLASSICAL_HEADERS = ["Mode", "fₙ [Hz]", "ζ modal", "ζ exact", "f_d [Hz]", "ζ friction"]
     CLASSICAL_TIPS = [
         "Mode number (ordered by undamped natural frequency)",
         "Undamped natural frequency: Kφ = ω²Mφ",
@@ -208,7 +208,16 @@ class ModalTable(QtWidgets.QTableWidget):
         "Exact only for proportional damping.",
         "Exact damping ratio from the complex eigenvalue λ of the state matrix: -Re(λ)/|λ|",
         "Damped natural frequency Im(λ)/2π",
+        "<p>Equivalent viscous damping ratio of the Coulomb friction, for the mode vibrating with "
+        "the <i>Initial displacement</i> below at the mass that moves most.</p>"
+        "<p>Friction takes a fixed amplitude ΔA per cycle out of the mode (4F<sub>f</sub>/k for a "
+        "single mass), whatever its size; a damper with ratio ζ takes about 2πζA. Matching the "
+        "two gives ζ = ΔA / 2πA, the energy-equivalent damper c<sub>eq</sub> = 4F<sub>f</sub>/πωX. "
+        "It falls as the amplitude grows: friction damps small motions most.</p>"
+        "<p>Add it to ζ exact for the total. It assumes the motion stays in the mode shape, which "
+        "friction, being nonlinear, only roughly allows.</p>",
     ]
+    FRICTION_COLUMN = 5
     STATE_SPACE_HEADERS = ["λ #", "λ = σ ± iω_d [1/s]", "|λ|/2π [Hz]", "ζ", "f_d [Hz]"]
     STATE_SPACE_TIPS = [
         "Eigenvalue number: all 2N eigenvalues of the state matrix A, ordered by |λ|. "
@@ -230,7 +239,10 @@ class ModalTable(QtWidgets.QTableWidget):
         self.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.method: Method | None = None
 
-    def set_result(self, result: ModalResult, method: Method, entries: list[ModeEntry]) -> None:
+    def set_result(
+        self, result: ModalResult, method: Method, entries: list[ModeEntry], friction_zeta: np.ndarray | None = None
+    ) -> None:
+        """Show `result`; `friction_zeta` (one per mode) adds the classical table's friction column."""
         if method is not self.method:
             self.method = method
             self.clearSelection()
@@ -238,10 +250,15 @@ class ModalTable(QtWidgets.QTableWidget):
             classical = method is Method.CLASSICAL
             headers = self.CLASSICAL_HEADERS if classical else self.STATE_SPACE_HEADERS
             tips = self.CLASSICAL_TIPS if classical else self.STATE_SPACE_TIPS
+            self.setColumnCount(len(headers))
             self.setHorizontalHeaderLabels(headers)
             for col, tip in enumerate(tips):
                 self.horizontalHeaderItem(col).setToolTip(tip)
-        rows = self._classical_rows(result) if method is Method.CLASSICAL else self._state_space_rows(result)
+        if method is Method.CLASSICAL:
+            rows = self._classical_rows(result, friction_zeta)
+            self.setColumnHidden(self.FRICTION_COLUMN, friction_zeta is None)
+        else:
+            rows = self._state_space_rows(result)
         selected = self.currentRow() if self.selectedItems() else -1
         self.setRowCount(len(rows))
         for r, (cells, entry) in enumerate(zip(rows, entries)):
@@ -259,9 +276,9 @@ class ModalTable(QtWidgets.QTableWidget):
         self.setFixedHeight(height)
 
     @staticmethod
-    def _classical_rows(result: ModalResult) -> list[list[str]]:
+    def _classical_rows(result: ModalResult, friction_zeta: np.ndarray | None) -> list[list[str]]:
         rows = []
-        for mode in result.modes:
+        for r, mode in enumerate(result.modes):
             d = mode.damped
             rows.append([
                 str(mode.index),
@@ -269,6 +286,7 @@ class ModalTable(QtWidgets.QTableWidget):
                 "rigid" if math.isnan(mode.zeta_modal) else f"{mode.zeta_modal:.4f}",
                 f"{d.zeta:.4f}" if d else "overdamped",
                 f"{d.fd_hz:.4g}" if d else "—",
+                "—" if friction_zeta is None or math.isnan(friction_zeta[r]) else f"{friction_zeta[r]:.4f}",
             ])
         return rows
 
