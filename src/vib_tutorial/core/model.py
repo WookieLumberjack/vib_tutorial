@@ -11,8 +11,9 @@ The equations of motion are
 
 with diagonal M and tridiagonal C, K assembled element by element. Each
 mass may also slide with Coulomb friction against the fixed floor: a force of
-size friction_i (N, mu N) opposing its velocity, or anything up to that size
-while it sticks. Friction makes the chain nonlinear; everything built on M, C
+size friction_i (N, mu N) opposing its velocity, or anything up to
+static_ratio x friction_i while it sticks (the same surface under every mass,
+so one ratio of static to sliding friction). Friction makes the chain nonlinear; everything built on M, C
 and K (modes, FRFs, substructuring) ignores it, and only the simulator applies it.
 All quantities are SI: kg, N/m, N*s/m, m, N.
 """
@@ -33,7 +34,8 @@ class ChainSystem:
     masses: np.ndarray
     stiffness: np.ndarray
     damping: np.ndarray
-    friction: np.ndarray | None = None  # N, Coulomb friction on each mass; zeros if None
+    friction: np.ndarray | None = None  # N, Coulomb (sliding) friction on each mass; zeros if None
+    static_ratio: float = 1.0  # static / sliding friction, the same for every mass
     _matrices: tuple[np.ndarray, np.ndarray, np.ndarray] | None = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -50,6 +52,9 @@ class ChainSystem:
             raise ValueError("masses must be positive")
         if np.any(self.stiffness < 0) or np.any(self.damping < 0) or np.any(self.friction < 0):
             raise ValueError("stiffness, damping and friction must be non-negative")
+        self.static_ratio = float(self.static_ratio)
+        if self.static_ratio < 1.0:
+            raise ValueError("static friction can't be less than sliding friction (static_ratio >= 1)")
 
     @classmethod
     def uniform(
@@ -59,15 +64,21 @@ class ChainSystem:
         stiffness: float = DEFAULT_STIFFNESS,
         damping: float = DEFAULT_DAMPING,
         friction: float = 0.0,
+        static_ratio: float = 1.0,
     ) -> ChainSystem:
-        return cls(np.full(n, mass), np.full(n, stiffness), np.full(n, damping), np.full(n, friction))
+        return cls(np.full(n, mass), np.full(n, stiffness), np.full(n, damping), np.full(n, friction), static_ratio)
+
+    @property
+    def static_friction(self) -> np.ndarray:
+        """The most friction can hold each mass with while it sticks (N)."""
+        return self.static_ratio * self.friction
 
     @property
     def n(self) -> int:
         return self.masses.size
 
     def copy(self) -> ChainSystem:
-        return ChainSystem(self.masses, self.stiffness, self.damping, self.friction)
+        return ChainSystem(self.masses, self.stiffness, self.damping, self.friction, self.static_ratio)
 
     def resized(self, n: int) -> ChainSystem:
         """Return a copy with n masses, padding with the last element's values."""
@@ -75,7 +86,9 @@ class ChainSystem:
         def fit(a: np.ndarray) -> np.ndarray:
             return a[:n] if n <= a.size else np.concatenate([a, np.full(n - a.size, a[-1])])
 
-        return ChainSystem(fit(self.masses), fit(self.stiffness), fit(self.damping), fit(self.friction))
+        return ChainSystem(
+            fit(self.masses), fit(self.stiffness), fit(self.damping), fit(self.friction), self.static_ratio
+        )
 
     def matrices(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return (M, C, K). Cached; treat the arrays as read-only."""

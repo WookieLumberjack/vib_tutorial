@@ -55,9 +55,22 @@ FRICTION_TIP = (
     "so doubling the input does not double the response. Released from rest, a single mass "
     "still swings at its undamped natural frequency, but loses a fixed 4F<sub>f</sub>/k of "
     "amplitude per cycle (a straight-line decay rather than viscous damping's exponential) "
-    "and stops for good at the first turn within F<sub>f</sub>/k of its rest position.</p>"
+    "and stops for good at the first turn within F<sub>s</sub>/k of its rest position, "
+    "F<sub>s</sub> being the static friction (see <i>Static / sliding</i> below).</p>"
     "<p>Only the simulation includes friction. The modes, frequency responses and the other "
     "pages use M, C and K, the linear part of the chain.</p>"
+)
+
+
+STATIC_TIP = (
+    "<p><b>Static friction</b> as a multiple of the sliding friction F<sub>f</sub>, the same for "
+    "every mass (the same floor under each). A mass at rest stays stuck until the pull of its "
+    "springs, dampers and the force exceeds F<sub>s</sub> = ratio × F<sub>f</sub>; then it slides "
+    "against the smaller F<sub>f</sub>, so it lurches off.</p>"
+    "<p>Above 1 this gives <b>stick-slip</b>: pull a mass slowly through a spring (a slow ground "
+    "motion, or a slow force) and it sticks while the spring winds up, jumps, and sticks again, "
+    "like a squeaking door or a bowed violin string. Static friction holds; it does no work, so "
+    "the energy balance is unchanged.</p>"
 )
 
 
@@ -121,6 +134,18 @@ class ParameterPanel(QtWidgets.QGroupBox):
         note.setWordWrap(True)
         mute(note)
         layout.addWidget(note)
+        ratio_row = QtWidgets.QHBoxLayout()
+        ratio_label = QtWidgets.QLabel("Static / sliding friction:")
+        self.static_ratio = spin(1.0, 5.0, system.static_ratio, 2)
+        self.static_ratio.setPrefix("× ")
+        self.static_ratio.setSingleStep(0.1)
+        for w in (ratio_label, self.static_ratio):
+            w.setToolTip(STATIC_TIP)
+        self.static_ratio.valueChanged.connect(self._emit)
+        ratio_row.addWidget(ratio_label)
+        ratio_row.addWidget(self.static_ratio)
+        ratio_row.addStretch(1)
+        layout.addLayout(ratio_row)
 
         self.rows: list[tuple[QtWidgets.QWidget, ...]] = []  # (label, m, k, c, friction)
         self._build_rows(system)
@@ -159,6 +184,7 @@ class ParameterPanel(QtWidgets.QGroupBox):
             [r[2].value() for r in self.rows],
             [r[3].value() for r in self.rows],
             [r[4].value() for r in self.rows],
+            self.static_ratio.value(),
         )
 
     def _emit(self) -> None:
@@ -175,7 +201,13 @@ class ParameterPanel(QtWidgets.QGroupBox):
                 box.blockSignals(True)
                 box.setValue(v)
                 box.blockSignals(False)
+        self._show_ratio(system)
         self._emit()
+
+    def _show_ratio(self, system: ChainSystem) -> None:
+        self.static_ratio.blockSignals(True)
+        self.static_ratio.setValue(system.static_ratio)
+        self.static_ratio.blockSignals(False)
 
     def set_system(self, system: ChainSystem) -> None:
         """Show every value of `system` (any number of masses) and emit it once."""
@@ -184,6 +216,7 @@ class ParameterPanel(QtWidgets.QGroupBox):
             self.dof.setValue(system.n)
             self.dof.blockSignals(False)
             self._build_rows(system)
+            self._show_ratio(system)
             self._emit()
         else:
             self._set_all(system)
@@ -205,7 +238,9 @@ class ParameterPanel(QtWidgets.QGroupBox):
 
     def _copy_first_row(self) -> None:
         s = self.system()
-        self._set_all(ChainSystem.uniform(s.n, s.masses[0], s.stiffness[0], s.damping[0], s.friction[0]))
+        self._set_all(
+            ChainSystem.uniform(s.n, s.masses[0], s.stiffness[0], s.damping[0], s.friction[0], s.static_ratio)
+        )
 
 
 BASE_TIP = (

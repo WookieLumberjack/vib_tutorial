@@ -31,8 +31,9 @@ the first moment a sliding mass stops (its velocity changes sign) or a stuck
 one breaks free (the pull of its springs, dampers and the force exceeds the
 friction), finds it on a cubic through the step's ends, steps exactly to it,
 updates which masses stick and carries on. At a stop the mass sticks if the
-pull on it is no more than its friction, and slides back otherwise (the
-static and sliding friction are equal). The heat friction makes over a
+pull on it is no more than its static friction (``static_friction``, at least
+the sliding friction), and slides back otherwise; a stuck mass breaks free
+when the pull exceeds it. The heat friction makes over a
 sub-step is exactly -e . (change in x), so the energy ledger stays exact.
 
 With base excitation the input is the ground displacement u = x_g instead of
@@ -348,11 +349,12 @@ class Simulator:
         """(stuck, e): which masses stick, and the friction force on each sliding one.
 
         A moving mass slides the way it moves. One at rest sticks while the pull
-        on it is no more than its friction, and otherwise starts to slide the way
-        it is pulled. ``forced`` overrides this for a mass that just broke free.
+        on it is no more than its static friction, and otherwise starts to slide
+        the way it is pulled. ``forced`` overrides this for a mass that just broke free.
         """
         n = self.system.n
         F = self.system.friction
+        Fs = self.system.static_friction
         v = w[n : 2 * n]
         way = np.sign(v)
         rest = (v == 0.0) & (F > 0)
@@ -360,7 +362,7 @@ class Simulator:
         if forced or rest.any():
             pull = P @ w[: 2 * n + 2]
             way = np.where(rest, np.sign(pull), way)
-            stuck = rest & (np.abs(pull) <= F)
+            stuck = rest & (np.abs(pull) <= Fs)
         for i, d in forced.items():
             stuck[i], way[i] = False, d
         return stuck, np.where(stuck, 0.0, -F * way)
@@ -369,16 +371,16 @@ class Simulator:
         """(time, mass, way) of the first stop (way 0) or break-free (way ±1) within the step w0 -> w1."""
         n = self.system.n
         m = 2 * n + 2
-        F = self.system.friction
+        Fs = self.system.static_friction
         # A sliding mass whose velocity changed sign stopped on the way: its velocity
         # now has the sign of the friction force (which opposed the sliding).
         reversed_ = e * w1[n : 2 * n] > 0.0
-        # A stuck mass whose pull grew beyond its friction broke free on the way.
+        # A stuck mass whose pull grew beyond its static friction broke free on the way.
         frees, p1 = np.empty(0, dtype=int), np.empty(0)
         if stuck.any():
             frees = np.flatnonzero(stuck)
             p1 = P[frees] @ w1[:m]
-            keep = np.abs(p1) > F[frees]
+            keep = np.abs(p1) > Fs[frees]
             frees, p1 = frees[keep], p1[keep]
         elif not reversed_.any():
             return None
@@ -396,7 +398,7 @@ class Simulator:
         for i, p in zip(frees, p1):
             sg = float(np.sign(p))
             p0 = P[i] @ w0[:m]
-            t = first_root(F[i] - sg * p0, -sg * (P[i] @ d0[:m]), F[i] - sg * p, -sg * (P[i] @ d1[:m]), s)
+            t = first_root(Fs[i] - sg * p0, -sg * (P[i] @ d0[:m]), Fs[i] - sg * p, -sg * (P[i] @ d1[:m]), s)
             if best is None or t < best[0]:
                 best = (t, int(i), sg)
         return best
@@ -491,14 +493,14 @@ class Simulator:
         zs = np.empty((f.size, 2 * n))
         w = np.zeros(3 * n + 2)
         w[: 2 * n] = self.state
-        F = self.system.friction
+        F, Fs = self.system.friction, self.system.static_friction
         f0 = self._u
         k = 0
         while k < f.size:
             f1 = f[k]
             if f1 == f0 and not w[n : 2 * n].any():
                 w[2 * n], w[2 * n + 1] = f0, 0.0
-                if np.all(np.abs(P @ w[: 2 * n + 2]) <= F):
+                if np.all(np.abs(P @ w[: 2 * n + 2]) <= Fs):
                     # At rest, every mass held by its friction (or with no pull on it),
                     # and the force not changing: nothing moves until it does.
                     changes = np.flatnonzero(f[k:] != f0)
@@ -518,7 +520,7 @@ class Simulator:
         v = zs[:, n:]
         pull = np.column_stack([zs, f, np.zeros(f.size)]) @ P.T  # a force has no slope term (b_du = 0)
         way = np.where(v != 0.0, np.sign(v), np.sign(pull))
-        stuck = (v == 0.0) & (F > 0) & (np.abs(pull) <= F)
+        stuck = (v == 0.0) & (F > 0) & (np.abs(pull) <= Fs)
         return zs, np.where(stuck, 0.0, (pull - F * way) / self.system.masses)
 
     def advance(self, duration: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

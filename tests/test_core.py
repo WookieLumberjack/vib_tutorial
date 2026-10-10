@@ -985,3 +985,28 @@ def test_friction_steps_converge_and_balance_with_ground_motion():
     ref = run(32)
     e1, e2 = (np.abs(run(d) - ref).max() for d in (1, 2))
     assert e1 < 1e-4 and 3.0 < e1 / e2 < 5.0
+
+
+def test_static_friction_holds_a_mass_that_sliding_friction_would_let_go():
+    # 4 N sliding friction on a 400 N/m spring. Released from 98 mm, it turns at -78,
+    # 58, -38 and 18 mm. With static = sliding friction it slides on from 18 mm (the
+    # spring's 7.2 N beats 4 N) and stops at 2 mm; with twice the static friction (8 N) it sticks at 18 mm.
+    for ratio, rest in ((1.0, 0.002), (2.0, 0.018)):
+        sim = Simulator(ChainSystem([1.0], [400.0], [0.0], [4.0], ratio))
+        sim.set_displacement(np.array([0.098]))
+        _, x, v = run_for(sim, 2.0)
+        assert v[-1, 0] == 0.0 and x[-1, 0] == pytest.approx(rest, abs=1e-9)
+
+
+def test_a_stuck_mass_breaks_free_at_static_friction_and_slides_against_sliding_friction():
+    s = ChainSystem([1.0], [0.0], [0.0], [2.0], 1.5)  # no spring: holds up to 3 N, then 2 N against it
+    for push, moves in ((2.9, False), (3.1, True)):
+        force = ForceController(ForceSettings(kind=ForceKind.STEP, amplitude=push))
+        sim = Simulator(s, force)
+        force.switch_on()
+        _, x, v = run_for(sim, 1.0)
+        assert (x[-1, 0] != 0.0) == moves
+    # Once sliding, it accelerates at (3.1 - 2) / 1 m/s^2.
+    np.testing.assert_allclose(np.diff(v[:, 0])[5:] / sim.step_size(), 1.1, rtol=1e-9)
+    with pytest.raises(ValueError):
+        ChainSystem([1.0], [1.0], [0.0], [1.0], 0.5)
