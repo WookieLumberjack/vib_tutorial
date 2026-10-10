@@ -256,9 +256,9 @@ def _circle_parameters(w: np.ndarray, h: np.ndarray, wr0: float, zeta0: float) -
         x = (w**2 - wr**2) / (2.0 * zeta * wr * w)
         return np.angle(np.exp(1j * (phi - phi_r + 2.0 * np.arctan(x))))
 
-    start = [phi[k], wr0, max(zeta0, 1e-4)]
     lower = [-np.inf, 0.5 * wr0, 1e-6]
     upper = [np.inf, 1.5 * wr0, 1.0]
+    start = [phi[k], wr0, min(max(zeta0, 1e-4), 0.99)]  # a noise "peak" can be wider than critical
     fit = scipy.optimize.least_squares(residual, start, bounds=(lower, upper))
     return float(fit.x[1]), float(fit.x[2])
 

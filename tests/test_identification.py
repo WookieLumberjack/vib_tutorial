@@ -125,3 +125,13 @@ def test_lscf_order_is_limited_by_the_lines_in_the_band():
     f = np.linspace(0.5, 7.0, 12)  # a coarse stepped sine
     stab = lscf(f, frf(SYSTEM, f, 3), (0.0, 7.0), 30)
     assert max(stab.orders) <= 11
+
+
+def test_circle_fit_starts_inside_its_bounds_for_an_overdamped_noise_peak():
+    # Half-power damping above critical (a noise "peak") used to start the fit outside zeta <= 1.
+    from vib_tutorial.core.identification import _circle_parameters
+
+    w = np.linspace(1.0, 3.0, 9)
+    h = 1.0 / (4.0 - w**2 + 2j * 0.3 * 2.0 * w)
+    wr, zeta = _circle_parameters(w, h, 2.0, 2.5)
+    assert 1.0 <= wr <= 3.0 and 0.0 < zeta <= 1.0

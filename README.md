@@ -403,13 +403,19 @@ model's $x_b(t)$, so it keeps every interior mode and its only error is the erro
 
 The **Virtual modal test** page measures the FRF the way a lab does: from sampled force and
 response signals alone, never from M, C and K. A force excites one mass, every mass's
-displacement is recorded, and the FRF column is estimated and drawn over the exact one.
+displacement or acceleration is recorded, and the FRF column (receptance or accelerance) is
+estimated and drawn over the exact one.
 Each step of the measurement, and each error it can bring in, can be switched on and off.
 
 - **Excitation**: impact hammer (the tip sets the pulse length, and so how high it
   excites), continuous random, burst random, periodic random, periodic chirp, or stepped
   sine. The response is simulated with the same exact first-order-hold discretization as
   the simulator.
+- **Response sensor**: displacement (receptance) or acceleration (accelerance, as with
+  accelerometers). The acceleration comes from the simulated chain itself, so it is filtered,
+  sampled and made noisy like a real accelerometer signal. With response noise, displacement
+  loses the high modes and acceleration the band below the first mode; modes are extracted
+  after dividing by −ω².
 - **Acquisition**: sample rate (automatic, or set by hand), block size (which sets
   Δf = f<sub>s</sub>/N<sub>b</sub>), averages, overlap, and an anti-alias filter. Turn the filter
   off and a mode above Nyquist folds back into the band.

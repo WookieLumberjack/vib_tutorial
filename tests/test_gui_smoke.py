@@ -924,6 +924,21 @@ def test_modal_extraction_on_the_test_page(app):
         p._measure_some()
     assert p.window.currentData() is Window.FORCE_EXPONENTIAL and p.extract.correct.isVisibleTo(p)
     assert "moved" in p.results.notes.text()
+
+    # Accelerometers: a new measurement of the accelerance, fitted as receptance after dividing by -w^2.
+    from vib_tutorial.core import Response
+
+    p.excitation.setCurrentIndex(list(Excitation).index(Excitation.PERIODIC_RANDOM))
+    p.response.setCurrentIndex(list(Response).index(Response.ACCELERATION))
+    while not p.acq.done:
+        p._measure_some()
+    assert p.acq.settings.response is Response.ACCELERATION and p.estimate.response is Response.ACCELERATION
+    assert "accelerance" in p.frf_view.mag.titleLabel.text and "a4" in p.signals.response.getAxis("left").labelText
+    assert "−ω²" in p.results.notes.text() and "acceleration measured" in p.check.toHtml()
+    p.frf_view.fit_band_changed.emit(0.0, p.acq.settings.band)
+    p.extract.method.setCurrentIndex(list(Method).index(Method.LSCF))
+    rows = [p.results.table.item(r, 0).text() for r in range(p.results.table.rowCount())]
+    assert rows == ["1", "2", "3", "4"]
     w.close()
 
 

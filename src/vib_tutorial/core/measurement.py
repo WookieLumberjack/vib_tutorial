@@ -2,8 +2,9 @@
 
 This mimics a laboratory test. A force is applied at one mass (impact hammer,
 shaker driven by random or chirp signals, or a stepped sine), and a data
-acquisition system samples the force and the displacement of every mass. The
-FRF is then estimated from those sampled signals alone, as it would be from
+acquisition system samples the force and the response of every mass, measured
+as displacement or (as with accelerometers) acceleration. The FRF, receptance
+or accelerance, is then estimated from those sampled signals alone, as it would be from
 real measurements, so it can be compared with the exact H(w).
 
 Signal chain
@@ -91,6 +92,30 @@ class Window(enum.Enum):
     FORCE_EXPONENTIAL = "Force + exponential"
 
 
+class Response(enum.Enum):
+    """What the response sensors measure, and so which form of the FRF is estimated."""
+
+    DISPLACEMENT = "Displacement"
+    ACCELERATION = "Acceleration"
+
+    @property
+    def symbol(self) -> str:
+        return "x" if self is Response.DISPLACEMENT else "a"
+
+    @property
+    def unit(self) -> str:
+        return "m" if self is Response.DISPLACEMENT else "m/s²"
+
+    @property
+    def frf_name(self) -> str:
+        return "receptance" if self is Response.DISPLACEMENT else "accelerance"
+
+    @property
+    def power(self) -> int:
+        """p in FRF = (s)^p x receptance: each derivative multiplies by s = iw."""
+        return 0 if self is Response.DISPLACEMENT else 2
+
+
 class Estimator(enum.Enum):
     H1 = "H1 = G_xf / G_ff"
     H2 = "H2 = G_xx / G_fx"
@@ -102,6 +127,7 @@ class MeasurementSettings:
 
     excitation: Excitation = Excitation.IMPACT
     input_dof: int = 0
+    response: Response = Response.DISPLACEMENT
     fs: float = 20.0  # Hz, acquisition sample rate
     block: int = 1024  # samples per block (Nb)
     averages: int = 10  # blocks (stepped sine: ignored)
@@ -159,6 +185,23 @@ def transfer(system: ChainSystem, s: np.ndarray, input_dof: int) -> np.ndarray:
     e = np.zeros((s.size, system.n, 1), dtype=complex)
     e[:, input_dof] = 1.0
     return np.linalg.solve(Z, e)[:, :, 0]
+
+
+def from_receptance(freqs_hz: np.ndarray, H: np.ndarray, response: Response) -> np.ndarray:
+    """The FRF the sensors measure, (iw)^p H, from receptance H (rows: frequencies)."""
+    iw = 1j * TWO_PI * np.asarray(freqs_hz, dtype=float)
+    factor = iw**response.power
+    return H * (factor[:, None] if np.ndim(H) > 1 else factor)
+
+
+def to_receptance(freqs_hz: np.ndarray, H: np.ndarray, response: Response) -> np.ndarray:
+    """Receptance from a measured FRF: accelerance divided by -w^2 (NaN at 0 Hz)."""
+    if response.power == 0:
+        return H
+    iw = 1j * TWO_PI * np.asarray(freqs_hz, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        factor = np.where(iw != 0, 1.0 / np.where(iw != 0, iw, 1.0) ** response.power, np.nan)
+    return H * (factor[:, None] if np.ndim(H) > 1 else factor)
 
 
 def impact_spectrum(width: float, freqs_hz: np.ndarray) -> np.ndarray:
@@ -222,16 +265,25 @@ def block_windows(settings: MeasurementSettings, processing: Processing) -> tupl
 class ChainResponse:
     """Exact FOH response of the chain to a force at one mass, sampled every h seconds.
 
+    The response is the displacements, or the accelerations
+    a = M^-1 (f - C v - K x), which the state and the force give exactly.
+
     Diagonalizing Phi = V diag(mu) V^-1 turns the update into one first-order
     filter per eigenvalue, eta_r[k] = mu_r eta_r[k-1] + b0_r f[k-1] + b1_r f[k],
     which scipy runs in C. A defective eigenvalue (a free chain's rigid-body
     lambda = 0) has no diagonal form, so that case steps the state directly.
     """
 
-    def __init__(self, system: ChainSystem, h: float, input_dof: int) -> None:
+    def __init__(
+        self, system: ChainSystem, h: float, input_dof: int, response: Response = Response.DISPLACEMENT
+    ) -> None:
         A, B = state_space(system)
         Phi, G0, G1 = foh_discretize(A, B, h)
-        self.n = system.n
+        self.n = n = system.n
+        if response is Response.DISPLACEMENT:  # y = C_out z + d f
+            self._C, self._d = np.eye(2 * n)[:n], np.zeros(n)
+        else:
+            self._C, self._d = A[n:].copy(), B[n:, input_dof].copy()
         self.state = np.zeros(2 * system.n)
         self.f_prev = 0.0
         self._Phi, self._g0, self._g1 = Phi, G0[:, input_dof].copy(), G1[:, input_dof].copy()
@@ -242,7 +294,7 @@ class ChainResponse:
             self._modal = (mu, V, Vinv, Vinv @ self._g0, Vinv @ self._g1)
 
     def run(self, f: np.ndarray) -> np.ndarray:
-        """Displacements (len(f), n) at the instants of the force samples f.
+        """Responses (len(f), n) at the instants of the force samples f.
 
         f[k] is the force at the end of step k; the force before the first
         step is the last sample of the previous call.
@@ -274,7 +326,7 @@ class ChainResponse:
                 f0 = f1
         self.state = z[-1].copy()
         self.f_prev = float(f[-1])
-        return z[:, : self.n]
+        return z @ self._C.T + f[:, None] * self._d[None, :]
 
 
 # --------------------------------------------------------------- acquisition
@@ -308,7 +360,7 @@ class Acquisition:
         self.oversample = R = oversampling(self.result, s)
         self.fs_sim = s.fs * R
         self.settle = settle_time(self.result)
-        self._chain = ChainResponse(system, 1.0 / self.fs_sim, s.input_dof)
+        self._chain = ChainResponse(system, 1.0 / self.fs_sim, s.input_dof, s.response)
         self._aa = None
         if s.anti_alias:
             self._aa = scipy.signal.ellip(8, 0.05, 90.0, s.band, fs=self.fs_sim, output="sos")
@@ -511,18 +563,19 @@ class Estimate:
     """An estimated FRF column and what went into it."""
 
     freqs: np.ndarray  # Hz
-    H: np.ndarray  # (F, n) complex receptance estimate
+    H: np.ndarray  # (F, n) complex estimate of the FRF the sensors measure (receptance or accelerance)
     coherence: np.ndarray | None  # (F, n); None for a stepped sine
     force_spectrum: np.ndarray  # (F,) averaged |F|^2 (N^2), or |F|^2 per stepped-sine point
     count: int  # blocks averaged (or stepped-sine frequencies measured)
     # The latest block as measured (with noise), for display.
     t: np.ndarray
     f: np.ndarray
-    x: np.ndarray  # (len(t), n)
+    x: np.ndarray  # (len(t), n) responses (displacement or acceleration)
     force_window: np.ndarray | None
     response_window: np.ndarray | None
     # Stepped sine: the sines fitted to the latest frequency, finely sampled (t, f, x).
     fit: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+    response: Response = Response.DISPLACEMENT  # what x is, and so whether H is receptance or accelerance
 
 
 class FrfEstimator:
@@ -586,6 +639,7 @@ class FrfEstimator:
             x=last[1],
             force_window=self.w_f,
             response_window=self.w_x,
+            response=s.response,
         )
 
     def _sine(self) -> Estimate | None:
@@ -614,4 +668,5 @@ class FrfEstimator:
             force_window=None,
             response_window=None,
             fit=fit,
+            response=self.acq.settings.response,
         )
