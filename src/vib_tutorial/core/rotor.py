@@ -41,13 +41,29 @@ damping in C; the rest is Ω H, a skew stiffness growing with the speed. Both
 skew stiffnesses push a forward whirl along its path, feeding it energy; above
 the speed where that outweighs the damping, the whirl grows by itself.
 
-The force is the disc's mass unbalance U = m e (kg·m): its centre of mass is a
-distance e from the shaft's centre at angle φ, with φ' = Ω. Keeping the centre
-of mass on its path takes
+Three sources turn with the shaft and drive it once per revolution (1X):
 
-    f_x = U (Ω² cos φ + Ω' sin φ),   f_y = U (Ω² sin φ - Ω' cos φ)
+- the disc's mass unbalance U = m e (kg·m): its centre of mass is a distance e
+  from the shaft's centre at angle φ, with φ' = Ω. Keeping the centre of mass
+  on its path takes
 
-on the disc.
+      f_x = U (Ω² cos φ + Ω' sin φ),   f_y = U (Ω² sin φ - Ω' cos φ)
+
+  on the disc, or f_x + i f_y = U (Ω² - iΩ') e^{iφ}.
+- the disc's skew τ (rad): its principal axis is tilted from the shaft's by τ,
+  toward angle φ + γ. The disc's inertia acts on its own axis, the shaft's slope
+  plus the skew, so the skew moves to the right side as a moment on the slopes,
+  M_x + i M_y = (I_d - I_p) τ (Ω² - iΩ') e^{i(φ+γ)}: a couple unbalance. A thin
+  disc (I_p > I_d) is pushed flat, toward square to the spin axis.
+- the shaft's bow: a residual bend, δ at the disc toward angle φ + β, in the
+  shape a load at the disc gives with the bearings held (q_bow). The shaft's
+  elastic force is K_shaft (q - q_bow(φ)), so the bow is a force K_shaft q_bow
+  turning with the shaft, constant in size. It loads only the shaft: its
+  forces on the disc and the journals balance, so at rest the shaft takes its
+  bent shape without loading the bearings.
+
+The internal damping acts on q - q_bow too, but the bow does not move in the
+shaft, so it adds nothing there: C_i q_bow' + Ω H q_bow = 0.
 
 Time stepping uses the state z = [q, q'], z' = A(Ω) z + B u, with the same exact
 first-order-hold matrix-exponential update as the chain's Simulator. A depends
@@ -59,6 +75,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 
 import numpy as np
 import scipy.linalg
@@ -100,6 +117,10 @@ class RotorSystem:
     bearing_b: Bearing = field(default_factory=Bearing)
     unbalance: float = 20e-6  # kg·m (20 g·mm)
     internal_damping: float = 0.0  # N·s/m, the shaft's rotating damping, as a damper at the disc
+    bow: float = 0.0  # m, the shaft's residual bow at the disc
+    bow_angle: float = 0.0  # rad, of the bow ahead of the heavy spot (in the direction of spin)
+    skew: float = 0.0  # rad, the disc's principal axis's tilt from the shaft's
+    skew_angle: float = 0.0  # rad, of the skew's direction ahead of the heavy spot
 
     def __post_init__(self) -> None:
         if not 0.0 < self.position < 1.0:
@@ -110,6 +131,8 @@ class RotorSystem:
             raise ValueError("lengths, Young's modulus, masses and Id must be positive")
         if self.internal_damping < 0.0:
             raise ValueError("the internal damping cannot be negative")
+        if self.bow < 0.0 or self.skew < 0.0:
+            raise ValueError("the bow and the skew are sizes; give their direction as an angle")
 
     def with_(self, **changes) -> RotorSystem:
         return replace(self, **changes)
@@ -131,7 +154,13 @@ class RotorSystem:
         return self.length - self.a
 
     def _shaft_condensation(self) -> tuple[np.ndarray, np.ndarray]:
-        """(K_shaft, T): one plane's 4x4 shaft stiffness on [w_A, w_D, θ_D, w_B], and T (6x4).
+        """(K_shaft, T): one plane's 4x4 shaft stiffness on [w_A, w_D, θ_D, w_B], and T (6x4)."""
+        K, T = self._condensed
+        return K.copy(), T.copy()
+
+    @cached_property
+    def _condensed(self) -> tuple[np.ndarray, np.ndarray]:
+        """_shaft_condensation's result, worked out once (the system is frozen).
 
         The shaft is two beam elements, A to the disc and the disc to B, on
         [w_A, θ_A, w_D, θ_D, w_B, θ_B]. The bearings take no moment, so θ_A and θ_B
@@ -163,6 +192,39 @@ class RotorSystem:
     def loss_time(self) -> float:
         """η (s): the internal damping is η K_shaft, so that it is c_i on the disc's own stiffness."""
         return self.internal_damping / self.disc_stiffness
+
+    def bow_shape(self) -> np.ndarray:
+        """One plane's bow (4,) on [w_A, w_D, θ_D, w_B], per metre of bow at the disc.
+
+        The shape a load at the disc gives with the bearings held: no moment at the
+        disc, so K_shaft times it is a force at the disc and the bearings' reactions.
+        """
+        k = self.shaft_stiffness()[1:3, 1:3]
+        w, theta = np.linalg.solve(k, [1.0, 0.0])
+        return np.array([0.0, 1.0, theta / w, 0.0])
+
+    def rotating_load(self, omega: float | np.ndarray, alpha: float | np.ndarray = 0.0) -> np.ndarray:
+        """The 1X load on [A, D, θ, B] as f_x + i f_y = P e^{iφ}: P (..., 4) complex.
+
+        The unbalance on the disc, the skew's moment on its slopes and the bow's
+        force K_shaft q_bow, at speed Ω and acceleration Ω' = alpha.
+        """
+        drive = np.asarray(omega, dtype=float) ** 2 - 1j * np.asarray(alpha, dtype=float)
+        per_drive, bow = self._load_parts
+        return drive[..., None] * per_drive + bow
+
+    @cached_property
+    def _load_parts(self) -> tuple[np.ndarray, np.ndarray]:
+        """(the load per unit Ω² - iΩ', the bow's constant load), each (4,) complex."""
+        per_drive = np.array([0.0, self.unbalance,
+                              (self.id - self.ip) * self.skew * np.exp(1j * self.skew_angle), 0.0])
+        bow = self.shaft_stiffness() @ self.bow_shape() * self.bow * np.exp(1j * self.bow_angle)
+        return per_drive, bow
+
+    def bow_displacement(self, phase: float) -> np.ndarray:
+        """q_bow (8,): the bow at shaft angle φ, as displacements in fixed coordinates."""
+        b = self.bow_shape() * self.bow * np.exp(1j * (phase + self.bow_angle))
+        return np.concatenate([b.real, b.imag])
 
     def shape_matrix(self, z: np.ndarray) -> np.ndarray:
         """S (len(z) x 4): the shaft's deflection at axial positions z (m) is S @ [w_A, w_D, θ_D, w_B].
@@ -239,9 +301,10 @@ class RotorSystem:
         return A
 
     def input_matrix(self) -> np.ndarray:
-        """B (16x2): the inputs u = [f_x, f_y] (N) act on the disc."""
-        B = np.zeros((2 * N_DOF, 2))
-        B[N_DOF + XD, 0] = B[N_DOF + YD, 1] = 1.0 / self.disc_mass
+        """B (16x8): the inputs u = f (8,), a force or moment on each DOF."""
+        B = np.zeros((2 * N_DOF, N_DOF))
+        A, Bb = self.bearing_a, self.bearing_b
+        B[N_DOF:] = np.diag(1.0 / np.array([A.mass, self.disc_mass, self.id, Bb.mass] * 2))
         return B
 
     # ------------------------------------------------------------- checks
@@ -408,18 +471,21 @@ def _refine_critical(system: RotorSystem, branch: int, guess: float, lo: float, 
     return x1 if lo <= x1 <= hi else guess
 
 
-def unbalance_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
-    """Steady-state response to the unbalance at constant speeds: Q (len(omegas), 8), complex.
+def synchronous_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
+    """Steady-state 1X response at constant speeds: Q (len(omegas), 8), complex.
 
-    q(t) = Re(Q e^{iΩt}), with the unbalance's centre of mass at angle φ = Ωt
-    (along +x at t = 0). Above the stability onset this particular solution still
-    exists, but the free whirl grows over it, so the rotor never settles to it.
+    The unbalance, the disc's skew and the shaft's bow together. q(t) = Re(Q e^{iΩt}),
+    with the unbalance's centre of mass at angle φ = Ωt (along +x at t = 0). Above
+    the stability onset this particular solution still exists, but the free whirl
+    grows over it, so the rotor never settles to it.
     """
     M, C, G, _ = system.matrices()
-    out = np.empty((np.size(omegas), N_DOF), dtype=complex)
-    for i, w in enumerate(np.atleast_1d(omegas)):
-        f = np.zeros(N_DOF, dtype=complex)
-        f[XD], f[YD] = system.unbalance * w * w, -1j * system.unbalance * w * w
+    omegas = np.atleast_1d(np.asarray(omegas, dtype=float))
+    out = np.empty((omegas.size, N_DOF), dtype=complex)
+    load = system.rotating_load(omegas)
+    for i, w in enumerate(omegas):
+        # f_x + i f_y = P e^{iφ}: f_x = Re(P e^{iφ}), f_y = Re(-iP e^{iφ}).
+        f = np.concatenate([load[i], -1j * load[i]])
         out[i] = np.linalg.solve(system.stiffness(w) - w * w * M + 1j * w * (C + w * G), f)
     return out
 
@@ -443,8 +509,8 @@ class RotorSimulator:
     def __init__(self, system: RotorSystem | None = None) -> None:
         self.system = system or RotorSystem()
         self.t = 0.0
-        self.state = np.zeros(2 * N_DOF)
         self.phase = 0.0  # φ: angle of the unbalance's centre of mass (rad, unwrapped)
+        self.state = self._rest()
         self.omega = 0.0  # spin speed now (rad/s)
         self.target = 0.0  # the speed it ramps toward (rad/s)
         self.accel = 500.0 / RPM  # ramp rate (rad/s²)
@@ -459,10 +525,14 @@ class RotorSimulator:
         self._cache.clear()
         self._f_still = self._highest_freq_still()
 
+    def _rest(self) -> np.ndarray:
+        """The state at rest: the shaft in its bowed shape, which loads nothing."""
+        return np.concatenate([self.system.bow_displacement(self.phase), np.zeros(N_DOF)])
+
     def reset(self) -> None:
         """Back to rest, not spinning (the target speed is kept)."""
         self.t = self.phase = self.omega = self._alpha = 0.0
-        self.state = np.zeros(2 * N_DOF)
+        self.state = self._rest()
 
     def tap(self, impulse_x: float = 0.0, impulse_y: float = 0.0) -> None:
         """Hit the disc: an impulse (N·s) in x and y changes its velocity at once."""
@@ -480,8 +550,10 @@ class RotorSimulator:
     def energy(self) -> tuple[float, float]:
         """(kinetic, potential) energy of the vibration (J); the spin's own energy left out."""
         M, _, _, K = self.system.matrices()
-        # Only K's symmetric part stores energy: the cross-coupling does work instead.
-        return 0.5 * float(self.qdot @ M @ self.qdot), 0.5 * float(self.q @ K @ self.q)
+        # The shaft's strain is measured from its bow (zero at the journals, where the
+        # supports act). Only K's symmetric part stores energy: the cross-coupling does work instead.
+        q = self.q - self.system.bow_displacement(self.phase) if self.system.bow else self.q
+        return 0.5 * float(self.qdot @ M @ self.qdot), 0.5 * float(q @ K @ q)
 
     # ------------------------------------------------------------- stepping
     def _highest_freq_still(self) -> float:
@@ -511,11 +583,9 @@ class RotorSimulator:
         return out
 
     def force(self, phase: np.ndarray, omega: np.ndarray, alpha: np.ndarray) -> np.ndarray:
-        """Unbalance force [f_x, f_y] (N) on the disc, shape (..., 2)."""
-        U = self.system.unbalance
-        c, s = np.cos(phase), np.sin(phase)
-        w2 = np.asarray(omega) ** 2
-        return np.stack([U * (w2 * c + alpha * s), U * (w2 * s - alpha * c)], axis=-1)
+        """The 1X load f (..., 8) on q: the unbalance, the skew's moment and the bow's force."""
+        p = self.system.rotating_load(omega, alpha) * np.exp(1j * np.asarray(phase))[..., None]
+        return np.concatenate([p.real, p.imag], axis=-1)
 
     def _speeds(self, h: float, n: int) -> np.ndarray:
         """Ω at the end of each of the next n steps, ramping toward the target at self.accel."""

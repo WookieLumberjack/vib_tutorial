@@ -13,7 +13,7 @@ from vib_tutorial.core.rotor import (
     RotorSimulator,
     RotorSystem,
     campbell,
-    unbalance_response,
+    synchronous_response,
     whirl_modes,
 )
 from vib_tutorial.core.rotor_stability import full_spectrum, least_damped, log_decrement, stability_onset
@@ -92,13 +92,13 @@ def test_cross_coupling_moves_damping_from_forward_to_backward_and_has_a_thresho
     assert onset is not None and onset.omega == 0.0 and onset.whirl > 0.9 and math.isinf(onset.order)
 
 
-def test_steady_unbalance_response_matches_the_simulation_with_both_terms():
+def test_steady_synchronous_response_matches_the_simulation_with_both_terms():
     s = RotorSystem(position=0.4, bearing_a=Bearing(kxy=4e3), internal_damping=10.0)
     w = 1200.0 / RPM
     sim = RotorSimulator(s)
     sim.omega = sim.target = w
     t, xy = run(sim, 3.0)
-    Q = unbalance_response(s, np.array([w]))[0]
+    Q = synchronous_response(s, np.array([w]))[0]
     expect = np.real(Q[[XD, YD]][None, :] * np.exp(1j * w * t[-200:, None]))
     np.testing.assert_allclose(xy[-200:], expect, atol=2e-3 * np.abs(Q).max())
 

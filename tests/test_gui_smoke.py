@@ -1,5 +1,6 @@
 """Headless smoke test: build the window and exercise the main interactions."""
 
+import math
 import os
 import tempfile
 
@@ -1633,11 +1634,15 @@ def test_rotor_page(app):
     w.set_theme("Dark")
     assert p.view.shaft.opts["pen"].color().name() == colors.structure
     bearing = Bearing(kx=2e4, ky=8e4, cx=20.0, cy=20.0)
-    system = RotorSystem(position=0.4, bearing_a=bearing, bearing_b=bearing, unbalance=5e-5)
+    system = RotorSystem(position=0.4, bearing_a=bearing, bearing_b=bearing, unbalance=5e-5, bow=30e-6,
+                         bow_angle=math.radians(45.0), skew=math.radians(0.2), skew_angle=math.radians(-90.0))
     p.set_system(system)
     assert p.sim.system == system and not p.isotropic.isChecked() and p.same_bearings.isChecked()
     p.reset()
     assert p.sim.t == 0.0 and p.history.size == 0
+    assert p.sim.q[1] == pytest.approx(30e-6 * math.cos(math.radians(45.0)))  # at rest in its bowed shape
+    p._refresh_analysis()
+    assert abs(p._steady_vectors[0, 1, 0]) == pytest.approx(30e-6, rel=1e-2)  # the slow-roll runout
     w.set_theme("Light")
 
     # Stability: internal damping makes it unstable above an onset speed, marked on the Campbell
