@@ -19,7 +19,7 @@ from ..core.back_expansion import RECOVERIES, RECOVERY_NAMES, RecoveryResponse
 from .animation import ChainView
 from .cms_time import MIN_SPAN, CMSRunView, _Buffer, _fmt
 from .style import colors
-from .theming import mute
+from .theming import add_legend, mute
 
 DASH, DOT, DASH_DOT = (QtCore.Qt.PenStyle.DashLine, QtCore.Qt.PenStyle.DotLine,
                        QtCore.Qt.PenStyle.DashDotLine)
@@ -88,7 +88,7 @@ class BackExpansionView(CMSRunView):
         self.f_plot.setLabel("bottom", "Time", units="s")
         # No grid and 1 px pens: these redraw every frame (see CMSTimeView._build).
         for p in (self.x_plot, self.e_plot, self.f_plot):
-            p.addLegend(offset=(5, 2), colCount=4)  # one row along the top, over the headroom
+            add_legend(p, offset=(5, 2), colCount=4)  # one row along the top, over the headroom
             p.setClipToView(True)
             p.setDownsampling(auto=True, mode="peak")
             p.setMouseEnabled(x=False, y=False)

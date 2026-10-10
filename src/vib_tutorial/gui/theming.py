@@ -101,6 +101,16 @@ def palette(theme: Theme) -> QtGui.QPalette:
     return pal
 
 
+def add_legend(plot: pg.PlotItem, **kwargs) -> pg.LegendItem:
+    """plot.addLegend(**kwargs) with the theme's background and text colour from the start.
+
+    restyle() updates legends on a theme switch, but only those that exist then: one made
+    later (a page built on first use, a plot rebuilt) would keep pyqtgraph's bare legend,
+    its text crossed by the curves.
+    """
+    return plot.addLegend(brush=style.current().legend_brush(), labelTextColor=style.colors.foreground, **kwargs)
+
+
 def mute(widget: QtWidgets.QWidget) -> None:
     """Draw a label's text in the palette's secondary-text colour, whatever the theme."""
     widget.setForegroundRole(Role.PlaceholderText)

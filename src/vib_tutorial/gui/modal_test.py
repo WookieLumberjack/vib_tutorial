@@ -54,7 +54,7 @@ from .axes import log_axes
 from .modal_extraction import EXTRACTION_THEORY_HTML, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
 from .style import MAX_DOF, colors
-from .theming import SETTINGS, mute
+from .theming import SETTINGS, add_legend, mute
 
 FRAME_MS = 30
 STEP_BUDGET_MS = 25  # measuring per frame, so the page stays responsive
@@ -218,11 +218,13 @@ class SignalView(pg.GraphicsLayoutWidget):
                 curve.setData(est.t[:n], y[:n], pen=None, symbol="o", symbolSize=4, symbolPen=None, symbolBrush=color)
                 m = est.fit[0].size if shown is None else int(np.searchsorted(est.fit[0], shown, side="right"))
                 fit.setData(est.fit[0][:m], y_fit[:m])
+            # Time spans the record. (Auto-ranging it padded by the widget's size when the range was
+            # worked out, which could be before the layout settled.)
+            plot.setXRange(0.0, float(est.t[-1]), padding=0.02)
             if shown is None:
-                plot.enableAutoRange()
+                plot.enableAutoRange(axis="y")
             else:  # the whole record's range, so the axes hold still while it is drawn
-                lo, hi = float(np.min(y)), float(np.max(y))
-                plot.setRange(xRange=(0.0, float(est.t[-1])), yRange=(lo, hi))
+                plot.setYRange(float(np.min(y)), float(np.max(y)))
         self.x_fit.setPen(pg.mkPen(colors.mass[j], width=1))
         self.response.setLabel("left", f"{est.response.symbol}{j + 1}", units=est.response.unit)
         for curve, window, signal in ((self.f_window, est.force_window, est.f), (self.x_window, est.response_window, est.x[:, j])):
@@ -267,7 +269,7 @@ class FrfView(pg.GraphicsLayoutWidget):
         self.mag = self.addPlot(row=0, col=0, axisItems=log_axes())
         self.mag.setLogMode(x=False, y=True)
         self.mag.setLabel("left", "|H|  [m/N]")
-        self.mag.addLegend(offset=(-5, 5))
+        add_legend(self.mag, offset=(-5, 5))
         self.phase = self.addPlot(row=1, col=0)
         self.phase.setLabel("left", "Phase", units="deg")
         self.phase.getAxis("left").setTickSpacing(90.0, 45.0)

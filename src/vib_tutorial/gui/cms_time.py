@@ -16,7 +16,7 @@ from ..core.cms_response import CMSResponse
 from .animation import ChainView
 from .panels import spin
 from .style import colors
-from .theming import mute
+from .theming import add_legend, mute
 
 FRAME_MS = 16
 KINDS = (ForceKind.STEP, ForceKind.HARMONIC, ForceKind.PULSE)
@@ -261,7 +261,7 @@ class CMSTimeView(CMSRunView):
         self.plots = pg.GraphicsLayoutWidget()
         self.x_plot = self.plots.addPlot(row=0, col=0)
         self.x_plot.setLabel("left", "Displacement", units="m")
-        self.x_plot.addLegend(offset=(-5, 5), colCount=2)
+        add_legend(self.x_plot, offset=(-5, 5), colCount=2)
         self.e_plot = self.plots.addPlot(row=1, col=0)
         self.e_plot.setLabel("left", "Reduced − full", units="m")
         self.e_plot.setLabel("bottom", "Time", units="s")

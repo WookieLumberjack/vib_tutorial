@@ -1481,3 +1481,29 @@ def test_frequency_response_with_friction(app):
     assert not plot.friction_curves and "friction" not in plot.mag.titleLabel.text
     assert not w.frf_friction_note.isVisible()
     w.close()
+
+
+def test_every_legend_has_the_theme_background(app):
+    # restyle() only reaches the legends that exist when the theme is applied; one made later
+    # (a page built on first use, a rebuilt plot) must get its background when it's created.
+    import pyqtgraph as pg
+
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    for i in range(w.pages.count()):
+        w.pages.setCurrentIndex(i)
+        app.processEvents()
+    w.params.dof.setValue(6)  # rebuilds the plots that have one panel per mass
+    app.processEvents()
+    legends = [
+        item
+        for view in w.findChildren(pg.GraphicsView)
+        for item in view.scene().items()
+        if isinstance(item, pg.LegendItem)
+    ]
+    assert len(legends) > 10
+    bare = [legend for legend in legends if legend.opts["brush"].style() == QtCore.Qt.BrushStyle.NoBrush]
+    assert not bare
+    w.close()

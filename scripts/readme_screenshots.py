@@ -36,11 +36,17 @@ app = gui.make_app("Light")
 
 def window(theme="Light"):
     w = MainWindow()
+    # The script drives time (run), so every shot is at a known moment. Stop the timer before
+    # the window shows: frames run while it settles would advance History.offset by a
+    # wall-clock-dependent count, and the strip chart's decimation buckets are aligned to it.
+    w._timer.stop()
     w.set_theme(theme)
     w.resize(1700, 900)
     w.show()
     QTest.qWait(200)
-    w._timer.stop()  # the script drives time (run), so every shot is at a known moment
+    running, w.running = w.running, False
+    w._tick()  # draw the chain (its masses' positions) without advancing time
+    w.running = running
     w.controls.reset.click()
     return w
 

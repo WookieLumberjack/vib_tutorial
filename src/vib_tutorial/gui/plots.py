@@ -21,6 +21,7 @@ from ..core import (
 from .axes import log_axes
 from .modes import Method, ModeEntry, time_constant_text
 from .style import colors
+from .theming import add_legend
 
 MAX_POINTS = 3000
 MIN_Y_SPAN = 1e-6  # m
@@ -33,7 +34,7 @@ class TimeHistoryPlot(pg.GraphicsLayoutWidget):
         super().__init__(parent)
         self.x_plot = self.addPlot(row=0, col=0)
         self.x_plot.setLabel("left", "Displacement", units="m")
-        self.x_plot.addLegend(offset=(5, 5), colCount=4)
+        add_legend(self.x_plot, offset=(5, 5), colCount=4)
         self.f_plot = self.addPlot(row=1, col=0)
         self.f_plot.setLabel("left", "Force", units="N")
         self.f_plot.setLabel("bottom", "Time", units="s")
@@ -331,7 +332,7 @@ class ModeShapePlot(pg.PlotWidget):
         self.showGrid(x=True, y=True, alpha=0.3)
         self.setYRange(-1.1, 1.1)
         self.setMouseEnabled(x=False, y=False)
-        self.legend = self.addLegend(offset=(5, -5), colCount=2)
+        self.legend = add_legend(self, offset=(5, -5), colCount=2)
         self.curves: list[pg.PlotDataItem] = []
         self.entries: list[ModeEntry] = []
         self.highlight: int | None = None
@@ -555,7 +556,7 @@ class FrfPlot(pg.GraphicsLayoutWidget):
         self.mag.setLogMode(x=True, y=True)
         self.mag.setLabel("left", "|X / F|  [m/N]")
         self.mag.showGrid(x=True, y=True, alpha=0.3)
-        self.mag.addLegend(offset=(-5, 5), colCount=2)
+        add_legend(self.mag, offset=(-5, 5), colCount=2)
         self.phase = self.addPlot(row=1, col=0, axisItems=log_axes())
         self.phase.setLogMode(x=True, y=False)
         self.phase.setLabel("left", "Phase", units="deg")
