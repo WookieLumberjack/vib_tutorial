@@ -1639,3 +1639,41 @@ def test_rotor_page(app):
     p.reset()
     assert p.sim.t == 0.0 and p.history.size == 0
     w.set_theme("Light")
+
+    # Stability: internal damping makes it unstable above an onset speed, marked on the Campbell
+    # diagram and the stability map; past it a tap grows at the natural frequency until it pauses.
+    p.set_system(RotorSystem())
+    assert "stable up to 10,000 rpm" in p.crit_label.text() and not p.campbell_plot.onset_line.isVisible()
+    p.internal_damping.setValue(20.0)
+    p._refresh_analysis()
+    assert p.sim.system.internal_damping == 20.0
+    assert "unstable above 3,910 rpm" in p.crit_label.text() and "3,910 rpm" in p.stability_note.text()
+    assert p.campbell_plot.onset_line.isVisible() and p.campbell_plot.unstable.getData()[0].size > 0
+    assert p.stability_map.onset_line.value() == pytest.approx(3910, abs=5)
+    p.measure.setCurrentIndex(1)
+    assert "Log decrement" in p.stability_map.plot.getAxis("left").labelText
+    p.tabs.setCurrentWidget(p.spectrum.parentWidget())
+    p.ramp.setValue(20_000.0)
+    p.set_target_rpm(5000.0)
+    p.running = True
+    for _ in range(20):
+        p.step(0.05)
+    p.tap()
+    for _ in range(200):
+        p.step(0.05)
+        if p.rubbed:
+            break
+    assert p.rubbed and not p.running and p.run_button.text() == "Run" and "Paused" in p.readout.text()
+    assert "unstable" in p.readout.text() and "heavy spot leads" not in p.readout.text()
+    freqs, amps = p.spectrum.curve.getData()
+    assert freqs.size and 20 < freqs[np.argmax(amps)] < 35  # forward, at the natural frequency
+    p.reset()
+    assert not p.rubbed
+    # The cross-coupling goes through the panels and round-trips.
+    p.bearing_rows[0][5].setValue(1.5e4)
+    assert p.sim.system.bearing_a.kxy == 1.5e4 and p.sim.system.bearing_b.kxy == 1.5e4  # B same as A
+    system = RotorSystem(bearing_a=Bearing(kxy=-2e3), bearing_b=Bearing(kxy=5e3), internal_damping=7.5)
+    p.set_system(system)
+    assert p.sim.system == system
+    p.tabs.setCurrentWidget(p.matrices)
+    assert "Ω H" in p.matrices.toHtml()
