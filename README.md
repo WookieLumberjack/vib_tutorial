@@ -113,7 +113,8 @@ waveforms and an amplitude in mm. The ground reaches the chain only through k<su
 and c<sub>1</sub>, as the force k<sub>1</sub>x<sub>g</sub> + c<sub>1</sub>ẋ<sub>g</sub> on m1.
 The plots show absolute displacements, the lower plot shows x<sub>g</sub>, and the
 *Frequency response* tab shows the transmissibility |X<sub>i</sub>/X<sub>g</sub>|. It is 1
-at low frequency, where the chain moves with the ground, and falls away above the modes.
+at low frequency, where the chain moves with the ground, and falls away above the modes
+(for a single mass, below 1 only above √2 f<sub>n</sub>, whatever the damping).
 The energy balance counts the work the moving ground does. Element forces, modal
 coordinates and energy by mode use the motion relative to the ground.
 

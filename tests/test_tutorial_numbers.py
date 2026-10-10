@@ -19,6 +19,7 @@ from vib_tutorial.core import (
     frf,
     modal_analysis,
     modal_energies,
+    transmissibility,
 )
 from vib_tutorial.core.presets import presets
 
@@ -126,3 +127,33 @@ def cms(interfaces, kept, method="craig-bampton"):
 ])
 def test_substructuring_try_it(interfaces, kept, method, mode, error, tol):
     assert cms(interfaces, kept, method)[mode - 1][0] == pytest.approx(error, abs=tol)
+
+
+def test_background_single_mass_numbers():
+    s = ChainSystem.uniform(1)
+    m, k, c = s.masses[0], s.stiffness[0], s.damping[0]
+    wn = (k / m) ** 0.5
+    zeta = c / (2 * (k * m) ** 0.5)
+    assert (wn, wn / (2 * np.pi), zeta) == pytest.approx((20.0, 3.18, 0.05), rel=0.002)
+    assert 1 / (zeta * wn) == pytest.approx(1.0)  # time constant
+    assert 2 * np.pi * zeta / (1 - zeta**2) ** 0.5 == pytest.approx(0.31, abs=0.005)  # log decrement
+    assert max(peaks(s, 0, k, 1.0, 6.0)) == pytest.approx(1 / (2 * zeta), rel=0.002)  # Q = 10
+    assert 2 * zeta * wn / (2 * np.pi) == pytest.approx(0.32, abs=0.005)  # half-power bandwidth, Hz
+
+
+def test_background_rayleigh_damping_of_the_default_chain():
+    zetas = [m.zeta_modal for m in modal_analysis(ChainSystem.uniform(4)).modes]
+    assert zetas[0] == pytest.approx(0.017, abs=0.0005) and zetas[3] == pytest.approx(0.094, abs=0.0005)
+    for m in modal_analysis(ChainSystem.uniform(4)).modes:
+        assert m.zeta_modal == pytest.approx(0.005 * m.omega_n / 2)  # zeta = beta omega / 2
+
+
+def test_background_isolation_above_root_2_fn():
+    for c in (0.5, 2.0, 20.0):
+        s = ChainSystem([1.0], [400.0], [c])
+        f = np.array([0.99, 1.01]) * 2**0.5 * 20 / (2 * np.pi)
+        t = np.abs(transmissibility(s, f))[:, 0]
+        assert t[0] > 1 > t[1]
+    f = np.linspace(0.01, 20, 20001)
+    t3 = np.abs(transmissibility(ChainSystem.uniform(4), f))[:, 2]
+    assert f[np.nonzero(t3 > 1)[0][-1]] == pytest.approx(1.65, abs=0.01)  # m3's crossover

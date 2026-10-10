@@ -187,7 +187,8 @@ BASE_TIP = (
     "as the force k<sub>1</sub>x<sub>g</sub> + c<sub>1</sub>ẋ<sub>g</sub> on m1.</p>"
     "<p>The plots show the absolute displacements x; the <i>Frequency response</i> tab shows "
     "the transmissibility |X<sub>i</sub>/X<sub>g</sub>|, which is 1 at low frequency (the chain "
-    "moves with the ground) and falls away above the modes (isolation).</p>"
+    "moves with the ground) and falls away above the modes (isolation). For a single mass "
+    "it is below 1 only above √2 f<sub>n</sub>, whatever the damping.</p>"
 )
 CHIRP_TIP = (
     "<p><b>Chirp:</b> a sine whose frequency sweeps from the start to the end frequency over "
