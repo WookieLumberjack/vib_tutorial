@@ -17,7 +17,7 @@ from PySide6 import QtCore, QtWidgets
 from ..core import CMSModel
 from ..core.back_expansion import RECOVERIES, RECOVERY_NAMES, RecoveryResponse
 from .animation import ChainView
-from .cms_time import MIN_SPAN, CMSRunView, _Buffer, _fmt
+from .cms_time import MIN_SPAN, CMSRunView, SampleBuffer, _fmt
 from .style import colors
 from .theming import add_legend, mute
 
@@ -52,7 +52,7 @@ class BackExpansionView(CMSRunView):
     tip = TIP
 
     def _build(self) -> None:
-        self.history = _Buffer(1, CAPACITY)
+        self.history = SampleBuffer(1, CAPACITY)
         self._n = self._nr = 0
         self._interior = np.zeros(0, dtype=int)
 
@@ -176,7 +176,7 @@ class BackExpansionView(CMSRunView):
         n = model.system.n
         rec = self.sim.recovery
         self._n, self._nr, self._interior = n, model.n_red, rec.interior
-        self.history = _Buffer(n + model.n_red + rec.interior.size, CAPACITY)
+        self.history = SampleBuffer(n + model.n_red + rec.interior.size, CAPACITY)
         for view in (self.full_view, self.rec_view):
             view.set_masses(model.system.masses)
             view.gain = 10.0
