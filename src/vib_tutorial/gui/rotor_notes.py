@@ -68,8 +68,11 @@ def _mat(A: np.ndarray, title: str) -> str:
     return _matrix(A, LABELS, GROUPS, title)
 
 
-def matrices_html(system: RotorSystem, omega: float) -> str:
-    """The equations of motion, every matrix with the current numbers, and the modes at speed Ω."""
+def matrices_html(system: RotorSystem, omega: float, hidden: bool = False) -> str:
+    """The equations of motion, every matrix with the current numbers, and the modes at speed Ω.
+
+    With `hidden`, the unbalance's size and angle are left out (a balancing exercise).
+    """
     M, C, G, K = system.matrices()
     H = system.circulatory()
     s = system
@@ -88,6 +91,16 @@ def matrices_html(system: RotorSystem, omega: float) -> str:
     rpm = omega * RPM
     fb = ks @ s.bow_shape() * s.bow
     bow_journals = f"{fmt(-fb[0], 1.0)} N at A and {fmt(-fb[3], 1.0)} N at B"
+    net = s.mass_unbalance
+    if hidden:
+        unbalance, force = "The unbalance (hidden: find it on the <i>Balancing</i> tab)", "hidden"
+    else:
+        unbalance = (f"The unbalance U = m e = {s.unbalance * 1e6:.4g} g·mm at ψ = "
+                     f"{math.degrees(s.unbalance_angle):.0f}°")
+        if s.weights:
+            unbalance += (f", with {len(s.weights)} balance weight{'s' if len(s.weights) > 1 else ''}"
+                          f" (net {abs(net) * 1e6:.4g} g·mm at {math.degrees(math.atan2(net.imag, net.real)):.0f}°),")
+        force = fmt(abs(net) * omega**2, 1.0)
     return f"""
 <h3>Equations of motion at {rpm:,.0f} rpm (Ω = {omega:.4g} rad/s)</h3>
 <p style='font-size:large' align='center'>M q̈ + (C + Ω G) q̇ + (K + Ω H) q = f(t)</p>
@@ -149,14 +162,15 @@ their masses (and the slopes by I<sub>d</sub>). A negative ζ is a mode that gro
 at this speed.</small></p>
 
 <h4>The 1X forces</h4>
-<p>The unbalance U = m e = {s.unbalance * 1e6:.4g} g·mm turns with the shaft at angle φ (φ' = Ω).
-Keeping the disc's centre of mass on its path takes</p>
+<p>{unbalance} turns with the shaft, the keyphasor mark at angle φ (φ' = Ω). For the heavy spot at the
+mark, keeping the disc's centre of mass on its path takes</p>
 <p align='center'>f<sub>x</sub> = U(Ω² cos φ + Ω' sin φ), &nbsp; f<sub>y</sub> = U(Ω² sin φ − Ω' cos φ)</p>
-<p>on the disc's x<sub>D</sub> and y<sub>D</sub>, or f<sub>x</sub> + i f<sub>y</sub> = U(Ω² − iΩ')e<sup>iφ</sup>:
-here UΩ² = {fmt(s.unbalance * omega**2, 1.0)} N turning once per revolution. Ω' is the ramp's angular
+<p>on the disc's x<sub>D</sub> and y<sub>D</sub>, or in general f<sub>x</sub> + i f<sub>y</sub> =
+Ue<sup>iψ</sup>(Ω² − iΩ')e<sup>iφ</sup>, with ψ the heavy spot's angle from the mark. Balance weights add
+to Ue<sup>iψ</sup>. Here the force is {force} N turning once per revolution. Ω' is the ramp's angular
 acceleration, while the speed changes.</p>
-<p>The disc's skew τ = {math.degrees(s.skew):.4g}° (toward {math.degrees(s.skew_angle):.0f}° from the heavy
-spot) gives the same form on its slopes, M<sub>x</sub> + i M<sub>y</sub> =
+<p>The disc's skew τ = {math.degrees(s.skew):.4g}° (toward {math.degrees(s.skew_angle):.0f}° from the
+mark) gives the same form on its slopes, M<sub>x</sub> + i M<sub>y</sub> =
 (I<sub>d</sub> − I<sub>p</sub>)τ(Ω² − iΩ')e<sup>i(φ+γ)</sup>: here
 {fmt(abs(s.id - s.ip) * s.skew * omega**2, 1.0)} N·m. The shaft's bow δ<sub>b</sub> =
 {s.bow * 1e6:.4g} µm (toward {math.degrees(s.bow_angle):.0f}°) gives K<sub>shaft</sub>q<sub>bow</sub>
@@ -242,7 +256,7 @@ fatigue loading a forward synchronous whirl does not cause.</p>
 
 <h3>Run-up and coast-down: Bode and polar plots</h3>
 <p>On a real machine the response is measured as the speed changes. A <b>keyphasor</b> (a once-per-turn
-mark on the shaft; here, the heavy spot passing +x) starts each revolution, and a <b>tracking
+mark on the shaft passing +x; the heavy spot is at the mark unless you move it) starts each revolution, and a <b>tracking
 filter</b> takes the 1X component: over one revolution,</p>
 <p align='center'>V = (1/π) ∫ x(φ) e<sup>−iφ</sup> dφ, &nbsp; x ≈ |V| cos(φ − lag)</p>
 <p>|V| is the 1X amplitude and the <b>phase lag</b> is the angle the shaft turns from the keyphasor to the
@@ -291,7 +305,7 @@ shape a load at the disc would give. Its elastic force is K<sub>shaft</sub>(q �
 the bow acts as a force K<sub>shaft</sub>q<sub>bow</sub> = kδ<sub>b</sub> turning with the shaft. Unlike
 the unbalance's meΩ², it does not grow with speed. For the classic Jeffcott rotor,</p>
 <p align='center'>(k − mΩ² + icΩ) X = meΩ² + kδ<sub>b</sub>e<sup>iβ</sup></p>
-<p>with β the bow's angle ahead of the heavy spot. So:</p>
+<p>with β the bow's angle from the heavy spot. So:</p>
 <ul>
 <li><b>At low speed the probes read the bow itself.</b> The shaft just carries its bend round: the
 <i>slow-roll runout</i>. The bow's forces on the disc and the journals balance, so the bearings carry
@@ -305,9 +319,12 @@ speed while the unbalance's grows, and they cancel at one speed, where meΩ² = 
 classic case. Choose δ<sub>b</sub> = e opposite and the disc's centre of mass sits exactly on the
 bearings' axis: nothing whirls at any speed, and the probe reads a steady 20 µm, the bow.</li>
 </ul>
-<p>That is why the <b>slow-roll vector is subtracted</b> from the 1X readings before balancing: it is not
-caused by unbalance, and no weight removes it. A balance weight cancels a force that grows as Ω²; the
-bow's force does not, so a bowed rotor balanced at one speed is out of balance at the others.</p>
+<p>Measured from its bent shape, the shaft's deflection y = x − δ<sub>b</sub> obeys
+(k − mΩ² + icΩ) y = (me + mδ<sub>b</sub>e<sup>iβ</sup>)Ω²: relative to its bow, the shaft sees the
+disc's mass carried round on the bow, an unbalance mδ<sub>b</sub>, and the probe adds the bow itself as
+runout. So one weight can take out every force the bow makes, at every speed, but not the runout.
+That is why the <b>slow-roll vector is subtracted</b> from the 1X readings before balancing (see
+<i>Single-plane balancing</i> below).</p>
 <p><b>A skewed disc (couple unbalance).</b> A disc mounted out of square has its principal axis tilted
 by τ from the shaft's. Its inertia acts on its own axis, so spinning it takes a moment
 (I<sub>d</sub> − I<sub>p</sub>)τΩ² that turns with the shaft, the same form as the unbalance force with
@@ -318,6 +335,40 @@ then meet the 1X line. At midspan on identical bearings the skew only tilts the 
 off centre and the tilt and the translation couple, so the skew moves the disc too. A <i>static</i>
 unbalance (the mass off the axis) can be corrected by one weight in one plane; a <i>couple</i>
 unbalance needs two weights in two planes, equal and opposite.</p>
+
+<h3>Single-plane balancing</h3>
+<p>Balancing puts a weight on the rotor to cancel its unbalance. Where the heavy spot is cannot be seen,
+and the phase lag between it and the high spot depends on the speed, so it is found from measurements,
+by <b>influence coefficients</b> (the <i>Balancing</i> tab):</p>
+<ol>
+<li>Turn slowly and read the 1X vector: the <b>slow roll</b> S, runout that no unbalance causes (a bow,
+or on a real machine a scratch or a magnetic spot on the probe's track).</li>
+<li>Run at the balancing speed and read the vector <b>as found</b>, V<sub>0</sub>.</li>
+<li>Stop, add a known <b>trial weight</b> T (mass × radius, at an angle from the keyphasor mark), run
+again and read V<sub>1</sub>. The rotor is linear, so the weight's effect is V<sub>1</sub> − V<sub>0</sub>,
+and the <b>influence coefficient</b> is α = (V<sub>1</sub> − V<sub>0</sub>)/T: microns, and degrees of
+lag, per g·mm of weight.</li>
+<li>Take the trial off and put on the <b>correction</b> W = −(V<sub>0</sub> − S)/α, then run and
+check.</li>
+</ol>
+<p>All quantities are vectors (complex numbers): a reading's angle is its phase lag from the keyphasor,
+a weight's its angle on the rotor. A trial weight should change the reading by a good fraction (30% or
+more) without making the rotor unsafe to run. For an unbalance at the disc alone, the one weight balances
+the rotor at every speed, since unbalance and weight both make forces growing as Ω² at the same place.</p>
+<p><b>Why the slow roll is subtracted.</b> Take the defaults with a bow of 20 µm at 90°, read at the
+disc, balancing at 1200 rpm. The disc reads 20 µm at 100 rpm, 52 µm at 1200 rpm and 293 µm at the
+critical. Subtracting the slow roll, the correction is 1.41 g at 20 mm, 225°: it cancels both the
+unbalance and the bow's mδ<sub>b</sub>, and from then on the disc reads 20 µm at every speed, the runout
+alone, with no force behind it. Balanced on the raw reading instead, the weight (1.95 g at 243°) zeroes
+the reading at 1200 rpm by leaving the rotor out of balance: 162 µm at the critical, 41 µm at
+3000 rpm. A bowed rotor cannot be made to read zero at every speed with one weight. Taking the slow roll
+too fast spoils it a little: at 300 rpm it already holds some unbalance response, and 16 µm is left at
+the critical instead of 19.4.</p>
+<p><b>What one plane cannot do.</b> A weight in the disc's plane makes a force; a skewed disc makes a
+moment. Off centre, both move the disc, so a single weight can cancel the reading at the balancing speed
+but not at every speed: with a/L = 0.3 and a skew of 0.5°, balanced at 1200 rpm, 172 µm at the critical
+falls only to 5.7 µm, and 9 µm is left at 6000 rpm. A couple unbalance needs <b>two-plane
+balancing</b>, with weights in two planes, the influence coefficients forming a 2 × 2 matrix.</p>
 
 <h3>Stability: cross-coupling and internal damping</h3>
 <p>Everything so far is forced vibration: the unbalance drives the rotor, and however hard it shakes at
@@ -411,6 +462,11 @@ every speed. Now set the bow to 10 µm: the orbit dips to about 1 µm at 1116 rp
 unbalance cancel, and still peaks at 110 µm at the critical.</li>
 <li>Set the unbalance to 0 and skew the disc by 0.1°. At midspan only the disc tilts (watch it wobble in
 the 3D view); move it to a/L = 0.3 and the disc whirls too, peaking at 14 µm at 1752 rpm.</li>
+<li>On the <i>Balancing</i> tab, press <i>Mystery unbalance</i> and balance the rotor in four steps:
+slow roll, as found, trial run, correct and check. The check should read well under 1% of the
+reading as found; <i>Reveal</i> then shows the unbalance you cancelled.</li>
+<li>Set a bow of 20 µm at 90°, put the probe on the disc, and balance at 1200 rpm with and without
+<i>Subtract slow roll</i>: compare the curves as found and now under the vectors.</li>
 <li>Pause near the critical speed and turn the 3D view: the shaft bows in one plane, which turns with
 the spin, rather than flapping back and forth.</li>
 </ol>
@@ -424,8 +480,8 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>k<sub>x</sub>, k<sub>y</sub>, c<sub>x</sub>, c<sub>y</sub></td><td>a support's stiffness and damping, horizontal and vertical</td><td>N/m, N·s/m</td></tr>
 <tr><td>x, y</td><td>horizontal and vertical displacement of the shaft's centre</td><td>m</td></tr>
 <tr><td>θ<sub>x</sub>, θ<sub>y</sub></td><td>shaft's slope at the disc, dx/dz and dy/dz</td><td>rad</td></tr>
-<tr><td>Ω, φ</td><td>spin speed; angle of the heavy spot from +x (φ' = Ω)</td><td>rad/s (rpm), rad</td></tr>
-<tr><td>U = m e</td><td>unbalance: disc mass times its centre of mass's offset e</td><td>kg·m (g·mm)</td></tr>
+<tr><td>Ω, φ</td><td>spin speed; angle of the keyphasor mark on the shaft from +x (φ' = Ω)</td><td>rad/s (rpm), rad</td></tr>
+<tr><td>U = m e, ψ</td><td>unbalance: disc mass times its centre of mass's offset e; the heavy spot's angle from the mark</td><td>kg·m (g·mm), rad</td></tr>
 <tr><td>M, C, G, K</td><td>mass, damping, gyroscopic and stiffness matrices (8 × 8)</td><td>—</td></tr>
 <tr><td>A(Ω), B</td><td>state matrix (16 × 16) and input matrix</td><td>—</td></tr>
 <tr><td>ω<sub>c</sub></td><td>critical speed</td><td>rad/s (rpm)</td></tr>
@@ -436,7 +492,8 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>c<sub>i</sub>, η</td><td>internal (rotating) damping of the shaft, as a damper at the disc; η = c<sub>i</sub>/k<sub>disc</sub></td><td>N·s/m, s</td></tr>
 <tr><td>H</td><td>circulatory matrix: the internal damping's skew stiffness per unit speed</td><td>N·s/m</td></tr>
 <tr><td>δ</td><td>log decrement, 2πζ/√(1 − ζ²)</td><td>—</td></tr>
-<tr><td>δ<sub>b</sub>, β</td><td>shaft bow at the disc, and its angle ahead of the heavy spot</td><td>m (µm), rad</td></tr>
-<tr><td>τ, γ</td><td>disc skew (its axis's tilt from the shaft's), and its angle ahead of the heavy spot</td><td>rad (°)</td></tr>
+<tr><td>δ<sub>b</sub>, β</td><td>shaft bow at the disc, and its angle from the keyphasor mark</td><td>m (µm), rad</td></tr>
+<tr><td>T, W, α</td><td>trial and correction weights (mass × radius at an angle); influence coefficient (V<sub>1</sub> − V<sub>0</sub>)/T</td><td>kg·m (g·mm); m per kg·m</td></tr>
+<tr><td>τ, γ</td><td>disc skew (its axis's tilt from the shaft's), and its angle from the keyphasor mark</td><td>rad (°)</td></tr>
 </table>
 """

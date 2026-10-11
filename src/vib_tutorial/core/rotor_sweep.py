@@ -2,7 +2,8 @@
 
 A rotor accelerated through a critical speed has no time to build up to the
 steady-state peak. To show it, the response is measured as on a real machine:
-a keyphasor marks each revolution (here, the heavy spot passing +x, φ = 2πk),
+a keyphasor marks each revolution (here, the mark on the shaft passing +x,
+φ = 2πk; the heavy spot is at the mark unless the unbalance is moved),
 and over each revolution a one-period DFT gives the 1X vector, as a tracking
 filter does. The largest displacement over the revolution is kept too.
 
@@ -12,7 +13,7 @@ major axis. A 1X vector V is complex: the probe reads Re(V e^{iφ}). |V| is
 the amplitude and -arg V the phase lag, the degrees of rotation from the
 keyphasor to the probe's positive peak. For the orbit, (x + iy) = F e^{iφ} +
 B e^{-iφ}: F is the forward whirl, B the backward, |F| + |B| the major
-semi-axis and -arg F the angle from the heavy spot back to the high spot.
+semi-axis and -arg F the angle from the mark back to the high spot.
 
 RunUpCoastDown drives a RotorSimulator from one speed to another and back at
 its ramp rate, recording each leg as its own TrackedSweep.
@@ -175,13 +176,13 @@ class RevolutionTracker:
         self.sweep.peaks.append(peak)
 
 
-def settle_time(system: RotorSystem, omega: float) -> float:
-    """How long to dwell at speed Ω for the start-up transient to die away: four time constants
-    of the least damped mode (ζ ≤ 0.3), at most SETTLE_MAX."""
+def settle_time(system: RotorSystem, omega: float, constants: float = 4.0, longest: float = SETTLE_MAX) -> float:
+    """How long to dwell at speed Ω for the start-up transient to die away: `constants` time
+    constants of the least damped mode (ζ ≤ 0.3), at most `longest`."""
     m = whirl_modes(system, omega)
     wn = TWO_PI * m.freq_hz / np.sqrt(np.maximum(1.0 - m.zeta**2, 1e-12))
     rate = (m.zeta * wn)[(m.zeta <= 0.3) & (m.zeta > 0)]
-    return float(min(SETTLE_MAX, 4.0 / rate.min())) if rate.size else 0.0
+    return float(min(longest, constants / rate.min())) if rate.size else 0.0
 
 
 def concat_samples(parts: list[RotorSamples]) -> RotorSamples:
@@ -190,7 +191,62 @@ def concat_samples(parts: list[RotorSamples]) -> RotorSamples:
     return RotorSamples(*(np.concatenate([getattr(p, f) for p in parts]) for f in ("t", "q", "omega", "phase")))
 
 
-class RunUpCoastDown:
+class StagedRun:
+    """Drives a RotorSimulator through stages, feeding a RevolutionTracker while one is set.
+
+    Subclasses give the simulated time to the next stage change and make the
+    change; advance() stops each simulator advance there, so a stage starts and
+    ends where it should. Resumable: a page calls advance() a slice at a time.
+    """
+
+    def __init__(self, sim: RotorSimulator) -> None:
+        self.sim = sim
+        self.stage = "approach"
+        self._tracker: RevolutionTracker | None = None
+
+    @property
+    def done(self) -> bool:
+        return self.stage == "done"
+
+    def _until_next_stage(self) -> float:
+        raise NotImplementedError
+
+    def _next_stage(self) -> None:
+        raise NotImplementedError
+
+    def advance(self, duration: float) -> RotorSamples:
+        """Advance the simulator by about `duration` s, changing stage on the way; return its samples."""
+        sim = self.sim
+        end = sim.t + duration
+        parts = []
+        while True:
+            h = sim.step_size()
+            left = end - sim.t
+            if left < 0.5 * h:
+                break
+            remaining = self._until_next_stage()
+            r = sim.advance(min(left, max(remaining, h)))
+            if not r.t.size:
+                break
+            parts.append(r)
+            if self._tracker is not None:
+                self._tracker.feed(r.phase, r.omega, station_motion(sim.system, r.q))
+            if self.stage != "done" and self._until_next_stage() <= 0.5 * h:
+                self._next_stage()
+        if not parts:
+            return sim.advance(0.0)
+        return concat_samples(parts)
+
+    def run(self, chunk: float = 0.25) -> None:
+        """Run to the end (for scripts and tests)."""
+        while not self.done:
+            t0 = self.sim.t
+            self.advance(chunk)
+            if self.sim.t == t0:
+                break
+
+
+class RunUpCoastDown(StagedRun):
     """Drive a RotorSimulator from `start` to `turn` and back (rad/s) at its ramp rate, tracking each leg.
 
     Stages: "approach" (to the start speed, not recorded), "settle" (a dwell there
@@ -202,19 +258,13 @@ class RunUpCoastDown:
     def __init__(self, sim: RotorSimulator, start: float, turn: float, settle: float | None = None) -> None:
         if start == turn or min(start, turn) <= 0.0:
             raise ValueError("the sweep needs two different, positive speeds")
-        self.sim = sim
+        super().__init__(sim)
         self.start, self.turn = start, turn
         self.rate = sim.accel * RPM  # rpm/s
         self.settle = settle_time(sim.system, start) if settle is None else settle
-        self.stage = "approach"
         self.sweeps: list[TrackedSweep] = []
-        self._tracker: RevolutionTracker | None = None
         self._settle_end = 0.0
         sim.target = start
-
-    @property
-    def done(self) -> bool:
-        return self.stage == "done"
 
     def _until_next_stage(self) -> float:
         """Simulated time to the next stage change (inf when done)."""
@@ -242,35 +292,8 @@ class RunUpCoastDown:
         self.sweeps.append(TrackedSweep(rate=self.rate, up=up))
         self._tracker = RevolutionTracker(self.sweeps[-1])
 
-    def advance(self, duration: float) -> RotorSamples:
-        """Advance the simulator by about `duration` s, changing stage on the way; return its samples."""
-        sim = self.sim
-        end = sim.t + duration
-        parts = []
-        while True:
-            h = sim.step_size()
-            left = end - sim.t
-            if left < 0.5 * h:
-                break
-            remaining = self._until_next_stage()
-            r = sim.advance(min(left, max(remaining, h)))
-            if not r.t.size:
-                break
-            parts.append(r)
-            if self._tracker is not None:
-                self._tracker.feed(r.phase, r.omega, station_motion(sim.system, r.q))
-            if self.stage != "done" and self._until_next_stage() <= 0.5 * h:
-                self._next_stage()
-        if not parts:
-            return sim.advance(0.0)
-        return concat_samples(parts)
-
     def run(self, chunk: float = 0.25) -> list[TrackedSweep]:
         """Run to the end (for scripts and tests); return the two legs."""
-        while not self.done:
-            t0 = self.sim.t
-            self.advance(chunk)
-            if self.sim.t == t0:
-                break
+        super().run(chunk)
         return self.sweeps
 

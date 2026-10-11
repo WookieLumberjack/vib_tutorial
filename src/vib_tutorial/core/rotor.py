@@ -41,15 +41,18 @@ damping in C; the rest is Ω H, a skew stiffness growing with the speed. Both
 skew stiffnesses push a forward whirl along its path, feeding it energy; above
 the speed where that outweighs the damping, the whirl grows by itself.
 
-Three sources turn with the shaft and drive it once per revolution (1X):
+Angles on the rotor are measured from a keyphasor mark on the shaft, at angle
+φ in fixed coordinates (φ' = Ω), in the direction of spin. Three sources turn
+with the shaft and drive it once per revolution (1X):
 
 - the disc's mass unbalance U = m e (kg·m): its centre of mass is a distance e
-  from the shaft's centre at angle φ, with φ' = Ω. Keeping the centre of mass
-  on its path takes
+  from the shaft's centre at angle φ + ψ (ψ = 0 by default: the heavy spot is at
+  the mark). Keeping the centre of mass on its path takes
 
       f_x = U (Ω² cos φ + Ω' sin φ),   f_y = U (Ω² sin φ - Ω' cos φ)
 
-  on the disc, or f_x + i f_y = U (Ω² - iΩ') e^{iφ}.
+  on the disc for ψ = 0, or in general f_x + i f_y = U e^{iψ} (Ω² - iΩ') e^{iφ}.
+  Balance weights m_k r_k at angles θ_k add to U e^{iψ} the same way.
 - the disc's skew τ (rad): its principal axis is tilted from the shaft's by τ,
   toward angle φ + γ. The disc's inertia acts on its own axis, the shaft's slope
   plus the skew, so the skew moves to the right side as a moment on the slopes,
@@ -116,11 +119,13 @@ class RotorSystem:
     bearing_a: Bearing = field(default_factory=Bearing)
     bearing_b: Bearing = field(default_factory=Bearing)
     unbalance: float = 20e-6  # kg·m (20 g·mm)
+    unbalance_angle: float = 0.0  # rad, ψ: the heavy spot's angle from the keyphasor mark
     internal_damping: float = 0.0  # N·s/m, the shaft's rotating damping, as a damper at the disc
     bow: float = 0.0  # m, the shaft's residual bow at the disc
-    bow_angle: float = 0.0  # rad, of the bow ahead of the heavy spot (in the direction of spin)
+    bow_angle: float = 0.0  # rad, of the bow from the keyphasor mark (in the direction of spin)
     skew: float = 0.0  # rad, the disc's principal axis's tilt from the shaft's
-    skew_angle: float = 0.0  # rad, of the skew's direction ahead of the heavy spot
+    skew_angle: float = 0.0  # rad, of the skew's direction from the keyphasor mark
+    weights: tuple[complex, ...] = ()  # balance weights on the disc, each m r e^{iθ} (kg·m) from the mark
 
     def __post_init__(self) -> None:
         if not 0.0 < self.position < 1.0:
@@ -136,6 +141,12 @@ class RotorSystem:
 
     def with_(self, **changes) -> RotorSystem:
         return replace(self, **changes)
+
+    @property
+    def mass_unbalance(self) -> complex:
+        """The disc's net mass unbalance (kg·m), the unbalance and the weights: |·| m e, its angle the heavy spot's."""
+        return self.unbalance * complex(math.cos(self.unbalance_angle), math.sin(self.unbalance_angle)) + sum(
+            self.weights, 0j)
 
     # ------------------------------------------------------------- the shaft
     @property
@@ -206,8 +217,8 @@ class RotorSystem:
     def rotating_load(self, omega: float | np.ndarray, alpha: float | np.ndarray = 0.0) -> np.ndarray:
         """The 1X load on [A, D, θ, B] as f_x + i f_y = P e^{iφ}: P (..., 4) complex.
 
-        The unbalance on the disc, the skew's moment on its slopes and the bow's
-        force K_shaft q_bow, at speed Ω and acceleration Ω' = alpha.
+        The unbalance and the balance weights on the disc, the skew's moment on its
+        slopes and the bow's force K_shaft q_bow, at speed Ω and acceleration Ω' = alpha.
         """
         drive = np.asarray(omega, dtype=float) ** 2 - 1j * np.asarray(alpha, dtype=float)
         per_drive, bow = self._load_parts
@@ -216,7 +227,7 @@ class RotorSystem:
     @cached_property
     def _load_parts(self) -> tuple[np.ndarray, np.ndarray]:
         """(the load per unit Ω² - iΩ', the bow's constant load), each (4,) complex."""
-        per_drive = np.array([0.0, self.unbalance,
+        per_drive = np.array([0.0, self.mass_unbalance,
                               (self.id - self.ip) * self.skew * np.exp(1j * self.skew_angle), 0.0])
         bow = self.shaft_stiffness() @ self.bow_shape() * self.bow * np.exp(1j * self.bow_angle)
         return per_drive, bow
@@ -475,7 +486,7 @@ def synchronous_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
     """Steady-state 1X response at constant speeds: Q (len(omegas), 8), complex.
 
     The unbalance, the disc's skew and the shaft's bow together. q(t) = Re(Q e^{iΩt}),
-    with the unbalance's centre of mass at angle φ = Ωt (along +x at t = 0). Above
+    with the keyphasor mark at angle φ = Ωt (along +x at t = 0). Above
     the stability onset this particular solution still exists, but the free whirl
     grows over it, so the rotor never settles to it.
     """
@@ -500,7 +511,7 @@ class RotorSamples:
     t: np.ndarray  # (k,) s
     q: np.ndarray  # (k, 8) displacements
     omega: np.ndarray  # (k,) spin speed (rad/s)
-    phase: np.ndarray  # (k,) angle φ of the unbalance (rad, unwrapped)
+    phase: np.ndarray  # (k,) angle φ of the keyphasor mark (rad, unwrapped)
 
 
 class RotorSimulator:
@@ -509,7 +520,7 @@ class RotorSimulator:
     def __init__(self, system: RotorSystem | None = None) -> None:
         self.system = system or RotorSystem()
         self.t = 0.0
-        self.phase = 0.0  # φ: angle of the unbalance's centre of mass (rad, unwrapped)
+        self.phase = 0.0  # φ: angle of the keyphasor mark (rad, unwrapped)
         self.state = self._rest()
         self.omega = 0.0  # spin speed now (rad/s)
         self.target = 0.0  # the speed it ramps toward (rad/s)

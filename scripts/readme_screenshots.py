@@ -428,6 +428,27 @@ def jeffcott_bow():
     save(w, "jeffcott_bow")
 
 
+def jeffcott_balancing():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.set_system(RotorSystem(bow=20e-6, bow_angle=math.pi / 2))
+    page._refresh_analysis()
+    page.ramp.setValue(5000.0)
+    b = page.balancing
+    page.tabs.setCurrentWidget(b)
+    b.station.setCurrentIndex(1)  # the disc
+    for button in b.step_buttons:
+        button.click()
+        while page.measurement is not None:
+            page.step(0.02)
+    print(b.results.text())
+    save(w, "jeffcott_balancing")
+
+
 def jeffcott_stability():
     w = window()
     page = w.rotor_page
@@ -454,7 +475,7 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
-         jeffcott_bow, jeffcott_stability]
+         jeffcott_bow, jeffcott_balancing, jeffcott_stability]
 
 
 def main(names: list[str]) -> None:
