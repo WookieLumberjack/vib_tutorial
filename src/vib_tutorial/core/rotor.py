@@ -1,7 +1,9 @@
 """Jeffcott rotor on flexible bearings: model, whirl analysis and exact time stepping.
 
-A massless, uniform Euler–Bernoulli shaft of length L runs between two bearings,
-A at z = 0 and B at z = L, and carries a rigid disc at z = a. The shaft bends in
+A massless, uniform Euler–Bernoulli shaft runs through two bearings, A at z = 0
+and B at z = L, and carries a rigid disc at z = a: between the bearings
+(0 < a < L), or overhung past one of them (a > L past B, a < 0 past A), the
+shaft then running on from the bearing to the disc. The shaft bends in
 two planes, x (horizontal) and y (vertical). Each plane has four degrees of
 freedom:
 
@@ -12,7 +14,8 @@ so q = [x_A, x_D, θx, x_B, y_A, y_D, θy, y_B] (m, m, rad, m, ...). θx = dx/dz
 and θy = dy/dz are the slopes of the shaft at the disc; with these slopes the
 two planes have the same matrices. The bearings are pinned (they take no
 moment), so the slopes at A and B are condensed out of the shaft's two beam
-elements.
+elements (A to the disc and the disc to B, or for an overhung disc the span and
+the overhang).
 
 Each journal has a mass and is held to ground by a spring and a damper in x and
 in y, which may differ (anisotropic supports) and may differ between A and B.
@@ -34,10 +37,16 @@ it) branch, the Campbell diagram.
 
 Two terms can make the rotor unstable. A bearing (or seal) may have
 cross-coupled stiffness: a displacement in x pushes the journal in y and vice
-versa, k_xy = -k_yx, so K is not symmetric. And the shaft may have internal
+versa, k_xy = -k_yx, so K is not symmetric. In a fluid-film bearing that
+coupling comes from the oil being dragged round at a fraction λ of the shaft's
+speed, so it grows with the speed, as λ c Ω on top of any constant k_xy (c the
+bearing's damping). With λ = 1/2, the forward whirl is fed faster than the
+bearing damps it once Ω passes twice its frequency: oil whirl and whip. And the
+shaft may have internal
 (rotating) damping, which resists the bending rate seen by the spinning shaft,
 q' - Ω J q in fixed coordinates (J turns x toward y). Part of it is ordinary
-damping in C; the rest is Ω H, a skew stiffness growing with the speed. Both
+damping in C; the rest is Ω H, a skew stiffness growing with the speed, which
+also holds the bearings' λ c. Both
 skew stiffnesses push a forward whirl along its path, feeding it energy; above
 the speed where that outweighs the damping, the whirl grows by itself.
 
@@ -97,6 +106,7 @@ XA, XD, TX, XB, YA, YD, TY, YB = range(N_DOF)
 DOF_NAMES = ("x_A", "x_D", "θx", "x_B", "y_A", "y_D", "θy", "y_B")
 CHUNK_TIME = 2e-3  # s; while the speed ramps, A(Ω) is held over chunks this long
 RPM = 60.0 / (2.0 * math.pi)  # rpm per rad/s
+MIN_GAP = 1e-3  # of the span: the closest the disc may come to a bearing
 
 
 @dataclass(frozen=True)
@@ -109,6 +119,12 @@ class Bearing:
     cy: float = 100.0  # N·s/m
     mass: float = 0.1  # kg, the journal and whatever moves with it
     kxy: float = 0.0  # N/m, cross-coupled stiffness: f_x = -k_xy y, f_y = +k_xy x (k_yx = -k_xy)
+    swirl: float = 0.0  # fluid swirl ratio λ: the cross-coupling grows with speed by λ c Ω (see damping)
+
+    @property
+    def damping(self) -> float:
+        """c (N·s/m), the mean of c_x and c_y: the fluid's drag-round takes k_xy up by λ c Ω."""
+        return 0.5 * (self.cx + self.cy)
 
 
 @dataclass(frozen=True)
@@ -118,7 +134,7 @@ class RotorSystem:
     length: float = 0.5  # m, between the bearings
     diameter: float = 0.01  # m, of the shaft
     youngs: float = 200e9  # Pa
-    position: float = 0.5  # disc position a / L (0.5: midspan)
+    position: float = 0.5  # disc position a / L (0.5: midspan; > 1 overhung past B, < 0 past A)
     disc_mass: float = 1.0  # kg
     ip: float = 1.25e-3  # kg·m², polar (about the spin axis)
     id: float = 6.25e-4  # kg·m², diametral (about a diameter)
@@ -135,14 +151,16 @@ class RotorSystem:
     gravity: float = 0.0  # m/s², pulling in -y (9.81 for a horizontal rotor; 0 for a vertical one)
 
     def __post_init__(self) -> None:
-        if not 0.0 < self.position < 1.0:
-            raise ValueError("the disc must sit between the bearings (0 < a/L < 1)")
+        if min(abs(self.position), abs(self.position - 1.0)) < MIN_GAP:
+            raise ValueError("the disc cannot sit on a bearing (a/L = 0 or 1)")
         positive = (self.length, self.diameter, self.youngs, self.disc_mass, self.id,
                     self.bearing_a.mass, self.bearing_b.mass)
         if min(positive) <= 0.0:
             raise ValueError("lengths, Young's modulus, masses and Id must be positive")
         if self.internal_damping < 0.0:
             raise ValueError("the internal damping cannot be negative")
+        if min(self.bearing_a.swirl, self.bearing_b.swirl) < 0.0:
+            raise ValueError("the fluid swirls with the shaft: the swirl ratio cannot be negative")
         if self.gravity < 0.0:
             raise ValueError("gravity pulls down (-y): give its size")
         if self.bow < 0.0 or self.skew < 0.0:
@@ -170,8 +188,26 @@ class RotorSystem:
 
     @property
     def b(self) -> float:
-        """Disc position from bearing B (m)."""
+        """Disc position from bearing B (m), L - a: negative when the disc overhangs B."""
         return self.length - self.a
+
+    @property
+    def overhung(self) -> bool:
+        """True if the disc sits outside the bearings rather than between them."""
+        return not 0.0 < self.position < 1.0
+
+    @property
+    def overhang(self) -> float:
+        """The disc's distance past the nearer bearing (m), 0 between the bearings."""
+        return max(-self.a, self.a - self.length, 0.0)
+
+    def _elements(self) -> list[tuple[int, int, float, float]]:
+        """The shaft's two beam elements in axial order: (first node, second node, z of the first, length).
+
+        Nodes are 0 (bearing A), 1 (the disc) and 2 (bearing B).
+        """
+        nodes = sorted(((0.0, 0), (self.a, 1), (self.length, 2)))
+        return [(n0, n1, z0, z1 - z0) for (z0, n0), (z1, n1) in zip(nodes, nodes[1:])]
 
     def _shaft_condensation(self) -> tuple[np.ndarray, np.ndarray]:
         """(K_shaft, T): one plane's 4x4 shaft stiffness on [w_A, w_D, θ_D, w_B], and T (6x4)."""
@@ -182,13 +218,13 @@ class RotorSystem:
     def _condensed(self) -> tuple[np.ndarray, np.ndarray]:
         """_shaft_condensation's result, worked out once (the system is frozen).
 
-        The shaft is two beam elements, A to the disc and the disc to B, on
-        [w_A, θ_A, w_D, θ_D, w_B, θ_B]. The bearings take no moment, so θ_A and θ_B
-        are condensed out: full = T @ retained.
+        The shaft is two beam elements (see _elements) on [w_A, θ_A, w_D, θ_D, w_B, θ_B].
+        The bearings take no moment, so θ_A and θ_B are condensed out: full = T @ retained.
         """
         k6 = np.zeros((6, 6))
-        for start, length in ((0, self.a), (2, self.b)):
-            k6[start : start + 4, start : start + 4] += beam_stiffness(self.ei, length)
+        for n0, n1, _, length in self._elements():
+            dofs = [2 * n0, 2 * n0 + 1, 2 * n1, 2 * n1 + 1]
+            k6[np.ix_(dofs, dofs)] += beam_stiffness(self.ei, length)
         keep, drop = [0, 2, 3, 4], [1, 5]
         krr = k6[np.ix_(keep, keep)]
         krc = k6[np.ix_(keep, drop)]
@@ -205,8 +241,12 @@ class RotorSystem:
 
     @property
     def disc_stiffness(self) -> float:
-        """The shaft's stiffness at the disc with the bearings held (N/m), 3EIL/(a²b²)."""
-        return 3.0 * self.ei * self.length / (self.a * self.b) ** 2
+        """The shaft's stiffness at the disc with the bearings held (N/m).
+
+        3EIL/(a²b²) between the bearings; 3EI/(c²(L + c)) for a disc overhung by c.
+        """
+        k = self.shaft_stiffness()[1:3, 1:3]
+        return 1.0 / np.linalg.inv(k)[0, 0]
 
     @property
     def loss_time(self) -> float:
@@ -250,16 +290,16 @@ class RotorSystem:
     def static_deflection(self, omega: float | np.ndarray = 0.0) -> np.ndarray:
         """q_s = (K + ΩH)^{-1} f_g: where gravity holds the rotor, (8,) or (len(omega), 8).
 
-        Without internal damping it does not depend on the speed.
+        Unless the stiffness depends on the speed (speed_dependent), neither does this.
         """
         omega = np.asarray(omega, dtype=float)
         if not self.gravity:
             return np.zeros(omega.shape + (N_DOF,))
         f = self.gravity_load()
-        if not self.internal_damping or omega.ndim == 0:
+        if not self.speed_dependent or omega.ndim == 0:
             q = np.linalg.solve(self.stiffness(float(omega) if omega.ndim == 0 else 0.0), f)
             return q if omega.ndim == 0 else np.broadcast_to(q, omega.shape + (N_DOF,)).copy()
-        K, H = self.matrices()[3], self.circulatory()
+        K, H = self.matrices()[3], self._circulatory
         return np.linalg.solve(K + omega[..., None, None] * H, np.broadcast_to(f, omega.shape + (N_DOF,))[..., None])[..., 0]
 
     def bow_displacement(self, phase: float) -> np.ndarray:
@@ -275,13 +315,19 @@ class RotorSystem:
         z = np.atleast_1d(np.asarray(z, dtype=float))
         T = self._shaft_condensation()[1]
         S = np.zeros((z.size, 4))
-        for start, z0, length in ((0, 0.0, self.a), (2, self.a, self.b)):
-            inside = (z >= z0) & (z <= z0 + length) if start else (z < self.a)
-            s = (z[inside] - z0) / length
+        (n0, n1, z0, l0), (m0, m1, z1, l1) = self._elements()
+        # Each element takes its own stretch; beyond the shaft's ends the nearer one carries on.
+        for (a, b, start, length), inside in (((n0, n1, z0, l0), z < z1), ((m0, m1, z1, l1), z >= z1)):
+            s = (z[inside] - start) / length
             h = np.column_stack([1 - 3 * s**2 + 2 * s**3, length * (s - 2 * s**2 + s**3),
                                  3 * s**2 - 2 * s**3, length * (s**3 - s**2)])
-            S[inside] = h @ T[start : start + 4]
+            S[inside] = h @ T[[2 * a, 2 * a + 1, 2 * b, 2 * b + 1]]
         return S
+
+    @property
+    def extent(self) -> tuple[float, float]:
+        """The shaft's ends (m): the bearings, or the disc where it overhangs one."""
+        return min(0.0, self.a), max(self.length, self.a)
 
     def deflection(self, q: np.ndarray, z: np.ndarray) -> np.ndarray:
         """Shaft centre (x, y) at axial positions z for displacements q: shape (..., len(z), 2)."""
@@ -315,21 +361,39 @@ class RotorSystem:
         return M, C, G, K
 
     def circulatory(self) -> np.ndarray:
-        """H (8x8): the internal damping's skew stiffness per unit speed, Ω H in the equations.
+        """H (8x8): the skew stiffness per unit speed, Ω H in the equations.
 
         The shaft's internal damping η K_shaft acts on the bending rate seen in the
         rotating shaft, q' - Ω J q, J turning x toward y. Its -Ω J part moves to the
-        left side as Ω H, with H = η [0 K_shaft; -K_shaft 0].
+        left side as Ω H, with H = η [0 K_shaft; -K_shaft 0]. Each fluid-film
+        bearing's cross-coupling λ c Ω adds λ c where K has k_xy.
         """
+        return self._circulatory.copy()
+
+    @cached_property
+    def _circulatory(self) -> np.ndarray:
         H = np.zeros((N_DOF, N_DOF))
         eta_ks = self.loss_time * self.shaft_stiffness()
         H[:4, 4:], H[4:, :4] = eta_ks, -eta_ks
+        for j, bearing in ((XA, self.bearing_a), (XB, self.bearing_b)):
+            H[j, j + 4] += bearing.swirl * bearing.damping
+            H[j + 4, j] -= bearing.swirl * bearing.damping
         return H
+
+    @property
+    def speed_dependent(self) -> bool:
+        """True if the stiffness changes with the speed: internal damping or a swirling bearing."""
+        return bool(self.internal_damping or self.bearing_a.swirl * self.bearing_a.damping
+                    or self.bearing_b.swirl * self.bearing_b.damping)
+
+    def cross_coupling(self, omega: float) -> tuple[float, float]:
+        """Each bearing's cross-coupled stiffness k_xy at speed Ω (N/m), A then B: k_xy + λ c Ω."""
+        return tuple(b.kxy + b.swirl * b.damping * omega for b in (self.bearing_a, self.bearing_b))
 
     def stiffness(self, omega: float) -> np.ndarray:
         """K + Ω H: the whole stiffness at speed Ω."""
         K = self.matrices()[3]
-        return K + omega * self.circulatory() if self.internal_damping else K
+        return K + omega * self._circulatory if self.speed_dependent else K
 
     def state_matrix(self, omega: float) -> np.ndarray:
         """A(Ω) (16x16) for z = [q, q']: z' = A z + B u."""
@@ -355,11 +419,13 @@ class RotorSystem:
         The disc's mass on the shaft's midspan-equivalent stiffness in series with
         the two bearings in parallel, all massless and isotropic (x-direction
         stiffnesses), the disc's tilt ignored: ω² = k_eq / m. Exact for a disc at
-        midspan on identical bearings as the journal masses go to zero.
+        midspan on identical bearings as the journal masses go to zero; poor for an
+        overhung disc, whose tilt (and so the gyroscopic moment) matters most.
         """
         a, b, L = self.a, self.b, self.length
-        k_shaft = 3.0 * self.ei * L / (a * a * b * b)  # load at a: deflection P a²b² / (3 EI L)
-        # The bearings carry b/L and a/L of the load; the disc moves by the weighted sum.
+        k_shaft = self.disc_stiffness
+        # The bearings carry b/L and a/L of the load (one of them negative for an
+        # overhung disc: the far bearing is pulled up); the disc moves by the weighted sum.
         flex_bearings = (b / L) ** 2 / self.bearing_a.kx + (a / L) ** 2 / self.bearing_b.kx
         return math.sqrt(1.0 / (1.0 / k_shaft + flex_bearings) / self.disc_mass)
 

@@ -253,3 +253,42 @@ def test_a_bowed_shaft_starts_at_rest_in_its_bent_shape():
     run(sim, 0.5)
     sim.reset()
     np.testing.assert_array_equal(sim.q, rest)
+
+
+@pytest.mark.parametrize("position", [1.3, -0.3])
+def test_overhung_shaft_flexibility_matches_the_cantilever_formulas(position):
+    s = RotorSystem(position=position)
+    c, L, EI = s.overhang, s.length, s.ei
+    assert s.overhung and c == pytest.approx(0.3 * L)
+    flex = np.linalg.inv(s.shaft_stiffness()[1:3, 1:3])
+    assert flex[0, 0] == pytest.approx(c * c * (L + c) / (3 * EI))  # a load at the tip
+    assert flex[1, 1] == pytest.approx((L + 3 * c) / (3 * EI))  # a moment at the tip
+    assert abs(flex[0, 1]) == pytest.approx(c * (2 * L + 3 * c) / (6 * EI))
+    assert s.disc_stiffness == pytest.approx(1.0 / flex[0, 0])
+    # The stations, and a rigid tilt along the whole shaft, overhang included.
+    np.testing.assert_allclose(s.shape_matrix([0.0, s.a, L]), [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1]],
+                               atol=1e-12)
+    z = np.linspace(*s.extent, 13)
+    np.testing.assert_allclose(s.shape_matrix(z) @ [0.0, s.a, 1.0, L], z, atol=1e-12)
+
+
+def test_the_disc_cannot_sit_on_a_bearing():
+    for position in (0.0, 1.0):
+        with pytest.raises(ValueError):
+            RotorSystem(position=position)
+
+
+def test_overhung_disc_separates_the_forward_and_backward_criticals():
+    # A big disc close past bearing B: its first mode tilts as much as it moves.
+    m, r = 3.0, 0.15
+    stiff = Bearing(kx=2e5, ky=2e5, cx=400.0, cy=400.0)
+    s = RotorSystem(position=1.2, disc_mass=m, ip=m * r * r / 2, id=m * r * r / 4, bearing_a=stiff, bearing_b=stiff)
+    at_rest = whirl_modes(s, 0.0).freq_hz[0] * 60.0  # rpm
+    crits = [c for c in campbell(s, 5000.0 / RPM, n_modes=4).criticals if c[2] < 0.3]  # not the journals
+    backward = min(w for w, ratio, _ in crits if ratio < 0) * RPM
+    forward = min(w for w, ratio, _ in crits if ratio > 0) * RPM
+    # The gyroscopic moment stiffens the forward whirl and softens the backward one, strongly.
+    assert backward < 0.8 * at_rest and forward > 1.4 * at_rest
+    # Without it (no polar inertia) both meet 1X at the frequency at rest.
+    plain = [w for w, _, z in campbell(s.with_(ip=1e-9), 5000.0 / RPM, n_modes=4).criticals if z < 0.3]
+    assert [w * RPM for w in plain[:2]] == pytest.approx([at_rest, at_rest], rel=1e-3)

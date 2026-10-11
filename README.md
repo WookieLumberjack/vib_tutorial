@@ -484,13 +484,16 @@ exact modes:
 
 ### Jeffcott rotor
 
-The **Jeffcott rotor** page spins a disc on a flexible, massless shaft between two bearings,
-each on springs and dampers to ground, horizontally and vertically. The disc has a mass,
+The **Jeffcott rotor** page spins a disc on a flexible, massless shaft, between two bearings
+or overhung past one, each bearing on springs and dampers to ground, horizontally and vertically. The disc has a mass,
 polar and diametral moments of inertia, and a mass unbalance; the disc can also be skewed on
 the shaft and the shaft bent (bowed). The model has 8 DOFs: in each
 plane, both journals, the disc, and the shaft's slope at the disc. It is stepped in state
 space with the same exact first-order-hold update as the chain, as the speed ramps to a target.
 
+- **Presets**: the classic Jeffcott rotor, an off-centre disc, anisotropic supports, an
+  overhung rotor and fluid-film bearings that go into oil whip. Each loads a rotor with a speed
+  range to suit it and a note on what to look for.
 - **3D view**: the whirling shaft, the disc with its heavy spot, and the supports, drawn
   in perspective on an ordinary 2D plot, with no OpenGL. Drag to turn it.
 - **Orbits** at bearing A, the disc, midspan and bearing B, seen from the B end, with
@@ -530,9 +533,15 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   it is out of balance away from the balancing speed; a skewed disc's couple needs two planes.
 - **Campbell diagram**: the damped natural frequencies against speed, coloured by whirl
   direction, with the 1X line and the critical speeds, and the onset of instability with the
-  growing modes crossed. Drag the speed line to set the target.
-- **Stability**: cross-coupled bearing stiffness k<sub>xy</sub> = −k<sub>yx</sub> and the
-  shaft's internal (rotating) damping. The stability map draws each mode's damping ratio or
+  growing modes crossed. Drag the speed line to set the target. The speed range is adjustable
+  (up to 60,000 rpm, and the speed controls and plots follow it), and 2X and ½X lines can be
+  drawn too.
+- **Overhung disc**: put the disc past a bearing (a/L above 1 or below 0) and it tilts as much as
+  it moves, so the gyroscopic moment acts on the first mode in full and its forward and
+  backward criticals separate strongly.
+- **Stability**: cross-coupled bearing stiffness k<sub>xy</sub> = −k<sub>yx</sub>, constant or
+  growing with speed as λcΩ (a fluid-film bearing's oil swirling at λ times the shaft's speed),
+  and the shaft's internal (rotating) damping. The stability map draws each mode's damping ratio or
   log decrement against speed and marks the onset speed, where a forward mode's damping
   crosses zero. Below it, the full spectrum of an orbit (the FFT of x + iy) separates forward
   from backward whirl, so past the onset the subsynchronous whirl shows as a growing line below
@@ -540,14 +549,14 @@ space with the same exact first-order-hold update as the chain, as the speed ram
 - **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
   the shaft's condensed beam stiffness, the state matrix A(Ω), and the modes at the current
   speed. G is skew-symmetric: it sits beside C but does no work.
-- **Theory**: the classic case, heavy and high spot, the gyroscopic effect, forward and
-  backward whirl, anisotropic supports, run-ups through a critical speed (why a fast ramp
+- **Theory**: the classic case, heavy and high spot, the gyroscopic effect, the overhung
+  rotor, forward and backward whirl, 2X and ½X excitations, anisotropic supports, run-ups through a critical speed (why a fast ramp
   peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²), the bent
   shaft (slow-roll runout, why it is subtracted before balancing), the couple unbalance,
   gravity's static sag,
   single-plane balancing by influence coefficients,
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
-  c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whip), and why the solution
+  c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whirl and whip at λΩ = ω), and why the solution
   uses state space.
 
 The default is the classic case: the disc at midspan on identical, isotropic supports, so its
@@ -587,7 +596,17 @@ itself at the rotor's natural frequency, not at the speed, and no balancing remo
 c<sub>i</sub> = 20 N·s/m the default rotor is stable up to 3910 rpm; with no damping in the
 supports the onset falls to the first critical speed itself.
 
-![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1932 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
+![Overhung rotor preset at 1250 rpm, just below its forward critical: a 3 kg disc 100 mm past bearing B tilts as it whirls. On the Campbell diagram the first mode fans out from 14.5 Hz at rest, meeting 1X backward at 664 rpm and forward at 1284 rpm, with the ½X line drawn](docs/images/jeffcott_overhung.png)
+
+An overhung disc tilts as much as it moves, so the gyroscopic moment acts on the first mode
+itself: the forward whirl stiffens with speed and the backward one softens. The *Overhung rotor*
+preset's first mode, 870 rpm at rest, becomes critical at 1284 rpm, 48% higher than without the
+gyroscopic moment; only that forward crossing is driven by the unbalance. The *Fluid-film
+bearings* preset turns the cross-coupling up with speed instead (λ = 0.5): the rotor goes
+unstable at 3136 rpm, twice its first natural frequency, and above that whirls at that
+frequency whatever the speed (oil whip).
+
+![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1947 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
 
 ## The math, briefly
 
@@ -729,6 +748,8 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/rotor_balance.py`: single-plane balancing: influence coefficient, correction weight,
   and `SteadyMeasurement`, which runs the stepper at a speed, lets it settle and averages the
   1X vector over some revolutions.
+- `core/rotor_presets.py`: the rotor page's presets, each a `RotorSystem` with a speed range
+  and a note.
 - `core/rotor_stability.py`: the least damped mode, the onset speed of instability (swept,
   then bisected), the log decrement, and the full spectrum of an orbit.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
@@ -851,6 +872,9 @@ from vib_tutorial.core.rotor_stability import full_spectrum, stability_onset
 
 unstable = RotorSystem(internal_damping=20.0, bearing_a=Bearing(kxy=5e3))  # H = unstable.circulatory()
 onset = stability_onset(unstable, 1000.0)                      # Onset(omega, freq_hz, whirl) or None
+whip = RotorSystem(bearing_a=Bearing(swirl=0.5), bearing_b=Bearing(swirl=0.5))  # k_xy grows as cΩ/2
+stability_onset(whip, 1000.0).order                            # 0.5: the whirl at half the speed at onset
+overhung = RotorSystem(position=1.2)                           # the disc 0.2 L past bearing B
 f, amp = full_spectrum(r.t, r.q[:, [1, 5]])                    # disc orbit: +f forward, −f backward
 
 from vib_tutorial.core.rotor_balance import SteadyMeasurement, correction, influence, weight
