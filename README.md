@@ -495,7 +495,7 @@ the speed ramps to a target.
 
 - **Presets**: the classic Jeffcott rotor, an off-centre disc, anisotropic supports, an
   overhung rotor, a long shaft whose own mass matters, a two-pole rotor with an asymmetric shaft,
-  and fluid-film bearings that go into oil whip. Each loads a rotor with a speed range to suit it and a note on what to look for.
+  oil swirl at λ = ½, and plain journal bearings, both going into oil whip. Each loads a rotor with a speed range to suit it and a note on what to look for.
 - **Shaft mass**: tick it (and set the density) and the shaft gets its mass, its sections'
   rotary inertia and their gyroscopic moment. It is then 2 to 60 Euler–Bernoulli beam elements
   with consistent or lumped mass, reduced Craig–Bampton style to the stations and the shaft's
@@ -561,7 +561,8 @@ the speed ramps to a target.
   it moves, so the gyroscopic moment acts on the first mode in full and its forward and
   backward criticals separate strongly.
 - **Stability**: cross-coupled bearing stiffness k<sub>xy</sub> = −k<sub>yx</sub>, constant or
-  growing with speed as λcΩ (a fluid-film bearing's oil swirling at λ times the shaft's speed),
+  growing with speed as λcΩ (a fluid-film bearing's oil swirling at λ times the shaft's speed), or a
+  journal bearing's film itself,
   and the shaft's internal (rotating) damping. The stability map draws each mode's damping ratio or
   log decrement against speed and marks the onset speed, where a forward mode's damping
   crosses zero (and, for an asymmetric shaft, where its unstable band ends). The asymmetry chart
@@ -581,7 +582,11 @@ the speed ramps to a target.
   eight linearized stiffness and damping coefficients against the speed or (dimensionless, as on a
   design chart) the Sommerfeld number, read at the rotor's speed now. Their skew part is exactly the
   λ = ½ swirl of the bearing table, and Lund's formula gives the speed at which a rigid rotor on the
-  bearing goes into oil whirl. The rotor's supports are still the springs and dampers for now.
+  bearing goes into oil whirl. Tick *Oil-film journal bearings* and the rotor runs in it at both ends,
+  each under its share of the weight: their stiffness and damping change with the speed, the journals
+  rest on the locus and rise along it (with *Static sag*), and oil whip comes from the bearing's own
+  cross-coupling. The page pauses when a journal reaches its clearance, where a real film's nonlinearity
+  would hold the whirl.
 - **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
   the shaft's beam stiffness (condensed, or with mass reduced to the stations and the shaft's modes), the state matrix A(Ω), and the modes at the current
   speed. G is skew-symmetric: it sits beside C but does no work.
@@ -649,10 +654,12 @@ supports the onset falls to the first critical speed itself.
 An overhung disc tilts as much as it moves, so the gyroscopic moment acts on the first mode
 itself: the forward whirl stiffens with speed and the backward one softens. The *Overhung rotor*
 preset's first mode, 870 rpm at rest, becomes critical at 1284 rpm, 48% higher than without the
-gyroscopic moment; only that forward crossing is driven by the unbalance. The *Fluid-film
-bearings* preset turns the cross-coupling up with speed instead (λ = 0.5): the rotor goes
+gyroscopic moment; only that forward crossing is driven by the unbalance. The *Oil swirl
+λ = ½* preset turns the cross-coupling up with speed instead: the rotor goes
 unstable at 3136 rpm, twice its first natural frequency, and above that whirls at that
-frequency whatever the speed (oil whip).
+frequency whatever the speed (oil whip). The *Journal bearings* preset gets the same from the
+bearings themselves: plain journal bearings, far stiffer than the shaft, put the critical at the
+rigid-bearing 1845 rpm, and their film's cross-coupling drives oil whip from 3576 rpm, at 30.5 Hz.
 
 ![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1947 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
 

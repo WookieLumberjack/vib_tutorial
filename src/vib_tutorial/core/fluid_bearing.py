@@ -49,13 +49,16 @@ one bearing charts use; S_s = π (L/D)² S.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import scipy.optimize
 
 GRAVITY = 9.81  # m/s²
 PI2 = math.pi**2
+LIGHTEST = 1e-6  # the least S_s⁻¹ taken: an unloaded bearing is worked out as one this lightly loaded
+ECCENTRICITY_LIMIT = 0.9  # on the rotor, slower than this ε the film is held as it is here (see `on_rotor`)
+SLOWEST = 1.0  # rad/s: and never slower than this
 
 
 @dataclass(frozen=True)
@@ -85,11 +88,39 @@ class JournalBearing:
         return sommerfeld / self.sommerfeld(1.0)
 
     def state(self, omega: float) -> BearingState:
-        """The bearing's equilibrium and coefficients at speed Ω (rad/s, > 0)."""
-        eps = eccentricity(float(self.modified_sommerfeld(omega)))
+        """The bearing's equilibrium and coefficients at speed Ω (rad/s, > 0).
+
+        An unloaded (or barely loaded) bearing is worked out as one with S_s =
+        1/LIGHTEST: its journal at the centre, its coefficients their limits as
+        the load goes to zero.
+        """
+        s = float(self.modified_sommerfeld(omega)) if self.load > 0.0 else math.inf
+        load = self.load
+        if not s < 1.0 / LIGHTEST:
+            s = 1.0 / LIGHTEST
+            load = float(self.with_load(1.0).modified_sommerfeld(omega)) * LIGHTEST
+        eps = eccentricity(s)
         a, b = coefficients(eps)
-        w_c = self.load / self.clearance
+        w_c = load / self.clearance
         return BearingState(omega, eps, attitude(eps), w_c * a, w_c / omega * b)
+
+    def with_load(self, load: float) -> JournalBearing:
+        return replace(self, load=load)
+
+    def slowest(self) -> float:
+        """The speed (rad/s) below which `on_rotor` holds the film: where ε = ECCENTRICITY_LIMIT."""
+        e = ECCENTRICITY_LIMIT
+        s = (1.0 - e * e) ** 2 / (e * math.sqrt(PI2 * (1.0 - e * e) + 16.0 * e * e))
+        return max(s / float(self.modified_sommerfeld(1.0)), SLOWEST) if self.load > 0.0 else SLOWEST
+
+    def on_rotor(self, omega: float) -> BearingState:
+        """The state at speed Ω as the rotor uses it: held at `slowest()` below it.
+
+        Slower, the journal is nearly on its bottom (mixed lubrication), where the
+        film's stiffness and damping grow without bound and the short-bearing
+        model is not to be trusted; the rotor takes it as it is at ε = 0.9.
+        """
+        return self.state(max(abs(omega), self.slowest()))
 
     def film_force(self, x: float, y: float, vx: float, vy: float, omega: float,
                    points: int = 4000) -> np.ndarray:

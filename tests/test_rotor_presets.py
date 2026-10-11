@@ -18,7 +18,7 @@ def criticals(name: str, forward: bool | None = None) -> list[int]:
 
 
 def test_every_preset_is_a_valid_rotor_with_its_target_in_range():
-    assert len(PRESETS) == 7
+    assert len(PRESETS) == 8
     for p in PRESETS.values():
         assert 0 < p.target_rpm < p.top_rpm and p.note
 
@@ -45,7 +45,7 @@ def test_overhung_rotor():
 
 
 def test_fluid_film_bearings_whip_above_twice_the_natural_frequency():
-    p = PRESETS["Fluid-film bearings (oil whip)"]
+    p = PRESETS["Oil swirl λ = ½ (oil whip)"]
     onset = stability_onset(p.system, p.top_rpm / RPM)
     assert round(onset.omega * RPM) == 3136 and round(onset.freq_hz) == 26
     assert onset.order == pytest.approx(0.5, rel=1e-3)
