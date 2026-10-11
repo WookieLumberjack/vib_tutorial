@@ -19,6 +19,11 @@ POINTS = 200_000  # the cavitation boundary is a kink: the quadrature converges 
 BEARING = JournalBearing(length=0.02, diameter=0.05, clearance=50e-6, viscosity=0.03, load=500.0)
 
 
+def nu2(eps):
+    """The rigid rotor's threshold whirl ν² on a short bearing at ε, in units of Ω²."""
+    return rigid_threshold(*coefficients(eps))[1]
+
+
 @pytest.mark.parametrize("rpm", [200.0, 3000.0, 20000.0])
 def test_film_holds_the_load_at_the_equilibrium(rpm):
     b = BEARING
@@ -78,7 +83,6 @@ def test_lightly_loaded_rigid_rotor_whirls_at_half_speed():
 
 def test_rigid_rotor_is_stable_at_any_speed_past_the_eccentricity_limit():
     # The short bearing's known result: past ε ≈ 0.756 no whirl can be fed (ν² < 0).
-    nu2 = lambda e: rigid_threshold(*coefficients(e))[1]  # noqa: E731
     assert nu2(0.74) > 0.0 > nu2(0.77)
 
 
@@ -116,5 +120,4 @@ def test_theory_numbers():
     assert round(omega * RPM) == 21_324
     t = b.state(omega)
     assert math.sqrt(rigid_threshold(t.k, t.c)[1]) / omega == pytest.approx(0.50, abs=0.005)
-    nu2 = lambda e: rigid_threshold(*coefficients(e))[1]  # noqa: E731
     assert nu2(0.7555) > 0.0 > nu2(0.7565)

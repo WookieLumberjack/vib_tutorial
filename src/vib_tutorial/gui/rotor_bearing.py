@@ -412,6 +412,6 @@ def _si(value: float, unit: str) -> str:
     """`value` with an SI prefix: 1.23 MN/m."""
     if value == 0.0:
         return f"0 {unit}"
-    exp = min(max(int(math.floor(math.log10(abs(value)) / 3.0)), -2), 3)
+    exp = min(max(math.floor(math.log10(abs(value)) / 3.0), -2), 3)
     prefix = {-2: "µ", -1: "m", 0: "", 1: "k", 2: "M", 3: "G"}[exp]
     return f"{value / 10.0 ** (3 * exp):.3g} {prefix}{unit}"
