@@ -70,6 +70,14 @@ def rotor_presets() -> list[RotorPreset]:
             "Campbell diagram), puts the first at 2146 rpm and misses the second, the shaft's own bending.",
         ),
         RotorPreset(
+            "Two-pole rotor (asymmetric shaft)",
+            RotorSystem(asymmetry=0.15, gravity=9.81, unbalance=5e-6), 3000.0, 785.0,
+            "A shaft 15% stiffer about one axis than its mean, 15% softer across it, as a two-pole "
+            "generator's slots make it. Laid horizontal, its weight drives a 2X whirl, 447 µm at 785 rpm: "
+            "the gravity critical, half the axes' critical speeds (1491 and 1665 rpm). From 1527 to 1631 rpm "
+            "it is unstable.",
+        ),
+        RotorPreset(
             "Fluid-film bearings (oil whip)",
             RotorSystem(bearing_a=Bearing(swirl=0.5), bearing_b=Bearing(swirl=0.5)),
             10_000.0, 2500.0,

@@ -102,10 +102,23 @@ q_s = (K + Ω H)^{-1} f_g, about which the rotor vibrates exactly as without it
 (the model is linear): the static sag, sideways too where K + ΩH is not
 symmetric. The tracking and the spectra work on q - q_s, the vibration.
 
+The shaft may be asymmetric (a two-pole generator's rotor, slotted along two
+sides): EI(1 + Δ) bending toward its stiff axis, at angle φ + α, and EI(1 - Δ)
+across it. Its stiffness then turns with it, K + ΔK(φ) with ΔK changing at 2X,
+and the equations have a periodic coefficient. Turning with the shaft on
+isotropic supports they are time-invariant, so its modes are exact there
+(_rotating_modes); otherwise they are found by Hill's method (_hill_modes).
+Either way they are Floquet modes. Its steady states come by harmonic balance
+(harmonic_response): a 1X load stays 1X on isotropic supports, and gravity gives
+a mean sag and a 2X whirl (gravity_response), largest near half a critical
+speed. Between the critical speeds of its two axes it may be unstable.
+
 Time stepping uses the state z = [q, q'], z' = A(Ω) z + B u, with the same exact
 first-order-hold matrix-exponential update as the chain's Simulator. A depends
 on Ω, so while the speed ramps A is held at the speed at the middle of each short
 chunk of steps (CHUNK_TIME), and the unbalance force follows the exact phase.
+An asymmetric shaft's turning stiffness is split off each step as a kick to the
+velocities at mid-step, between two exact half steps of the rest.
 """
 
 from __future__ import annotations
@@ -128,6 +141,8 @@ STEEL = 7850.0  # kg/m³
 MODE_LIMIT = 1000.0  # Hz: the shaft's fixed-interface modes are kept up to this frequency (the top speed: 60,000 rpm)
 MAX_MODES = 12  # and at most this many in each plane
 CHUNK_TIME = 2e-3  # s; while the speed ramps, A(Ω) is held over chunks this long
+HARMONICS = 3  # an asymmetric shaft on anisotropic supports: harmonics kept each side of the 1X (or 0X) one
+HILL_ORDER = 3  # and harmonics of 2Ω kept each side in Hill's method for its modes
 RPM = 60.0 / (2.0 * math.pi)  # rpm per rad/s
 MIN_GAP = 1e-3  # of the span: the closest the disc may come to a bearing
 
@@ -189,6 +204,8 @@ class RotorSystem:
     density: float = 0.0  # kg/m³ of the shaft: 0 for the Jeffcott model's massless shaft (steel: STEEL)
     elements: int = 8  # beam elements along the shaft, shared between its stretches by length
     lumped: bool = False  # the shaft's mass lumped at the nodes, rather than the consistent mass matrix
+    asymmetry: float = 0.0  # Δ: the shaft's EI is EI(1 + Δ) bending toward its stiff axis, EI(1 - Δ) across it
+    asymmetry_angle: float = 0.0  # rad, α: the stiff axis's angle from the keyphasor mark
 
     def __post_init__(self) -> None:
         if min(abs(self.position), abs(self.position - 1.0)) < MIN_GAP:
@@ -207,6 +224,8 @@ class RotorSystem:
             raise ValueError("the bow and the skew are sizes; give their direction as an angle")
         if self.density < 0.0:
             raise ValueError("the shaft's density cannot be negative")
+        if not 0.0 <= self.asymmetry < 1.0:
+            raise ValueError("the asymmetry Δ is in [0, 1): EI(1 - Δ) about the soft axis must stay positive")
         if self.elements < 2:
             raise ValueError("the shaft needs at least two elements, one each side of the disc")
         lo, hi = self.extent
@@ -442,7 +461,9 @@ class RotorSystem:
         shaft = [p for p in self.plane_weights if not self.on_disc(p)]
         if shaft:
             per_drive += np.array([p.weight for p in shaft]) @ self.shape_matrix(np.array([p.z for p in shaft]))
-        bow = self.shaft_stiffness() @ self.bow_shape() * self.bow * np.exp(1j * self.bow_angle)
+        # K_shaft(φ) q_bow(φ): the deviatoric part Δ k e^{2i(φ+α)} conj(·) of the bow turns with it too.
+        bow = self.shaft_stiffness() @ self.bow_shape() * self.bow * (
+            np.exp(1j * self.bow_angle) + self.asymmetry * np.exp(1j * (2.0 * self.asymmetry_angle - self.bow_angle)))
         return per_drive, bow
 
     def plane_load(self, P: np.ndarray) -> np.ndarray:
@@ -461,17 +482,37 @@ class RotorSystem:
         """q_s = (K + ΩH)^{-1} f_g: where gravity holds the rotor, (n_dof,) or (len(omega), n_dof).
 
         Unless the stiffness depends on the speed (speed_dependent), neither does this.
+        With an asymmetric shaft the rotor never holds still under gravity: q_s is
+        then the mean of its periodic response (gravity_response), the sag about
+        which the 2X gravity vibration swings, and it depends on the speed.
         """
         omega = np.asarray(omega, dtype=float)
         n = self.n_dof
         if not self.gravity:
             return np.zeros(omega.shape + (n,))
+        if self.asymmetry:
+            return gravity_response(self, omega.ravel())[0].real.reshape(omega.shape + (n,))
         f = self.gravity_load()
         if not self.speed_dependent or omega.ndim == 0:
             q = np.linalg.solve(self.stiffness(float(omega) if omega.ndim == 0 else 0.0), f)
             return q if omega.ndim == 0 else np.broadcast_to(q, omega.shape + (n,)).copy()
         K, H = self.matrices()[3], self._circulatory
         return np.linalg.solve(K + omega[..., None, None] * H, np.broadcast_to(f, omega.shape + (n,))[..., None])[..., 0]
+
+    @property
+    def sag_varies(self) -> bool:
+        """True if the static sag depends on the speed: a speed-dependent stiffness, or an asymmetric shaft."""
+        return bool(self.gravity and (self.speed_dependent or self.asymmetry))
+
+    def rest_deflection(self, phase: float = 0.0) -> np.ndarray:
+        """Where gravity holds the rotor at rest, its keyphasor mark at angle φ (n_dof,).
+
+        As static_deflection(0), except that an asymmetric shaft at rest sags on the
+        stiffness it has at that angle, not on its mean.
+        """
+        if not self.gravity or not self.asymmetry:
+            return self.static_deflection(0.0)
+        return np.linalg.solve(self.stiffness_at(0.0, phase), self.gravity_load())
 
     def bow_displacement(self, phase: float) -> np.ndarray:
         """q_bow (n_dof,): the bow at shaft angle φ, as displacements in fixed coordinates."""
@@ -567,9 +608,67 @@ class RotorSystem:
         return tuple(b.kxy + b.swirl * b.damping * omega for b in (self.bearing_a, self.bearing_b))
 
     def stiffness(self, omega: float) -> np.ndarray:
-        """K + Ω H: the whole stiffness at speed Ω."""
+        """K + Ω H: the whole stiffness at speed Ω (with an asymmetric shaft, its mean over a revolution)."""
         K = self._matrices[3]
         return K + omega * self._circulatory if self.speed_dependent else K.copy()
+
+    @property
+    def deviatoric(self) -> tuple[np.ndarray, np.ndarray]:
+        """(K_c, K_s): an asymmetric shaft's stiffness less its mean is cos 2θ K_c + sin 2θ K_s, θ = φ + α.
+
+        Bending toward the stiff axis (at θ) meets Δ k more than the mean stiffness k
+        of the shaft, across it Δ k less: in each plane pair that is Δ k [cos 2θ,
+        sin 2θ; sin 2θ, -cos 2θ]. As f_x + i f_y it is Δ k e^{2iθ} (x - iy). The
+        shaft's reduced stiffness all scales with EI, so the modal coordinates
+        share the same Δ.
+        """
+        Kc, Ks = self._deviatoric
+        return Kc.copy(), Ks.copy()
+
+    @cached_property
+    def _deviatoric(self) -> tuple[np.ndarray, np.ndarray]:
+        dk = self.asymmetry * self.shaft_stiffness()
+        zero = np.zeros_like(dk)
+        return self._blocks(dk, -dk), self._blocks(zero, zero, dk, dk)
+
+    @cached_property
+    def _deviatoric_harmonics(self) -> tuple[np.ndarray, np.ndarray]:
+        """(E₊, E₋): the deviatoric stiffness is E₊ e^{2iφ} + E₋ e^{-2iφ}, E₋ = conj(E₊)."""
+        Kc, Ks = self._deviatoric
+        Ep = 0.5 * (Kc - 1j * Ks) * np.exp(2j * self.asymmetry_angle)
+        return Ep, Ep.conj()
+
+    @cached_property
+    def _kick(self) -> np.ndarray:
+        """[M^{-1} K_c; M^{-1} K_s] (2n x n): the deviatoric stiffness's pull on the accelerations."""
+        Kc, Ks = self._deviatoric
+        return np.vstack([self.mass_inverse @ Kc, self.mass_inverse @ Ks])
+
+    def stiffness_at(self, omega: float, phase: float | np.ndarray) -> np.ndarray:
+        """K + Ω H + the deviatoric part at shaft angle φ: the whole stiffness at that instant, (..., n, n)."""
+        K = self.stiffness(omega)
+        if not self.asymmetry:
+            return np.broadcast_to(K, np.shape(phase) + K.shape).copy()
+        theta = 2.0 * (np.asarray(phase, dtype=float) + self.asymmetry_angle)
+        Kc, Ks = self._deviatoric
+        return K + np.cos(theta)[..., None, None] * Kc + np.sin(theta)[..., None, None] * Ks
+
+    @property
+    def isotropic_supports(self) -> bool:
+        """True if both bearings have the same stiffness and damping in x as in y.
+
+        Then an asymmetric shaft is time-invariant in coordinates turning with it,
+        so a few harmonics give its response and modes exactly.
+        """
+        return all(b.kx == b.ky and b.cx == b.cy for b in (self.bearing_a, self.bearing_b))
+
+    def axis_system(self, stiff: bool) -> RotorSystem:
+        """The same rotor with a round shaft as stiff as this one's stiff (or soft) axis: EI(1 ± Δ).
+
+        Its critical speed is that axis's: an asymmetric shaft has two.
+        """
+        return self.with_(youngs=self.youngs * (1.0 + (self.asymmetry if stiff else -self.asymmetry)),
+                          asymmetry=0.0)
 
     @cached_property
     def mass_inverse(self) -> np.ndarray:
@@ -714,13 +813,25 @@ class WhirlModes:
 
 
 def whirl_modes(system: RotorSystem, omega: float) -> WhirlModes:
-    """Eigen-solution of A(Ω): the oscillatory modes (Im λ > 0), lowest first."""
-    lam, vec = np.linalg.eig(system.state_matrix(omega))
-    keep = lam.imag > 1e-9 * max(1.0, float(np.abs(lam).max()))
-    lam, vec = lam[keep], vec[:system.n_dof, keep]
-    order = np.argsort(lam.imag)
-    lam, vec = lam[order], vec[:, order]
-    _circularize(system, lam, vec)
+    """Eigen-solution of A(Ω): the oscillatory modes (Im λ > 0), lowest first.
+
+    An asymmetric shaft's stiffness turns with it, so A depends on time and its
+    modes are Floquet's: e^{λt} times a motion periodic in φ. Each is listed by
+    the harmonic of it that carries the most kinetic energy (see _rotating_modes
+    and _hill_modes): that is its frequency here, and its shape and whirl are that
+    harmonic's.
+    """
+    if system.asymmetry:
+        lam, vec = _rotating_modes(system, omega) if system.isotropic_supports else _hill_modes(system, omega)
+        order = np.argsort(lam.imag)
+        lam, vec = lam[order], vec[:, order]
+    else:
+        lam, vec = np.linalg.eig(system.state_matrix(omega))
+        keep = lam.imag > _oscillating(lam)
+        lam, vec = lam[keep], vec[:system.n_dof, keep]
+        order = np.argsort(lam.imag)
+        lam, vec = lam[order], vec[:, order]
+        _circularize(system, lam, vec)
     shapes = vec.T.copy()
     for s in shapes:
         # By a station's largest entry (a shaft mode may barely move them: then by its largest).
@@ -735,6 +846,111 @@ def whirl_modes(system: RotorSystem, omega: float) -> WhirlModes:
     )
 
 
+def _oscillating(lam: np.ndarray) -> float:
+    """The least Im λ of a mode that oscillates (smaller is round-off on a real eigenvalue)."""
+    return 1e-9 * max(1.0, float(np.abs(lam).max())) if lam.size else 0.0
+
+
+def rotating_state_matrix(system: RotorSystem, omega: float) -> np.ndarray:
+    """A_r(Ω) (2n x 2n) in coordinates turning with the shaft, q = R(φ) r: constant on isotropic supports.
+
+    R(φ) turns each plane pair by φ, R' = Ω R J. Every matrix but the asymmetric
+    shaft's commutes with R when the supports are isotropic, so R^T(...)R leaves
+    them, the shaft's deviatoric part is held at φ = 0, and
+        M r'' + (C + ΩG + 2ΩMJ) r' + (K + ΩH + ΔK(0) - Ω²M + ΩCJ + Ω²GJ) r = R^T f.
+    """
+    M, C, G, _ = system._matrices
+    n = system.n_dof
+    J = _turn(system)
+    Kr = system.stiffness_at(omega, 0.0) - omega**2 * M + omega * C @ J + omega**2 * G @ J
+    Cr = C + omega * G + 2.0 * omega * M @ J
+    Minv = system.mass_inverse
+    A = np.zeros((2 * n, 2 * n))
+    A[:n, n:] = np.eye(n)
+    A[n:, :n] = -Minv @ Kr
+    A[n:, n:] = -Minv @ Cr
+    return A
+
+
+def _turn(system: RotorSystem) -> np.ndarray:
+    """J (n x n): turns every plane pair x toward y, J [x; y] = [-y; x]."""
+    eye = np.eye(system.n_dof // 2)
+    return system._blocks(0 * eye, 0 * eye, -eye, eye)
+
+
+def _rotating_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.ndarray]:
+    """An asymmetric shaft's modes on isotropic supports, exactly: (λ (k,), shapes (n_dof, k)), Im λ > 0.
+
+    Turning with the shaft the rotor is time-invariant (rotating_state_matrix).
+    A mode r = V e^{μt} there, V = [X; Y] by plane, is seen from the fixed frame
+    as a forward circle (X + iY) e^{(μ + iΩ)t} plus a backward one (X - iY)
+    e^{(μ - iΩ)t}. The one carrying more kinetic energy names the mode: λ = μ ± iΩ,
+    its shape that circle (conjugated if need be, so that Im λ > 0). Its growth
+    rate Re λ = Re μ is exact. A mode that stands still turning with the shaft
+    (μ real, as between the two critical speeds) is a forward whirl locked to 1X.
+    """
+    mu, vec = np.linalg.eig(rotating_state_matrix(system, omega))
+    # A conjugate pair there is one real motion, and maps to one λ: keep its Im μ ≥ 0 member.
+    half = mu.imag >= -_oscillating(mu)
+    mu, vec = mu[half], vec[:, half]
+    ix, iy = system.plane_dofs
+    V = vec[:system.n_dof]
+    a, b = V[ix] + 1j * V[iy], V[ix] - 1j * V[iy]
+    mp = system.plane_mass()
+    fwd = np.real(np.einsum("ik,ij,jk->k", a.conj(), mp, a))
+    bwd = np.real(np.einsum("ik,ij,jk->k", b.conj(), mp, b))
+    forward = fwd >= bwd
+    lam = mu + np.where(forward, 1j, -1j) * omega
+    shapes = np.where(forward, system.merge(a.T, -1j * a.T).T, system.merge(b.T, 1j * b.T).T)
+    flip = lam.imag < 0
+    lam[flip], shapes[:, flip] = lam[flip].conj(), shapes[:, flip].conj()
+    keep = lam.imag > _oscillating(lam)
+    return lam[keep], shapes[:, keep]
+
+
+def _hill_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.ndarray]:
+    """An asymmetric shaft's modes on anisotropic supports, by Hill's method: (λ, shapes (n_dof, k)), Im λ > 0.
+
+    A(t) = A_0 + A_+ e^{2iφ} + A_- e^{-2iφ}; a Floquet mode z = e^{λt} Σ c_k
+    e^{2ikΩt} has λ c_k = (A_0 - 2ikΩ) c_k + A_+ c_{k-1} + A_- c_{k+1}, an
+    eigenproblem in the c_k, |k| ≤ HILL_ORDER. Each mode turns up once for every
+    k, shifted by 2iΩ (and so does its conjugate); the copies kept are those whose
+    kinetic energy is centred on c_0, within half a harmonic (the copies near the
+    truncation are the inaccurate ones, and their energy is off at the edges).
+    A whirl locked to 1X has its energy split evenly between two harmonics, so
+    two of its copies sit on that edge; turned to Im λ > 0 they are one λ, kept
+    once. Its shape is c_0.
+    """
+    n, H = system.n_dof, HILL_ORDER
+    A0 = system.state_matrix(omega).astype(complex)
+    Ap = np.zeros_like(A0)
+    Ap[n:, :n] = -system.mass_inverse @ system._deviatoric_harmonics[0]
+    Am = Ap.conj()
+    size, blocks = 2 * n, 2 * H + 1
+    big = np.zeros((blocks * size, blocks * size), dtype=complex)
+    for i, k in enumerate(range(-H, H + 1)):
+        d = slice(i * size, (i + 1) * size)
+        big[d, d] = A0 - 2j * k * omega * np.eye(size)
+        if i > 0:
+            big[d, (i - 1) * size:i * size] = Ap
+        if i < blocks - 1:
+            big[d, (i + 1) * size:(i + 2) * size] = Am
+    lam, vec = np.linalg.eig(big)
+    disp = vec.reshape(blocks, size, -1)[:, :n]  # (harmonic, DOF, mode)
+    M = system._matrices[0]
+    energy = np.real(np.einsum("hik,ij,hjk->hk", disp.conj(), M, disp))
+    centre = np.arange(-H, H + 1) @ energy / energy.sum(axis=0)
+    keep = np.abs(centre) <= 0.5 + 1e-6
+    lam, shapes = lam[keep], disp[H][:, keep]
+    flip = lam.imag < 0
+    lam[flip], shapes[:, flip] = lam[flip].conj(), shapes[:, flip].conj()
+    keep = lam.imag > _oscillating(lam)
+    lam, shapes = lam[keep], shapes[:, keep]
+    tol = 1e-7 * max(1.0, float(np.abs(lam).max())) if lam.size else 0.0
+    single = [i for i in range(lam.size) if not np.any(np.abs(lam[:i] - lam[i]) <= tol)]
+    return lam[single], shapes[:, single]
+
+
 @dataclass
 class Campbell:
     """Damped natural frequencies against spin speed, and the critical speeds."""
@@ -747,7 +963,15 @@ class Campbell:
 
 
 def campbell(system: RotorSystem, omega_max: float, n_speeds: int = 241, n_modes: int = 6) -> Campbell:
-    """Sweep the speed 0..omega_max and find where each branch crosses the synchronous (1X) line."""
+    """Sweep the speed 0..omega_max and find where each branch crosses the synchronous (1X) line.
+
+    An asymmetric shaft's modes lock onto 1X between its two critical speeds, so
+    its branches do not cross the line cleanly. Its critical speeds are taken as
+    those of a round shaft as stiff as each axis (RotorSystem.axis_system): where,
+    turning with the shaft, the rotor has no stiffness left along that axis
+    against the centrifugal force. With no damping and no gyroscopic coupling
+    they are exactly the ends of the band where it is unstable.
+    """
     omegas = np.linspace(0.0, omega_max, n_speeds)
     freq = np.full((n_speeds, n_modes), np.nan)
     zeta = np.full((n_speeds, n_modes), np.nan)
@@ -757,6 +981,11 @@ def campbell(system: RotorSystem, omega_max: float, n_speeds: int = 241, n_modes
         k = min(n_modes, m.freq_hz.size)
         freq[i, :k], zeta[i, :k], whirl[i, :k] = m.freq_hz[:k], m.zeta[:k], m.whirl[:k]
     criticals = []
+    if system.asymmetry:
+        for stiff in (False, True):
+            criticals += campbell(system.axis_system(stiff), omega_max, n_speeds, n_modes).criticals
+        criticals.sort()
+        return Campbell(omegas, freq, zeta, whirl, criticals)
     for j in range(n_modes):
         gap = 2.0 * math.pi * freq[:, j] - omegas
         for i in range(n_speeds - 1):
@@ -796,16 +1025,97 @@ def synchronous_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
     with the keyphasor mark at angle φ = Ωt (along +x at t = 0). Above
     the stability onset this particular solution still exists, but the free whirl
     grows over it, so the rotor never settles to it.
+
+    With an asymmetric shaft the response to a 1X load has 3X, 5X, ... in it too,
+    unless the supports are isotropic (harmonic_response); this is its 1X part.
     """
     M, C, G, _ = system.matrices()
     omegas = np.atleast_1d(np.asarray(omegas, dtype=float))
     out = np.empty((omegas.size, system.n_dof), dtype=complex)
     load = system.rotating_load(omegas)
+    # f_x + i f_y = P e^{iφ}: f_x = Re(P e^{iφ}), f_y = Re(-iP e^{iφ}).
+    f = system.merge(load, -1j * load)
+    if system.asymmetry:
+        orders = harmonic_orders(system, odd=True)
+        one = int(np.searchsorted(orders, 1))
+        F = np.zeros((omegas.size, orders.size, system.n_dof), dtype=complex)
+        F[:, one], F[:, one - 1] = 0.5 * f, 0.5 * f.conj()
+        return 2.0 * harmonic_response(system, omegas, orders, F)[:, one]
     for i, w in enumerate(omegas):
-        # f_x + i f_y = P e^{iφ}: f_x = Re(P e^{iφ}), f_y = Re(-iP e^{iφ}).
-        f = system.merge(load[i], -1j * load[i])
-        out[i] = np.linalg.solve(system.stiffness(w) - w * w * M + 1j * w * (C + w * G), f)
+        out[i] = np.linalg.solve(system.stiffness(w) - w * w * M + 1j * w * (C + w * G), f[i])
     return out
+
+
+def harmonic_orders(system: RotorSystem, odd: bool) -> np.ndarray:
+    """The harmonics of φ an asymmetric shaft's steady state needs: odd (to a 1X load) or even (to gravity).
+
+    Its deviatoric stiffness shifts a harmonic k to k ± 2, so a load at 1X
+    reaches the odd ones and a constant load the even ones. On isotropic supports
+    the chain closes at once: a forward whirl at 1X stays 1X (in x and y, ±1),
+    and the 0X sag gives only a forward 2X (0, ±2). Otherwise HARMONICS each side.
+    """
+    top = (1 if odd else 2) if system.isotropic_supports else (2 * HARMONICS - 1 if odd else 2 * HARMONICS)
+    return np.arange(-top, top + 1, 2)
+
+
+def harmonic_response(system: RotorSystem, omega: float | np.ndarray, orders: np.ndarray,
+                      loads: np.ndarray) -> np.ndarray:
+    """Harmonic balance at constant speed Ω: the periodic q = Σ Q_k e^{ikφ} under f = Σ F_k e^{ikφ}.
+
+    orders (m,) are the harmonics k, each 2 more than the last; loads (..., m, n_dof)
+    the F_k (F_{-k} = conj(F_k) for a real load). Returns the Q_k, (m, n_dof) for one
+    speed or (len(omega), m, n_dof) for several (loads then one set for all, or one
+    per speed). Row k reads (K + ΩH - k²Ω²M + ikΩ(C + ΩG)) Q_k + E₊ Q_{k-2} + E₋
+    Q_{k+2} = F_k, the deviatoric stiffness being E₊ e^{2iφ} + E₋ e^{-2iφ};
+    harmonics past the ends are taken as zero.
+    """
+    M, C, G, K = system._matrices
+    H = system._circulatory if system.speed_dependent else np.zeros_like(K)
+    Ep, Em = system._deviatoric_harmonics
+    n, m = system.n_dof, len(orders)
+    w = np.atleast_1d(np.asarray(omega, dtype=float))
+    F = np.broadcast_to(np.asarray(loads, dtype=complex), (w.size, m, n)).reshape(w.size, m * n)
+    out = np.empty((w.size, m * n), dtype=complex)
+    chunk = max(1, 2_000_000 // (m * n) ** 2)  # speeds solved at once, to bound the memory
+    for c in range(0, w.size, chunk):
+        wc = w[c:c + chunk, None, None]
+        A = np.zeros((wc.shape[0], m * n, m * n), dtype=complex)
+        for i, k in enumerate(orders):
+            s = k * wc
+            d = slice(i * n, (i + 1) * n)
+            A[:, d, d] = K + wc * H - s * s * M + 1j * s * (C + wc * G)
+            if i > 0:
+                A[:, d, (i - 1) * n:i * n] = Ep
+            if i < m - 1:
+                A[:, d, (i + 1) * n:(i + 2) * n] = Em
+        out[c:c + chunk] = np.linalg.solve(A, F[c:c + chunk, :, None])[..., 0]
+    out = out.reshape(w.size, m, n)
+    return out[0] if np.ndim(omega) == 0 else out
+
+
+def gravity_response(system: RotorSystem, omegas: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Gravity's steady state at constant speeds: (mean sag Q_0, 2X vector Q_2), each (len(omegas), n_dof).
+
+    q = Q_0 + Re(Q_2 e^{2iφ}) + (4X, ...: only on anisotropic supports). A round
+    shaft just sags: Q_0 = (K + ΩH)^{-1} f_g and Q_2 = 0. An asymmetric shaft's
+    weight acts on a stiffness that changes twice per revolution, so it vibrates
+    at 2X, most where 2Ω meets a natural frequency: the gravity critical, near
+    half the critical speed.
+    """
+    omegas = np.atleast_1d(np.asarray(omegas, dtype=float))
+    n = system.n_dof
+    if not system.gravity:
+        return np.zeros((omegas.size, n), dtype=complex), np.zeros((omegas.size, n), dtype=complex)
+    if not system.asymmetry:
+        return system.static_deflection(omegas).astype(complex), np.zeros((omegas.size, n), dtype=complex)
+    orders = harmonic_orders(system, odd=False)
+    zero = int(np.searchsorted(orders, 0))
+    F = np.zeros((orders.size, n), dtype=complex)
+    F[zero] = system.gravity_load()
+    # Each speed once: a steady run asks for the same one again and again.
+    speeds, back = np.unique(omegas, return_inverse=True)
+    Q = harmonic_response(system, speeds, orders, F)[back.ravel()]
+    return Q[:, zero], 2.0 * Q[:, zero + 1]
 
 
 # ------------------------------------------------------------------ time stepping
@@ -854,7 +1164,7 @@ class RotorSimulator:
 
     def _rest(self) -> np.ndarray:
         """The state at rest: the shaft in its bowed shape (which loads nothing), sagging under gravity."""
-        q = self.system.bow_displacement(self.phase) + self.system.static_deflection(0.0)
+        q = self.system.bow_displacement(self.phase) + self.system.rest_deflection(self.phase)
         return np.concatenate([q, np.zeros_like(q)])
 
     def reset(self) -> None:
@@ -881,6 +1191,8 @@ class RotorSimulator:
         # Measured from the equilibrium: the shaft's strain from its bow (zero at the journals, where
         # the supports act), the springs' from where gravity holds them (gravity's own potential energy
         # cancels the rest). Only K's symmetric part stores energy: the cross-coupling does work instead.
+        # An asymmetric shaft's strain energy is on its stiffness at this angle, about its mean sag.
+        K = K + self.system.stiffness_at(0.0, self.phase) - self.system.stiffness(0.0)
         q = self.q - self.system.bow_displacement(self.phase) - self.system.static_deflection(self.omega)
         return 0.5 * float(self.qdot @ M @ self.qdot), 0.5 * float(q @ K @ q)
 
@@ -901,11 +1213,17 @@ class RotorSimulator:
         h = MAX_STEP if fmax <= 0 else min(MAX_STEP, 1.0 / (STEPS_PER_PERIOD * fmax))
         return 2.0 ** math.floor(math.log2(h))
 
-    def _discrete(self, h: float, omega: float, cache: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        key = (h, omega)
+    def _discrete(self, h: float, omega: float, cache: bool,
+                  phase: float | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The FOH update over h at speed Ω; with `phase`, an asymmetric shaft standing still at that angle."""
+        key = (h, omega, phase)
         if key in self._cache:
             return self._cache[key]
-        out = foh_discretize(self.system.state_matrix(omega), self.system.input_matrix(), h)
+        A = self.system.state_matrix(omega)
+        if phase is not None:
+            n = self.system.n_dof
+            A[n:, :n] = -self.system.mass_inverse @ self.system.stiffness_at(omega, phase)
+        out = foh_discretize(A, self.system.input_matrix(), h)
         if cache:
             if len(self._cache) > 8:
                 self._cache.clear()
@@ -944,12 +1262,18 @@ class RotorSimulator:
             u0 = self.force(self.phase, self.omega, self._alpha)
             u = self.force(phi1, w1, alpha)
             # A is held at the chunk's mean speed (exactly the speed when it is steady).
-            Phi, G0, G1 = self._discrete(h, float(np.mean(w1)) if not steady else self.omega, steady)
-            drive = G0 @ np.vstack([u0, u[:-1]]).T + G1 @ u.T
-            z = self.state
-            for j in range(n):
-                z = Phi @ z + drive[:, j]
-                qs[k + j] = z[:n_dof]
+            held = float(np.mean(w1)) if not steady else self.omega
+            # An asymmetric shaft standing still has a fixed stiffness: stepped exactly, like a round one.
+            still = self.system.asymmetry and steady and self.omega == 0.0
+            if self.system.asymmetry and not still:
+                z = self._split_steps(h, held, steady, w0, w1, alpha, u0, u, qs[k:k + n])
+            else:
+                Phi, G0, G1 = self._discrete(h, held, steady, self.phase if still else None)
+                drive = G0 @ np.vstack([u0, u[:-1]]).T + G1 @ u.T
+                z = self.state
+                for j in range(n):
+                    z = Phi @ z + drive[:, j]
+                    qs[k + j] = z[:n_dof]
             self.state = z
             ts[k : k + n] = self.t + h * np.arange(1, n + 1)
             ws[k : k + n], phis[k : k + n] = w1, phi1
@@ -957,3 +1281,36 @@ class RotorSimulator:
             self.omega, self.phase, self._alpha = float(w1[-1]), float(phi1[-1]), float(alpha[-1])
             k += n
         return RotorSamples(ts, qs, ws, phis)
+
+    def _split_steps(self, h: float, held: float, steady: bool, w0: np.ndarray, w1: np.ndarray,
+                     alpha: np.ndarray, u0: np.ndarray, u: np.ndarray, out: np.ndarray) -> np.ndarray:
+        """Steps with an asymmetric shaft (Strang splitting); fills out (n, n_dof), returns the last state.
+
+        Its stiffness turns with it, so no one matrix exponential steps it. Each step
+        is half a step of everything else (the exact FOH update, as for a round
+        shaft), then the deviatoric stiffness at mid-step as a kick to the
+        velocities (exact for it alone: v -= h M^{-1} ΔK(φ) q), then the other
+        half step. Second order in h, and stable: ΔK is smaller than the shaft's
+        stiffness, whose fastest mode the step already resolves.
+        """
+        system, n_dof = self.system, self.system.n_dof
+        n = w1.size
+        Phi, G0, G1 = self._discrete(0.5 * h, held, steady)
+        wm = 0.5 * (w0 + w1)
+        phi0 = np.concatenate([[self.phase], self.phase + np.cumsum(0.5 * h * (w0 + w1))[:-1]])
+        phim = phi0 + 0.25 * h * (w0 + wm)  # exact for Ω linear over the step
+        um = self.force(phim, wm, alpha)
+        before = np.vstack([u0, u[:-1]])
+        first = G0 @ before.T + G1 @ um.T
+        second = G0 @ um.T + G1 @ u.T
+        theta = 2.0 * (phim + system.asymmetry_angle)
+        c, s = h * np.cos(theta), h * np.sin(theta)
+        kick = system._kick
+        z = self.state
+        for j in range(n):
+            z = Phi @ z + first[:, j]
+            k = kick @ z[:n_dof]
+            z[n_dof:] -= c[j] * k[:n_dof] + s[j] * k[n_dof:]
+            z = Phi @ z + second[:, j]
+            out[j] = z[:n_dof]
+        return z

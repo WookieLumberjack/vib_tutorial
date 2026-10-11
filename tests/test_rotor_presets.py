@@ -18,7 +18,7 @@ def criticals(name: str, forward: bool | None = None) -> list[int]:
 
 
 def test_every_preset_is_a_valid_rotor_with_its_target_in_range():
-    assert len(PRESETS) == 6
+    assert len(PRESETS) == 7
     for p in PRESETS.values():
         assert 0 < p.target_rpm < p.top_rpm and p.note
 
@@ -60,3 +60,12 @@ def test_long_shaft_needs_its_mass():
     assert criticals("Long shaft, with its mass", forward=True) == [1589, 6582]
     massless = campbell(s.with_(density=0.0), 10_000.0 / RPM, n_modes=8).criticals
     assert [round(w * RPM) for w, r, z in massless if z < 0.3 and r > 0.1] == [2146]
+
+
+def test_two_pole_rotor():
+    p = PRESETS["Two-pole rotor (asymmetric shaft)"]
+    assert p.system.asymmetry == 0.15 and p.system.gravity > 0
+    assert criticals("Two-pole rotor (asymmetric shaft)", forward=True) == [1491, 1665]
+    band = stability_onset(p.system, p.top_rpm / RPM)
+    assert (round(band.omega * RPM), round(band.end * RPM)) == (1527, 1631)
+    assert least_damped(p.system, p.target_rpm / RPM)[0] > 0  # it runs stable at the gravity critical

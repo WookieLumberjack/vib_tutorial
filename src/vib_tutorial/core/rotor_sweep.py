@@ -16,6 +16,10 @@ keyphasor to the probe's positive peak. For the orbit, (x + iy) = F e^{iφ} +
 B e^{-iφ}: F is the forward whirl, B the backward, |F| + |B| the major
 semi-axis and -arg F the angle from the mark back to the high spot.
 
+The tracking filter takes the 2X vector over each revolution too, the same way
+(x + iy against e^{2iφ}): an asymmetric shaft's weight drives it, most at half
+a critical speed (the gravity critical).
+
 RunUpCoastDown drives a RotorSimulator from one speed to another and back at
 its ramp rate, recording each leg as its own TrackedSweep.
 """
@@ -27,11 +31,21 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .rotor import RPM, RotorSamples, RotorSimulator, RotorSystem, synchronous_response, whirl_modes
+from .rotor import (
+    RPM,
+    RotorSamples,
+    RotorSimulator,
+    RotorSystem,
+    gravity_response,
+    synchronous_response,
+    whirl_modes,
+)
 
 STATIONS = ("Bearing A", "Disc", "Midspan", "Bearing B")
 DIRECTIONS = ("x", "y", "orbit")  # probe directions; "orbit" is the major axis
+ORDERS = (1, 2)  # the harmonics of the speed tracked: 1X, and 2X
 SETTLE_MAX = 2.0  # s, the longest dwell at the starting speed before a sweep is recorded
+SAG_SPEEDS = 16  # an asymmetric shaft's sag under many samples' speeds is interpolated between this many
 TWO_PI = 2.0 * math.pi
 
 
@@ -48,6 +62,13 @@ def vibration(system: RotorSystem, q: np.ndarray, omega: np.ndarray) -> np.ndarr
     """
     if not system.gravity:
         return q
+    omega = np.asarray(omega, dtype=float)
+    if system.asymmetry and omega.size > SAG_SPEEDS and np.ptp(omega) > 0.0:
+        # An asymmetric shaft's sag takes a harmonic balance at each speed: through a ramp, work it
+        # out at a few speeds across the samples' and interpolate (it changes smoothly with speed).
+        grid = np.linspace(omega.min(), omega.max(), SAG_SPEEDS)
+        sag = system.static_deflection(grid)
+        return q - np.stack([np.interp(omega, grid, col) for col in sag.T], axis=-1)
     return q - system.static_deflection(omega)
 
 
@@ -56,8 +77,16 @@ def station_motion(system: RotorSystem, q: np.ndarray) -> np.ndarray:
     return system.deflection(q, station_positions(system))
 
 
-def steady_vectors(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
-    """Steady-state 1X vectors at each station, (len(omegas), 4, 2) complex: (x, y) = Re(V e^{iφ})."""
+def steady_vectors(system: RotorSystem, omegas: np.ndarray, order: int = 1) -> np.ndarray:
+    """Steady-state 1X (or 2X) vectors at each station, (len(omegas), 4, 2) complex: (x, y) = Re(V e^{iφ})
+    (or Re(V e^{2iφ})).
+
+    The 2X is gravity's on an asymmetric shaft (zero on a round one, or with no gravity).
+    """
+    if order == 2:
+        return station_motion(system, gravity_response(system, omegas)[1])
+    if order != 1:
+        raise ValueError(f"order must be one of {ORDERS}")
     return station_motion(system, synchronous_response(system, omegas))
 
 
@@ -106,6 +135,7 @@ class TrackedSweep:
     speed: list[float] = field(default_factory=list)  # rad/s, at the middle of each revolution
     vectors: list[np.ndarray] = field(default_factory=list)  # each (4, 2) complex: the 1X vectors
     peaks: list[np.ndarray] = field(default_factory=list)  # each (4, 3): max |x|, max |y|, max radius
+    vectors2: list[np.ndarray] = field(default_factory=list)  # each (4, 2) complex: the 2X vectors
 
     @property
     def label(self) -> str:
@@ -120,14 +150,16 @@ class TrackedSweep:
         return (np.array(self.speed), np.array(self.vectors).reshape(n, 4, 2),
                 np.array(self.peaks).reshape(n, 4, 3))
 
-    def trace(self, station: int, direction: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """(speed rad/s, 1X complex, per-revolution peak) at one station, in one direction."""
+    def trace(self, station: int, direction: str, order: int = 1) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """(speed rad/s, 1X (or 2X) complex, per-revolution peak) at one station, in one direction."""
         w, v, p = self.arrays()
+        if order == 2:
+            v = np.array(self.vectors2).reshape(v.shape)
         return w, probe(v[:, station], direction), p[:, station, peak_column(direction)]
 
-    def peak(self, station: int, direction: str) -> tuple[float, float]:
-        """(largest 1X amplitude, the speed it occurred at in rad/s); (0, nan) if empty."""
-        w, v, _ = self.trace(station, direction)
+    def peak(self, station: int, direction: str, order: int = 1) -> tuple[float, float]:
+        """(largest 1X (or 2X) amplitude, the speed it occurred at in rad/s); (0, nan) if empty."""
+        w, v, _ = self.trace(station, direction, order)
         if not w.size:
             return 0.0, math.nan
         i = int(np.argmax(np.abs(v)))
@@ -178,13 +210,17 @@ class RevolutionTracker:
         return done
 
     def _record(self, ph: np.ndarray, om: np.ndarray, xy: np.ndarray, inside: np.ndarray, middle: float) -> None:
-        f = xy * np.exp(-1j * ph)[:, None, None]
         span = ph[-1] - ph[0]
-        vec = 2.0 / span * np.sum(0.5 * (f[1:] + f[:-1]) * np.diff(ph)[:, None, None], axis=0)
+
+        def dft(order: int) -> np.ndarray:
+            f = xy * np.exp(-1j * order * ph)[:, None, None]
+            return 2.0 / span * np.sum(0.5 * (f[1:] + f[:-1]) * np.diff(ph)[:, None, None], axis=0)
+
         peak = np.concatenate([np.abs(inside).max(axis=0), np.hypot(inside[..., 0], inside[..., 1]).max(axis=0)[:, None]],
                               axis=1)
         self.sweep.speed.append(float(np.interp(middle, ph, om)))
-        self.sweep.vectors.append(vec)
+        self.sweep.vectors.append(dft(1))
+        self.sweep.vectors2.append(dft(2))
         self.sweep.peaks.append(peak)
 
 

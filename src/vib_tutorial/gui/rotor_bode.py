@@ -6,6 +6,9 @@ speed, and over it the 1X vectors tracked once per revolution during run-ups
 and coast-downs. A sweep pair (its run-up and its coast-down) shares a colour:
 the run-up is drawn solid, the coast-down dashed. The page's summary table under the plot is
 their key, so the legend names only the steady state.
+
+Either can show the 2X vector instead (set_order): an asymmetric shaft's weight
+drives it, and its steady state is gravity's 2X response.
 """
 
 from __future__ import annotations
@@ -100,6 +103,10 @@ class BodePlots(pg.GraphicsLayoutWidget):
             dot.setPen(pg.mkPen(colors.background, width=1))
         self.lag.getAxis("left").setTickSpacing(90.0, 45.0)
 
+    def set_order(self, order: int) -> None:
+        """Label the plots for the 1X or the 2X vector."""
+        self.amp.setLabel("left", f"{order}X amplitude", units="m")
+
     def set_steady(self, rpm: np.ndarray, values: np.ndarray, lag: np.ndarray) -> None:
         self.steady_amp.setData(rpm, np.abs(values))
         self.steady_lag.setData(rpm, lag)
@@ -181,6 +188,7 @@ class SweepPlots:
         self.bode, self.polar = bode, polar
         self.curves: list[SweepCurves] = []
         self.show_peaks = True
+        self.order = 1  # the harmonic drawn: 1X or 2X
 
     def add(self, sweep: TrackedSweep, color: int) -> None:
         c = SweepCurves(sweep, color, self.bode.amp.plot(), pg.ScatterPlotItem(size=4),
@@ -219,7 +227,7 @@ class SweepPlots:
             if not full and len(c.sweep) == c.drawn:
                 continue
             c.drawn = len(c.sweep)
-            w, v, peak = c.sweep.trace(station, direction)
+            w, v, peak = c.sweep.trace(station, direction, self.order)
             rpm = w * RPM
             lag = lag_degrees(v, np.interp(rpm, steady_rpm, steady_lag)) if steady_rpm.size else lag_degrees(v)
             c.amp.setData(rpm, np.abs(v))

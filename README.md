@@ -487,15 +487,15 @@ exact modes:
 The **Jeffcott rotor** page spins a disc on a flexible shaft, between two bearings
 or overhung past one, each bearing on springs and dampers to ground, horizontally and vertically. The disc has a mass,
 polar and diametral moments of inertia, and a mass unbalance; the disc can also be skewed on
-the shaft and the shaft bent (bowed). With the Jeffcott model's massless shaft the model has 8 DOFs: in each
+the shaft, the shaft bent (bowed), and made stiffer about one axis than the other (asymmetric). With the Jeffcott model's massless shaft the model has 8 DOFs: in each
 plane, both journals, the disc, and the shaft's slope at the disc. Give the shaft its mass and
 it becomes a beam finite element model, reduced to those 8 DOFs plus a few of the shaft's own
 modes. It is stepped in state space with the same exact first-order-hold update as the chain, as
 the speed ramps to a target.
 
 - **Presets**: the classic Jeffcott rotor, an off-centre disc, anisotropic supports, an
-  overhung rotor, a long shaft whose own mass matters, and fluid-film bearings that go into oil
-  whip. Each loads a rotor with a speed range to suit it and a note on what to look for.
+  overhung rotor, a long shaft whose own mass matters, a two-pole rotor with an asymmetric shaft,
+  and fluid-film bearings that go into oil whip. Each loads a rotor with a speed range to suit it and a note on what to look for.
 - **Shaft mass**: tick it (and set the density) and the shaft gets its mass, its sections'
   rotary inertia and their gyroscopic moment. It is then 2 to 60 Euler–Bernoulli beam elements
   with consistent or lumped mass, reduced Craig–Bampton style to the stations and the shaft's
@@ -515,7 +515,7 @@ the speed ramps to a target.
   displacement over the revolution. Each leg becomes its own trace; earlier sweeps can be held
   to compare ramp rates, and a table gives each one's peak and the speed it came at against
   the steady state.
-- **Bode and polar plots**: the steady-state 1X amplitude and phase lag against speed at
+- **Bode and polar plots**: the steady-state 1X (or 2X) amplitude and phase lag against speed at
   either bearing, the disc or midspan, read by an x or a y probe or as the orbit's major axis,
   with the tracked sweeps over it and a marker at the current speed. On the polar plot the
   steady-state vector traces its circle through each critical speed.
@@ -529,8 +529,16 @@ the speed ramps to a target.
   and whirls about the sagged position, its orbits below the bearings' centre. *Static sag*
   switches the drawing between a DC-coupled probe's view and an AC-coupled one. The tracking,
   the spectrum and the phase always use the vibration about the sag, which is exactly the
-  response without gravity: gravity alone makes no whirl, even on anisotropic supports.
-  Cross-coupled bearings and internal damping push the sag sideways.
+  response without gravity: gravity alone makes no whirl, even on anisotropic supports (unless
+  the shaft is asymmetric). Cross-coupled bearings and internal damping push the sag sideways.
+- **Asymmetric shaft**: a shaft stiffer about one axis, EI(1 + Δ), than across it, EI(1 − Δ),
+  as a two-pole generator's slots make it, its stiff axis at an angle from the keyphasor mark.
+  Its stiffness turns with it, so it has two critical speeds and between them an unstable band
+  where the whirl grows locked to 1X; laid horizontal, its weight drives a 2X whirl that peaks
+  near half the critical speed (the gravity critical); and its 1X response depends on where the
+  heavy spot sits from the stiff axis. The modes are exact Floquet modes (from axes turning with
+  the shaft, or Hill's method on anisotropic supports), the steady states come by harmonic
+  balance, and the time step splits off the turning stiffness as a mid-step kick.
 - **Balancing, in one plane or two**: the field procedure by influence coefficients. Read the
   slow roll, the 1X vector as found, then with a trial weight, and the page works out the
   correction weight (grams at a radius and an angle from the keyphasor mark), puts it on and
@@ -556,7 +564,9 @@ the speed ramps to a target.
   growing with speed as λcΩ (a fluid-film bearing's oil swirling at λ times the shaft's speed),
   and the shaft's internal (rotating) damping. The stability map draws each mode's damping ratio or
   log decrement against speed and marks the onset speed, where a forward mode's damping
-  crosses zero. Below it, the full spectrum of an orbit (the FFT of x + iy) separates forward
+  crosses zero (and, for an asymmetric shaft, where its unstable band ends). The asymmetry chart
+  maps the instability against the shaft's asymmetry and the speed, an Ince–Strutt chart with one
+  tongue between the two axes' critical speeds. Below it, the full spectrum of an orbit (the FFT of x + iy) separates forward
   from backward whirl, so past the onset the subsynchronous whirl shows as a growing line below
   +1X. The simulation pauses once the whirl reaches 2% of the span.
 - **Waterfall and cascade**: full spectra of a station's orbit taken block by block as the rotor
@@ -572,7 +582,8 @@ the speed ramps to a target.
   rotor, forward and backward whirl, 2X and ½X excitations, anisotropic supports, run-ups through a critical speed (why a fast ramp
   peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²), the bent
   shaft (slow-roll runout, why it is subtracted before balancing), the couple unbalance,
-  gravity's static sag,
+  gravity's static sag, the asymmetric shaft (its unstable band, the gravity critical and the
+  unbalance angle),
   single- and two-plane balancing by influence coefficients (where the planes go, and why planes
   close together need large weights: the influence matrix's condition number),
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
@@ -655,6 +666,22 @@ rpm, about what adding 17/35 of its mass to the disc predicts. But a shaft also 
 35% too high (2146 rpm, not 1589) and misses the second, at 6582 rpm, altogether. With consistent
 mass the second critical comes down from above as elements are added (7393, 6591 and 6582 rpm
 with 2, 4 and 8); lumped mass has no such bound (8187, 6733 and 6620).
+
+![Two-pole rotor preset (a horizontal shaft 15% stiffer about one axis and 15% softer across it) run up and coasted down between 500 and 1200 rpm at 200 rpm/s, with the Bode plot tracking the disc orbit's 2X: the steady-state 2X peak is 447 µm at 784 rpm, half the critical speeds of 1491 and 1665 rpm, and the sweeps reach 93% and 94% of it](docs/images/jeffcott_asymmetric.png)
+
+A two-pole generator's rotor is stiffer bending one way than the other, so its stiffness turns
+with it. Laid horizontal, its own weight acts on a stiffness that changes twice per revolution
+and drives a 2X whirl, largest where 2Ω meets the natural frequency: the *gravity critical*, at
+half the critical speed. The *Two-pole rotor* preset's disc whirls 447 µm at 2X at 785 rpm,
+more than its mean sag. Balancing does nothing to it.
+
+![Stability tab's asymmetry chart for the same rotor at 785 rpm: the unstable tongue (shaded) between the critical speeds of round shafts as stiff as the soft and the stiff axis (dashed), its tip lifted to Δ = 0.12 by the damping; at Δ = 0.15 the rotor is unstable from 1527 to 1631 rpm. Below, the full spectrum of the disc orbit has its peak at +2X, on the free whirl frequency](docs/images/jeffcott_asymmetry_chart.png)
+
+Between its two critical speeds, one per axis, the asymmetric shaft is unstable: turning with the
+shaft, the centrifugal force beats the soft axis's stiffness but not the stiff one's, and a whirl
+grows locked to 1X. Undamped, the band runs exactly between the two critical speeds (a test
+checks); damping narrows it, and below Δ = 0.123 on the default supports there is none. Above
+it the rotor is stable again, unlike the instabilities from cross-coupling and internal damping.
 
 ## The math, briefly
 
@@ -790,9 +817,12 @@ $F_f$ times the distance slid, so the energy balance still closes.
   stations, or with mass and reduced to the stations and its fixed-interface modes), disc,
   bearings and the gyroscopic matrix; whirl modes, the Campbell diagram and critical speeds, the steady 1X
   response to the unbalance, the disc's skew and the shaft's bow, and an exact FOH time
-  stepper that follows a speed ramp.
-- `core/rotor_sweep.py`: run-up and coast-down: the steady-state 1X vectors at each station,
-  once-per-revolution tracking of the 1X vector and peak (`RevolutionTracker`), and
+  stepper that follows a speed ramp. An asymmetric shaft's turning stiffness: its Floquet modes
+  (in axes turning with the shaft, or by Hill's method), its steady states by harmonic balance
+  (`harmonic_response`, `gravity_response`), and a split time step with the turning stiffness as
+  a mid-step kick.
+- `core/rotor_sweep.py`: run-up and coast-down: the steady-state 1X (and gravity's 2X) vectors at each station,
+  once-per-revolution tracking of the 1X and 2X vectors and peak (`RevolutionTracker`), and
   `RunUpCoastDown`, which drives the stepper through a sweep and records each leg.
 - `core/rotor_balance.py`: single- and two-plane balancing: influence coefficient and matrix,
   correction weights, and `SteadyMeasurement`, which runs the stepper at a speed, lets it settle and averages the
@@ -800,7 +830,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/rotor_presets.py`: the rotor page's presets, each a `RotorSystem` with a speed range
   and a note.
 - `core/rotor_stability.py`: the least damped mode, the onset speed of instability (swept,
-  then bisected), the log decrement, and the full spectrum of an orbit.
+  then bisected, with the end of the band if it ends), the log decrement, the full spectrum of
+  an orbit, and `AsymmetryChart`, the growth rate against asymmetry and speed, filled in a few
+  cells at a time.
 - `core/rotor_waterfall.py`: `Waterfall`, full spectra of the orbits taken block by block as
   samples are fed in, each with the free whirl frequencies at its speed, and the latest run-up
   or coast-down among them.
@@ -922,6 +954,7 @@ up, down = RunUpCoastDown(spin, 800 / RPM, 2400 / RPM).run()   # each leg tracke
 w, v, peak = up.trace(1, "x")                                  # disc, x probe: speed, 1X vector, max |x|
 up.peak(1, "orbit")                                            # (largest 1X major axis, speed it came at)
 
+from vib_tutorial.core.rotor import gravity_response
 from vib_tutorial.core.rotor_stability import full_spectrum, stability_onset
 
 unstable = RotorSystem(internal_damping=20.0, bearing_a=Bearing(kxy=5e3))  # H = unstable.circulatory()
@@ -930,6 +963,9 @@ whip = RotorSystem(bearing_a=Bearing(swirl=0.5), bearing_b=Bearing(swirl=0.5))  
 stability_onset(whip, 1000.0).order                            # 0.5: the whirl at half the speed at onset
 overhung = RotorSystem(position=1.2)                           # the disc 0.2 L past bearing B
 f, amp = full_spectrum(r.t, r.q[:, [1, 5]])                    # disc orbit: +f forward, −f backward
+two_pole = RotorSystem(asymmetry=0.15, gravity=9.81)            # EI(1 ± 0.15), stiff axis at the mark
+band = stability_onset(two_pole, 300.0)                        # unstable from band.omega to band.end (rad/s)
+q0, q2 = gravity_response(two_pole, np.array([82.2]))           # mean sag, and the 2X whirl near half the critical
 
 from vib_tutorial.core.rotor_waterfall import Waterfall
 
