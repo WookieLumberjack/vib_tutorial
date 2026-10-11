@@ -548,13 +548,58 @@ def jeffcott_shaft_mass():
     save(w, "jeffcott_shaft_mass")
 
 
+def jeffcott_asymmetric():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.load_preset("Two-pole rotor (asymmetric shaft)")
+    page._refresh_analysis()
+    page.probe_direction.setCurrentIndex(2)  # the orbit
+    page.probe_order.setCurrentIndex(1)  # 2X
+    page.sweep_from.setValue(500.0)
+    page.sweep_to.setValue(1200.0)
+    page.ramp.setValue(200.0)
+    page.start_sweep()
+    while page.run_up is not None:
+        page.step(0.02)
+    page.set_target_rpm(785.0)
+    for _ in range(100):
+        page.step(0.02)
+    print(page.sweep_summary.text())
+    save(w, "jeffcott_asymmetric")
+
+
+def jeffcott_asymmetry_chart():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.load_preset("Two-pole rotor (asymmetric shaft)")
+    page._refresh_analysis()
+    page.tabs.setCurrentWidget(page.spectrum.parentWidget())
+    page.measure.setCurrentIndex(2)  # the asymmetry chart
+    page.asym_chart.run()
+    page.ramp.setValue(2000.0)
+    page.set_target_rpm(785.0)
+    for _ in range(150):
+        page.step(0.02)
+    page._draw_spectrum()
+    print(page.stability_note.text())
+    save(w, "jeffcott_asymmetry_chart")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_overhung, jeffcott_waterfall,
-         jeffcott_shaft_mass]
+         jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart]
 
 
 def main(names: list[str]) -> None:

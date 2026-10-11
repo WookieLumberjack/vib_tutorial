@@ -48,14 +48,14 @@ from ..core.rotor_sweep import (
 )
 from ..core.rotor_balance import SteadyMeasurement
 from ..core.rotor_presets import rotor_presets
-from ..core.rotor_stability import Onset, full_spectrum, least_damped, stability_onset
+from ..core.rotor_stability import AsymmetryChart, Onset, full_spectrum, least_damped, stability_onset
 from ..core.rotor_waterfall import Waterfall
 from .cms_time import SampleBuffer
 from .panels import spin
 from .rotor_balance import BalancingPanel
 from .rotor_bode import SWEEP_COLORS, BodePlots, PolarPlot, SweepPlots, nice_marks
 from .rotor_notes import THEORY_HTML, matrices_html, whirl_name
-from .rotor_stability import MEASURES, FullSpectrum, StabilityMap
+from .rotor_stability import MEASURES, AsymmetryPlot, FullSpectrum, StabilityMap
 from .rotor_waterfall import AGAINST, SCALES, WaterfallPlot, against_speed, baselines
 from .style import colors
 from .theming import add_legend, mute
@@ -91,6 +91,9 @@ SPECTRUM_FRAMES = 6  # the full spectrum is recomputed every this many frames
 MEASURE_SPEED = 2.0  # × real time, at least, while a balancing measurement runs
 WATERFALL_FRAMES = 15  # new spectra are drawn at most every this many frames (each repaint fills every line)
 WATERFALL_RANGE = 2.0  # the waterfall keeps frequencies up to this many times the top speed
+CHART_BUDGET = 0.012  # s per frame spent filling in the asymmetry chart while it shows
+CHART_DELTA = 0.5  # the asymmetry chart's top Δ (taller only for a rotor past it)
+ORDER_NAMES = ("1X", "2X")  # what the Bode and polar plots can track
 
 ORDER_TIPS = {
     2.0: "<p>Twice the speed. A shaft stiffer one way than the other (a keyway, a crack) bends twice per "
@@ -139,7 +142,7 @@ VIEW_TIP = (
     "magnified (the scale is in the top corner). Drag to turn the view; double-click to reset it.</p>"
     "<p>The red dot on the disc is the heavy spot, where its unbalance is: it turns with the shaft. The "
     "tick across the rim is the keyphasor mark that angles are measured from, and squares are balance "
-    "weights. "
+    "weights. An asymmetric shaft's stiff axis is the dashed diameter across the disc. "
     "The thin lines are the orbits of the four stations (bearings, disc, midspan).</p>"
 )
 INTERNAL_TIP = (
@@ -196,11 +199,23 @@ SKEW_TIP = (
     "square to the spin axis, bending the shaft at the disc by −τ at high speed.</p><p>At midspan on "
     "identical bearings it only tilts the disc; move the disc off centre and it moves it too.</p>"
 )
+ASYMMETRY_TIP = (
+    "<p>A shaft stiffer about one axis than the other, as the slots of a two-pole generator's rotor make "
+    "it (or a keyway, or a crack): bending toward its stiff axis it has EI(1 + Δ), across it EI(1 − Δ). "
+    "The angle is the stiff axis's from the keyphasor mark, in the direction of spin.</p>"
+    "<p>Its stiffness turns with it, so it has two critical speeds, one per axis, and between them it is "
+    "unstable unless the damping holds it: the whirl grows locked to 1X. Laid horizontal, its weight acts "
+    "on a stiffness that changes twice per turn and drives a 2X whirl, largest near half the critical "
+    "speed (the <i>gravity critical</i>; plot 2X on the Bode plot). The 1X response depends on where the "
+    "heavy spot sits from the stiff axis.</p>"
+)
 GRAVITY_TIP = (
     "<p>A horizontal rotor: gravity pulls the disc and the journals down. The shaft sags and the "
     "supports give, so the rotor whirls about a point below the bearings' centre. The model is linear, "
     "so the vibration about that point is just as without gravity: on these supports gravity alone "
     "makes no whirl. With cross-coupled bearings or internal damping the sag also goes sideways.</p>"
+    "<p>An asymmetric shaft is the exception: its stiffness turns under its weight, so gravity drives "
+    "it at 2X.</p>"
 )
 SAG_TIP = (
     "<p>Draw the motion with the static sag, as a DC-coupled probe reads the shaft's position in its "
@@ -257,13 +272,14 @@ class RotorView(pg.PlotWidget):
         self.heavy = pg.ScatterPlotItem(size=9)
         self.weight_dots = pg.ScatterPlotItem(size=7, symbol="s")  # balance weights, on the disc or the shaft
         self.mark = pg.PlotCurveItem()  # the keyphasor mark: a tick across the disc's rim
+        self.stiff_axis = pg.PlotCurveItem()  # an asymmetric shaft's stiff axis: a diameter across the disc
         self.show_heavy = True
         self.stations = pg.ScatterPlotItem(size=8)
         self.triad = pg.PlotCurveItem(connect="pairs")
         self.triad_labels = [pg.TextItem(t, anchor=(0.5, 0.5)) for t in ("x", "y", "z")]
         self.end_labels = [pg.TextItem(t, anchor=(0.5, 0.0)) for t in ("A", "B")]
         for item in (self.frame, self.axis, self.supports, *self.trails, self.shaft, self.disc,
-                     self.spoke, self.heavy, self.weight_dots, self.mark, self.stations, self.triad, *self.triad_labels, *self.end_labels):
+                     self.spoke, self.stiff_axis, self.heavy, self.weight_dots, self.mark, self.stations, self.triad, *self.triad_labels, *self.end_labels):
             plot.addItem(item)
         self.scale_label = pg.TextItem(anchor=(1.0, 0.0))
         plot.addItem(self.scale_label)
@@ -352,6 +368,7 @@ class RotorView(pg.PlotWidget):
         self.weight_dots.setBrush(pg.mkBrush(colors.strong))
         self.weight_dots.setPen(pg.mkPen(colors.background, width=1))
         self.mark.setPen(pg.mkPen(colors.strong, width=2))
+        self.stiff_axis.setPen(pg.mkPen(colors.strong, width=1.5, style=DASH))
         self.stations.setPen(pg.mkPen(colors.background, width=1))
         self.triad.setPen(pg.mkPen(colors.muted, width=1))
         for label in (*self.triad_labels, *self.end_labels, self.scale_label):
@@ -432,6 +449,11 @@ class RotorView(pg.PlotWidget):
         else:
             self.weight_dots.setData([], [])
         self.mark.setData(*self.project(np.vstack([on_disc(phase, 0.88), on_disc(phase, 1.12)])))
+        if s.asymmetry:
+            angle = phase + s.asymmetry_angle
+            self.stiff_axis.setData(*self.project(np.vstack([on_disc(angle, 0.75), on_disc(angle + math.pi, 0.75)])))
+        else:
+            self.stiff_axis.setData([], [])
 
         # Supports: a spring and a damper to ground below (y) and to the side wall (x) at each bearing.
         parts = []
@@ -689,8 +711,10 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         self.unstable = pg.ScatterPlotItem(size=7, symbol="x", name="growing (ζ &lt; 0)")
         p.addItem(self.unstable)
         self.onset_line = pg.InfiniteLine(angle=90)
+        self.end_line = pg.InfiniteLine(angle=90)  # where an unstable band ends (an asymmetric shaft's)
         self.onset_label = pg.TextItem(anchor=(1.05, 0.0))
         p.addItem(self.onset_line)
+        p.addItem(self.end_line)
         p.addItem(self.onset_label)
         self.speed_line = pg.InfiniteLine(angle=90, movable=True)
         self.speed_line.setToolTip("The speed now. Drag it to set the target speed.")
@@ -724,6 +748,7 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         self.unstable.setBrush(pg.mkBrush(colors.force))
         self.unstable.setPen(pg.mkPen(None))
         self.onset_line.setPen(pg.mkPen(colors.force, width=1.5, style=DASH))
+        self.end_line.setPen(pg.mkPen(colors.force, width=1.5, style=DASH))
         self.onset_label.setColor(colors.force)
         for label in self.crit_labels:
             label.setColor(colors.force)
@@ -744,7 +769,12 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         growing = ok & (result.zeta.ravel() < 0.0)
         self.unstable.setData(rpm[growing], f[growing])
         self.onset_line.setVisible(onset is not None)
-        if onset is not None:
+        self.end_line.setVisible(onset is not None and math.isfinite(onset.end))
+        if onset is not None and math.isfinite(onset.end):
+            self.onset_line.setValue(onset.omega * RPM)
+            self.end_line.setValue(onset.end * RPM)
+            self.onset_label.setText(f"unstable\n{onset.omega * RPM:,.0f}–{onset.end * RPM:,.0f} rpm")
+        elif onset is not None:
             self.onset_line.setValue(onset.omega * RPM)
             self.onset_label.setText(f"instability onset\n{onset.omega * RPM:,.0f} rpm")
         else:
@@ -837,6 +867,8 @@ class RotorPage(QtWidgets.QWidget):
         self._sweep_pairs = 0  # sweeps started since the plots were cleared (each pair's colour)
         self._steady_rpm = np.empty(0)  # the steady-state curve: speeds (rpm)
         self._steady_vectors = np.empty((0, len(STATIONS), 2), dtype=complex)  # and 1X vectors there
+        self._steady_vectors2 = np.empty((0, len(STATIONS), 2), dtype=complex)  # and 2X vectors there
+        self.asym_chart: AsymmetryChart | None = None  # the stability tab's asymmetry chart, as far as it got
         self.onset: Onset | None = None  # where the rotor goes unstable, if it does up to top_rpm
         self.rubbed = False  # the whirl grew past RUB of the span and the simulation paused
         self._sag: tuple[np.ndarray, np.ndarray] | None = None  # see _set_sag
@@ -964,7 +996,8 @@ class RotorPage(QtWidgets.QWidget):
             "<p>The log decrement δ = 2πζ/√(1 − ζ²) is the natural log of the ratio of successive peaks of "
             "a decaying vibration; API 684 asks for δ ≥ 0.1 at the running speed.</p>"
         )
-        self.measure.currentIndexChanged.connect(lambda i: self.stability_map.set_measure(i == 1))
+        self.asymmetry_plot = AsymmetryPlot()
+        self.measure.currentIndexChanged.connect(self._on_measure)
         self.stability_note = QtWidgets.QLabel()
         self.stability_note.setWordWrap(True)
         self.stability_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
@@ -979,7 +1012,10 @@ class RotorPage(QtWidgets.QWidget):
         measure_row.addWidget(self.measure)
         measure_row.addStretch(1)
         st.addLayout(measure_row)
-        st.addWidget(self.stability_map, 3)
+        self.stability_stack = QtWidgets.QStackedWidget()
+        self.stability_stack.addWidget(self.stability_map)
+        self.stability_stack.addWidget(self.asymmetry_plot)
+        st.addWidget(self.stability_stack, 3)
         st.addWidget(self.stability_note)
         st.addWidget(self.spectrum, 2)
         st.addWidget(self.spectrum_note)
@@ -1178,11 +1214,18 @@ class RotorPage(QtWidgets.QWidget):
             "to the probe's positive peak, so on a circular orbit the y probe reads 90° more than the x "
             "probe. For the orbit, it is the angle from the mark back to the high spot.</p>"
         )
-        for c in (self.probe_station, self.probe_direction):
+        self.probe_order = QtWidgets.QComboBox()
+        self.probe_order.addItems(ORDER_NAMES)
+        self.probe_order.setToolTip(
+            "<p>Track the 1X vector (once per revolution: the unbalance, the bow, the skew) or the 2X vector "
+            "(twice per revolution). On a round shaft nothing drives 2X; an asymmetric shaft's weight does, "
+            "most near half its critical speeds.</p>")
+        for c in (self.probe_station, self.probe_direction, self.probe_order):
             c.currentIndexChanged.connect(self._on_probe)
         probe_row = QtWidgets.QHBoxLayout()
-        probe_row.addWidget(self.probe_station, 1)
-        probe_row.addWidget(self.probe_direction, 2)
+        probe_row.addWidget(self.probe_station, 2)
+        probe_row.addWidget(self.probe_direction, 3)
+        probe_row.addWidget(self.probe_order, 1)
         form.addRow("Plot:", probe_row)
         self.show_peaks = QtWidgets.QCheckBox("Per-revolution peaks (dots)")
         self.show_peaks.setChecked(True)
@@ -1268,9 +1311,13 @@ class RotorPage(QtWidgets.QWidget):
         self.bow_angle = spin(-180.0, 180.0, math.degrees(s.bow_angle), 0, "°")
         self.skew = spin(0.0, 10.0, math.degrees(s.skew), 3, "°")
         self.skew_angle = spin(-180.0, 180.0, math.degrees(s.skew_angle), 0, "°")
+        self.asymmetry = spin(0.0, 90.0, s.asymmetry * 100, 1, " %")
+        self.asymmetry_angle = spin(-180.0, 180.0, math.degrees(s.asymmetry_angle), 0, "°")
         for size, angle, tip, label in ((self.unbalance, self.unbalance_angle, None, "Unbalance m·e:"),
                                         (self.bow, self.bow_angle, BOW_TIP, "Shaft bow δ<sub>b</sub>:"),
-                                        (self.skew, self.skew_angle, SKEW_TIP, "Disc skew τ:")):
+                                        (self.skew, self.skew_angle, SKEW_TIP, "Disc skew τ:"),
+                                        (self.asymmetry, self.asymmetry_angle, ASYMMETRY_TIP,
+                                         "Asymmetry ±Δ:")):
             angle.setWrapping(True)
             angle.setStepType(QtWidgets.QAbstractSpinBox.StepType.DefaultStepType)
             angle.setSingleStep(15.0)
@@ -1294,7 +1341,7 @@ class RotorPage(QtWidgets.QWidget):
         form.addRow(self.shaft_note)
         for box_ in (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip,
                      self.id, self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle,
-                     self.internal_damping, self.density, self.elements):
+                     self.asymmetry, self.asymmetry_angle, self.internal_damping, self.density, self.elements):
             box_.valueChanged.connect(self._on_params)
         return box
 
@@ -1390,6 +1437,8 @@ class RotorPage(QtWidgets.QWidget):
             bow_angle=math.radians(self.bow_angle.value()),
             skew=math.radians(self.skew.value()),
             skew_angle=math.radians(self.skew_angle.value()),
+            asymmetry=self.asymmetry.value() / 100,
+            asymmetry_angle=math.radians(self.asymmetry_angle.value()),
             internal_damping=self.internal_damping.value(),
             density=self.density.value() if self.shaft_mass.isChecked() else 0.0,
             elements=self.elements.value(),
@@ -1399,7 +1448,8 @@ class RotorPage(QtWidgets.QWidget):
     def set_system(self, system: RotorSystem) -> None:
         """Show and use `system` (for scripts and tests)."""
         boxes = (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip, self.id,
-                 self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle, self.internal_damping,
+                 self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle,
+                 self.asymmetry, self.asymmetry_angle, self.internal_damping,
                  self.gravity, self.isotropic, self.same_bearings, self.shaft_mass, self.density, self.elements,
                  self.mass_matrix, *(w for row in self.bearing_rows for w in row))
         for w in boxes:
@@ -1421,6 +1471,8 @@ class RotorPage(QtWidgets.QWidget):
         self.bow_angle.setValue(math.degrees(system.bow_angle))
         self.skew.setValue(math.degrees(system.skew))
         self.skew_angle.setValue(math.degrees(system.skew_angle))
+        self.asymmetry.setValue(system.asymmetry * 100)
+        self.asymmetry_angle.setValue(math.degrees(system.asymmetry_angle))
         self.internal_damping.setValue(system.internal_damping)
         self.shaft_mass.setChecked(system.density > 0.0)
         if system.density > 0.0:
@@ -1543,9 +1595,18 @@ class RotorPage(QtWidgets.QWidget):
             formula = f" (48EI/L³ = {ks:,.0f} N/m at midspan)"
         self.shaft_note.setText(
             f"EI = {system.ei:.4g} N·m²; shaft stiffness at the disc (bearings rigid) "
-            f"{system.disc_stiffness:,.0f} N/m" + formula + self._shaft_mass_text(system) + self._sag_text(system)
+            f"{system.disc_stiffness:,.0f} N/m" + formula + self._asymmetry_text(system)
+            + self._shaft_mass_text(system) + self._sag_text(system)
         )
         self._analysis_timer.start()
+
+    @staticmethod
+    def _asymmetry_text(system: RotorSystem) -> str:
+        if not system.asymmetry:
+            return ""
+        d = system.asymmetry
+        return (f"<br>Asymmetric: EI = {system.ei * (1 + d):.4g} N·m² bending toward the stiff axis "
+                f"({math.degrees(system.asymmetry_angle):.0f}° from the mark), {system.ei * (1 - d):.4g} across it")
 
     @staticmethod
     def _shaft_mass_text(system: RotorSystem) -> str:
@@ -1570,6 +1631,7 @@ class RotorPage(QtWidgets.QWidget):
         self.campbell_plot.set_result(self.campbell, top, iso, self.onset)
         self.campbell_plot.set_reference(massless)
         self.stability_map.set_result(self.campbell, self.onset, top)
+        self._new_asymmetry_chart()
         crits = critical_speeds(self.campbell, iso)
         self.time.set_criticals([w * RPM for w, _ in crits])
         lines = [f"{w * RPM:,.0f} rpm ({w / (2 * math.pi):.4g} Hz), {whirl_name(r)} whirl" for w, r in crits]
@@ -1580,6 +1642,8 @@ class RotorPage(QtWidgets.QWidget):
             + ("<br><small>The backward whirl crossings are not critical: an isotropic rotor's unbalance "
                "drives only forward whirl.</small>" if iso else "")
             + f"<br><small>Textbook Jeffcott estimate (massless journals, no tilt): {jeff:,.0f} rpm</small>"
+            + ("<br><small>An asymmetric shaft has two critical speeds for each mode: those of a round shaft as "
+               "stiff as each of its axes.</small>" if system.asymmetry else "")
             + (f"<br><small>With a massless shaft (the Jeffcott model, dashed): "
                + (", ".join(f"{w * RPM:,.0f}" for w, _ in critical_speeds(massless, iso)) or "none") + " rpm</small>"
                if massless is not None else "")
@@ -1592,7 +1656,9 @@ class RotorPage(QtWidgets.QWidget):
             "hollow). A critical speed (circled) is where a lightly damped whirl frequency meets the 1X "
             "line: the unbalance, turning once per revolution, drives that mode at its natural "
             "frequency. An isotropic rotor's unbalance drives only its forward whirl."
-            + (" Crosses mark growing modes (ζ < 0), above the onset of instability (dashed)." if self.onset else "")
+            + (" Crosses mark growing modes (ζ < 0), " + ("between the dashed lines." if math.isfinite(self.onset.end)
+                                                        else "above the onset of instability (dashed).")
+               if self.onset else "")
         )
         self._matrices_speed = -math.inf
         self._refresh_matrices()
@@ -1605,6 +1671,9 @@ class RotorPage(QtWidgets.QWidget):
         whirl = whirl_name(o.whirl)
         if o.omega == 0.0:
             return f"<b>unstable even at rest</b>: the {whirl} whirl at {o.freq_hz:.3g} Hz grows."
+        if math.isfinite(o.end):
+            return (f"<b>unstable from {o.omega * RPM:,.0f} to {o.end * RPM:,.0f} rpm</b>, where the {whirl} whirl "
+                    f"at {o.freq_hz:.3g} Hz ({o.order:.2f}×) grows; stable again above.")
         return (f"<b>unstable above {o.omega * RPM:,.0f} rpm</b>, where the {whirl} whirl at "
                 f"{o.freq_hz:.3g} Hz ({o.order:.2f}×) starts to grow.")
 
@@ -1616,20 +1685,63 @@ class RotorPage(QtWidgets.QWidget):
                     if b.swirl * b.damping]
         if s.internal_damping:
             coupled.append(f"internal damping c<sub>i</sub> = {s.internal_damping:g} N·s/m")
+        if s.asymmetry:
+            coupled.append(f"the shaft's asymmetry Δ = {s.asymmetry:.3g}")
         cause = ("With " + " and ".join(coupled) + ": " if coupled else
-                 "No cross-coupling and no internal damping: every mode stays damped, however fast it spins. "
-                 "Set c<sub>i</sub>, k<sub>xy</sub> or λ to see one go unstable. ")
-        return (f"<small>{cause}{self._onset_text()} Modes damped more than ζ = {DAMPED:g} are left off. "
-                "Below: the full spectrum of the strip chart's station.</small>")
+                 "No cross-coupling, internal damping or asymmetry: every mode stays damped, however fast it "
+                 "spins. Set c<sub>i</sub>, k<sub>xy</sub>, λ or Δ to see one go unstable. ")
+        if self.measure.currentIndex() == 2:
+            chart = (" The chart shades where the rotor is unstable against the shaft's asymmetry Δ and the speed "
+                     "(the rest of the rotor as it is), between the two axes' critical speeds (dashed).")
+            if self.asym_chart is not None and not self.asym_chart.done:
+                chart += f" Working it out: {self.asym_chart._next / self.asym_chart.growth.size:.0%}."
+        else:
+            chart = f" Modes damped more than ζ = {DAMPED:g} are left off."
+        return f"<small>{cause}{self._onset_text()}{chart} Below: the full spectrum of the strip chart's station.</small>"
+
+    def _on_measure(self, index: int) -> None:
+        if index < 2:
+            self.stability_map.set_measure(index == 1)
+        self.stability_stack.setCurrentIndex(1 if index == 2 else 0)
+        self._new_asymmetry_chart()
+        self.stability_note.setText(self._stability_note())
+
+    def _new_asymmetry_chart(self) -> None:
+        """Start the asymmetry chart afresh if the rotor (other than its asymmetry) or the speed range changed."""
+        system = self.sim.system
+        top = max(CHART_DELTA, math.ceil(system.asymmetry * 12.0) / 10.0)
+        chart = self.asym_chart
+        if (chart is not None and chart.system.with_(asymmetry=0.0) == system.with_(asymmetry=0.0)
+                and chart.omegas[-1] == self.top_rpm / RPM and chart.asymmetries[-1] == top):
+            return
+        self.asym_chart = AsymmetryChart(system, self.top_rpm / RPM, top) if self.measure.currentIndex() == 2 else None
+        self.asymmetry_plot.set_chart(self.asym_chart)
+
+    def _work_asymmetry_chart(self) -> None:
+        """Fill in some more of the asymmetry chart, if it shows, and draw what is new."""
+        chart = self.asym_chart
+        if (chart is None or self.measure.currentIndex() != 2
+                or self.tabs.currentWidget() is not self.spectrum.parentWidget()):
+            return
+        if not chart.done:
+            chart.work(CHART_BUDGET)
+        elif self.asymmetry_plot.drawn == chart._next:
+            return
+        self.asymmetry_plot.set_chart(chart)
+        if chart.done or self._frames % SPECTRUM_FRAMES == 0:
+            self.stability_note.setText(self._stability_note())
 
     def _refresh_steady(self) -> None:
         """The steady-state 1X vectors at every station, finely around each critical speed."""
         w = [np.linspace(self.top_rpm / STEADY_POINTS, self.top_rpm, STEADY_POINTS) / RPM]
         crits = [c for c, _, _ in self.campbell.criticals] if self.campbell else []
+        if self.sim.system.asymmetry and self.sim.system.gravity:
+            crits += [0.5 * c for c in crits]  # gravity's 2X peaks near half of each
         w += [np.linspace(0.8 * c, 1.2 * c, STEADY_POINTS // max(len(crits), 1)) for c in crits]
         w = np.unique(np.concatenate(w))
         self._steady_rpm = w * RPM
         self._steady_vectors = steady_vectors(self.sim.system, w)
+        self._steady_vectors2 = steady_vectors(self.sim.system, w, order=2)
         self._draw_tracking(full=True)
         self.balancing.rotor_changed()
         self.balancing.refresh()
@@ -1856,6 +1968,9 @@ class RotorPage(QtWidgets.QWidget):
         self.sweep_status.setText(text)
 
     def _on_probe(self) -> None:
+        order = self._order()
+        self.sweep_plots.order = order
+        self.bode.set_order(order)
         self._fit_tracking_range()
         self._draw_tracking(full=True)
 
@@ -1864,6 +1979,10 @@ class RotorPage(QtWidgets.QWidget):
 
     def _probe(self) -> tuple[int, str]:
         return self.probe_station.currentIndex(), DIRECTIONS[self.probe_direction.currentIndex()]
+
+    def _order(self) -> int:
+        """The harmonic the Bode and polar plots track: 1 (1X) or 2 (2X)."""
+        return self.probe_order.currentIndex() + 1
 
     def _tracking_range(self) -> tuple[float, float]:
         """Speeds (rpm) the Bode and polar plots show: the sweep's, and those of the sweeps on them."""
@@ -1881,9 +2000,10 @@ class RotorPage(QtWidgets.QWidget):
         self.polar.getPlotItem().enableAutoRange()
 
     def _steady_probe(self) -> tuple[np.ndarray, np.ndarray]:
-        """The steady-state 1X values at the chosen station and direction, and their unwrapped lag."""
+        """The steady-state 1X (or 2X) values at the chosen station and direction, and their unwrapped lag."""
         station, direction = self._probe()
-        values = probe(self._steady_vectors[:, station], direction)
+        vectors = self._steady_vectors2 if self._order() == 2 else self._steady_vectors
+        values = probe(vectors[:, station], direction)
         return values, lag_degrees(values)
 
     def _draw_tracking(self, full: bool = False) -> None:
@@ -1918,17 +2038,29 @@ class RotorPage(QtWidgets.QWidget):
         ss_amp, ss_rpm = float(abs(values[i])), float(rpm[i])
         wc = ss_rpm / RPM
         where = f"{STATIONS[station].lower()}, {DIRECTION_NAMES[self.probe_direction.currentIndex()].lower()}"
+        order = self._order()
+        if order == 2:
+            where += ", 2X"
+            if not ss_amp:
+                return (f"<b>Steady state</b> ({where}): nothing drives 2X"
+                        + (" on a round shaft." if not self.sim.system.asymmetry else
+                           " without gravity: tick <i>Horizontal rotor</i>."))
         head = f"<b>Steady state</b> ({where}): peak {_fmt_len(ss_amp)} at {ss_rpm:,.0f} rpm"
-        zetas = [(abs(w - wc), z) for w, _, z in (self.campbell.criticals if self.campbell else [])]
-        if zetas and min(zetas)[0] < 0.05 * wc:
+        crits = self.campbell.criticals if self.campbell else []
+        zetas = [(abs(w - wc), z) for w, _, z in crits]
+        near = min(crits, key=lambda c: abs(c[0] - 2.0 * wc), default=None)
+        if order == 2:
+            if near is not None and abs(near[0] - 2.0 * wc) < 0.15 * 2.0 * wc:
+                head += f", about half the critical speed {near[0] * RPM:,.0f} rpm: the <i>gravity critical</i>"
+        elif zetas and min(zetas)[0] < 0.05 * wc:
             z = min(zetas)[1]
             head += f"; its mode has ζ = {z:.3g}, ζ² = {z * z:.2g}"
         if not self.sweeps:
-            return head + ("<br><small>Run up and coast down to track the 1X response over this curve.</small>")
+            return head + (f"<br><small>Run up and coast down to track the {order}X response over this curve.</small>")
         rows = []
         for c in self.sweep_plots.curves:
             sweep = c.sweep
-            amp, w = sweep.peak(station, direction)
+            amp, w = sweep.peak(station, direction, order)
             if not len(sweep):
                 continue
             color = colors.mode[SWEEP_COLORS[c.color % len(SWEEP_COLORS)]]
@@ -1942,7 +2074,7 @@ class RotorPage(QtWidgets.QWidget):
             )
         return (
             head + "<table cellspacing='0' cellpadding='2'><tr><th align='left'>Sweep</th>"
-            "<th>α/ω<sub>c</sub>²</th><th>1X peak</th><th>of steady</th><th>at rpm</th><th>vs steady</th></tr>"
+            f"<th>α/ω<sub>c</sub>²</th><th>{order}X peak</th><th>of steady</th><th>at rpm</th><th>vs steady</th></tr>"
             + "".join(rows) + "</table>"
         )
 
@@ -2040,6 +2172,8 @@ class RotorPage(QtWidgets.QWidget):
                                 self.window.value())
         self.campbell_plot.set_speed(sim.omega * RPM)
         self.stability_map.set_speed(sim.omega * RPM)
+        self.asymmetry_plot.set_here(sim.omega * RPM, sim.system.asymmetry)
+        self._work_asymmetry_chart()
         self._draw_tracking()
         self.balancing.update_status()
         self._frames += 1
@@ -2068,7 +2202,8 @@ class RotorPage(QtWidgets.QWidget):
                 text += ", whirling " + ("forward" if swept > 0 else "backward")
             parts.append(text)
         growing = self.onset is not None and sim.omega >= self.onset.omega and least_damped(sim.system, w)[0] < 0
-        if (heavy is not None and steady and not growing
+        # (Not where an asymmetric shaft's weight drives 2X: the disc's position then says little of the 1X.)
+        if (heavy is not None and steady and not growing and not (sim.system.asymmetry and sim.system.gravity)
                 and r_disc > 1e-3 * max(abs(sim.system.mass_unbalance) / sim.system.disc_mass, MIN_PEAK)):
             lag = math.degrees(heavy - math.atan2(here[3], here[2])) % 360.0
             parts.append(f"heavy spot leads the high spot by {lag:.0f}°")
@@ -2082,8 +2217,9 @@ class RotorPage(QtWidgets.QWidget):
             parts.append(
                 f"<span style='color:{colors.force}'><b>Paused:</b> the whirl passed "
                 f"{_fmt_len(RUB * sim.system.length)} ({RUB:.0%} of the span), where a real rotor would rub its "
-                "seals or wreck its bearings. The model is linear, so it would grow for ever. Lower the target "
-                "below the onset and Reset.</span>")
+                "seals or wreck its bearings. The model is linear, so it would grow for ever. "
+                + ("Set the target outside the unstable range" if self.onset is not None and math.isfinite(self.onset.end)
+                   else "Lower the target below the onset") + " and Reset.</span>")
         self.readout.setText(" · ".join(parts))
 
     def _heavy_angle(self) -> float | None:
@@ -2100,7 +2236,7 @@ class RotorPage(QtWidgets.QWidget):
         if not system.gravity:
             self._sag = None
             return
-        speeds = np.linspace(0.0, self.top_rpm / RPM, SAG_SPEEDS if system.speed_dependent else 1)
+        speeds = np.linspace(0.0, self.top_rpm / RPM, SAG_SPEEDS if system.sag_varies else 1)
         qs = system.static_deflection(speeds)
         self._sag = (speeds, self._columns(qs, speeds, speeds)[:, :8])
 
@@ -2132,7 +2268,8 @@ class RotorPage(QtWidgets.QWidget):
         st = self.station.currentIndex()
         freqs, amps = full_spectrum(t, self._vibration(hist)[:, 2 * st : 2 * st + 2])
         omega = self.sim.omega
-        self.spectrum.update_spectrum(freqs, amps, omega, whirl_modes(self.sim.system, omega), DAMPED)
+        self.spectrum.update_spectrum(freqs, amps, omega, whirl_modes(self.sim.system, omega), DAMPED,
+                                      twice=bool(self.sim.system.asymmetry))
         self.spectrum_note.setText(
             f"Full spectrum of the {STATIONS[st].lower()} orbit over the last {self.window.value():g} s "
             "(the strip chart's station and window): forward whirl on the right, backward on the left.")

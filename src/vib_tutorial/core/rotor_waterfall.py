@@ -108,8 +108,12 @@ class Waterfall:
         w = np.interp(even, t, self._w)
         end = float(np.interp(start + self.block, t, self._w))
         omega = float(w.mean())
-        natural = (whirl_lines(whirl_modes(self.system, omega), DAMPED) if self.system is not None
-                   else np.empty(0))
+        if self.system is None:
+            natural = np.empty(0)
+        elif self.blocks and self.blocks[-1].omega == omega:  # running steady: the same modes again
+            natural = self.blocks[-1].natural
+        else:
+            natural = whirl_lines(whirl_modes(self.system, omega), DAMPED)
         return SpectrumBlock(t=start + 0.5 * self.block, omega=omega, rise=end - float(w[0]),
                              amps=amps[self._keep].T.astype(np.float32), natural=natural)
 

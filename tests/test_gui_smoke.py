@@ -1947,3 +1947,74 @@ def test_rotor_shaft_mass(app):
     assert not any(line.isVisible() for line in p.campbell_plot.reference)
     p.set_system(RotorSystem(density=2700.0, elements=6, lumped=True))
     assert p.density.value() == 2700.0 and p.elements.value() == 6 and p.mass_matrix.currentIndex() == 1
+
+
+def test_rotor_asymmetric_shaft(app):
+    from vib_tutorial.core.rotor import RotorSystem
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    p.running = False
+    p.load_preset("Two-pole rotor (asymmetric shaft)")
+    p._refresh_analysis()
+    s = p.sim.system
+    assert s.asymmetry == pytest.approx(0.15) and p.asymmetry.value() == pytest.approx(15.0)
+    assert "Asymmetric: EI" in p.shaft_note.text()
+    assert "unstable from 1,527 to 1,631 rpm" in p.crit_label.text()
+    assert "1,491 rpm" in p.crit_label.text() and "1,665 rpm" in p.crit_label.text()
+    assert p.campbell_plot.end_line.isVisible() and p.stability_map.end_line.isVisible()
+    assert p.stability_map.end_line.value() == pytest.approx(1631, abs=1)
+    # The Bode plot tracks 2X: gravity's steady state peaks at the gravity critical.
+    p.probe_direction.setCurrentIndex(2)
+    p.probe_order.setCurrentIndex(1)
+    p.sweep_from.setValue(700.0)
+    p.sweep_to.setValue(850.0)
+    assert "2X amplitude" in p.bode.amp.getAxis("left").labelText
+    text = p.sweep_summary.text()
+    assert "peak 447 µm at 785 rpm" in text and "critical speed 1,491 rpm" in text and "gravity critical" in text
+    p.ramp.setValue(2000.0)
+    p.start_sweep()
+    for _ in range(400):
+        if p.run_up is None:
+            break
+        p.step(0.05)
+    assert p.run_up is None and len(p.sweeps) == 2 and len(p.sweeps[0].vectors2) == len(p.sweeps[0])
+    assert "2X peak" in p.sweep_summary.text()
+    # The 3D view draws the stiff axis; the readout drops the heavy spot's lag, which 2X swamps.
+    assert p.view.stiff_axis.getData()[0].size == 2
+    assert "heavy spot leads" not in p.readout.text()
+    # The asymmetry chart fills in while the stability tab shows it.
+    p.tabs.setCurrentWidget(p.spectrum.parentWidget())
+    p.measure.setCurrentIndex(2)
+    assert p.stability_stack.currentWidget() is p.asymmetry_plot and p.asym_chart is not None
+    chart = p.asym_chart
+    for _ in range(5):
+        p._draw()
+    assert chart._next > 0 and "Working it out" in p.stability_note.text()
+    p.asymmetry.setValue(10.0)  # only the asymmetry: the same chart
+    p._refresh_analysis()
+    p._draw()
+    assert p.asym_chart is chart and p.asymmetry_plot.here[1] == pytest.approx(0.1)
+    chart.run()
+    p._draw()
+    assert p.asymmetry_plot.drawn == chart.growth.size and "Working it out" not in p.stability_note.text()
+    p.disc_mass.setValue(1.2)  # a new rotor: a new chart
+    p._refresh_analysis()
+    assert p.asym_chart is not chart
+    w.set_theme("Dark")
+    p.measure.setCurrentIndex(0)
+    assert p.stability_stack.currentWidget() is p.stability_map
+    # The matrices tab shows the turning stiffness.
+    p.tabs.setCurrentWidget(p.matrices)
+    p._refresh_matrices()
+    text = p.matrices.toPlainText()
+    assert "ΔK(φ)" in text and "Floquet" in text
+    p.set_system(RotorSystem())
+    p._refresh_analysis()
+    p._draw()
+    assert p.asymmetry.value() == 0.0 and not len(p.view.stiff_axis.getData()[0])
+    assert p.probe_order.currentIndex() == 1
+    assert "nothing drives 2X on a round shaft" in p.sweep_summary.text()

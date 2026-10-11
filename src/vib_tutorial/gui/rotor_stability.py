@@ -6,6 +6,10 @@ diagram, with the unstable region below zero shaded and the onset speed marked.
 The full spectrum transforms x + iy at one station over the strip chart's
 window: forward whirl at positive frequencies, backward at negative, with the
 ±1X lines and the free whirl frequencies at the current speed.
+
+The asymmetry chart (in place of the stability map) shades where the rotor is
+unstable against the shaft's asymmetry Δ and the speed, as an Ince–Strutt chart
+does a Mathieu equation's: a tongue between the two axes' critical speeds.
 """
 
 from __future__ import annotations
@@ -17,12 +21,12 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..core.rotor import RPM, Campbell, WhirlModes
-from ..core.rotor_stability import Onset, log_decrement, whirl_lines
+from ..core.rotor_stability import AsymmetryChart, Onset, log_decrement, whirl_lines
 from .style import colors
 
 DASH = QtCore.Qt.PenStyle.DashLine
 DOT = QtCore.Qt.PenStyle.DotLine
-MEASURES = ("Damping ratio ζ", "Log decrement δ")
+MEASURES = ("Damping ratio ζ", "Log decrement δ", "Asymmetry chart (Δ against speed)")
 FLOOR = 1e-4  # the spectrum's log scale starts this far below its highest line
 
 MAP_TIP = (
@@ -36,9 +40,21 @@ SPECTRUM_TIP = (
     "<p>The full spectrum of the orbit at the strip chart's station, over the strip chart's window: "
     "the Fourier transform of x + iy. Forward whirl (with the spin) shows at positive frequencies, "
     "backward whirl at negative ones; a straight-line vibration shows at both, half each.</p>"
-    "<p>The red lines are ±1X, the speed: the unbalance drives +1X. The thin dashed lines are the free "
+    "<p>The red lines are ±1X, the speed: the unbalance drives +1X (and +2X for an asymmetric shaft, "
+    "which its weight drives). The thin dashed lines are the free "
     "whirl frequencies at this speed. An unstable rotor whirls at its natural frequency, below +1X: a "
     "subsynchronous line that grows.</p>"
+)
+
+
+CHART_TIP = (
+    "<p>Where the rotor is unstable (shaded, darker where the whirl grows faster) against the shaft's "
+    "asymmetry Δ and the speed: an Ince–Strutt chart. The dashed lines are the critical speeds of a round "
+    "shaft as stiff as the soft axis, EI(1 − Δ), and as the stiff one, EI(1 + Δ). Between them, turning "
+    "with the shaft, the centrifugal force outweighs the soft axis's stiffness but not the stiff one's, and "
+    "with no damping the rotor is unstable throughout. Damping narrows the tongue and lifts its tip off "
+    "Δ = 0: a little asymmetry is harmless.</p><p>The dot is this rotor, at the speed now. The chart is "
+    "worked out a few cells at a time while the tab shows.</p>"
 )
 
 
@@ -76,9 +92,10 @@ class StabilityMap(pg.GraphicsLayoutWidget):
             p.addItem(item)
             self.legend.addItem(item, item.name())
         self.onset_line = pg.InfiniteLine(angle=90)
+        self.end_line = pg.InfiniteLine(angle=90)  # where an unstable band ends (an asymmetric shaft's)
         self.onset_label = pg.TextItem(anchor=(-0.05, 0.0))
         self.speed_line = pg.InfiniteLine(angle=90)
-        for item in (self.onset_line, self.onset_label, self.speed_line):
+        for item in (self.onset_line, self.end_line, self.onset_label, self.speed_line):
             p.addItem(item)
         self.result: Campbell | None = None
         self.onset: Onset | None = None
@@ -95,6 +112,7 @@ class StabilityMap(pg.GraphicsLayoutWidget):
             line.setPen(pg.mkPen(None))
         self.zero.setPen(pg.mkPen(colors.structure, width=1))
         self.onset_line.setPen(pg.mkPen(colors.force, width=1.5, style=DASH))
+        self.end_line.setPen(pg.mkPen(colors.force, width=1.5, style=DASH))
         self.onset_label.setColor(colors.force)
         self.speed_line.setPen(pg.mkPen(colors.force, width=2))
 
@@ -123,6 +141,7 @@ class StabilityMap(pg.GraphicsLayoutWidget):
         lo, hi = bottom - 0.15 * span, top + 0.08 * span
         self.region.setRegion((lo - span, 0.0))
         p.setRange(xRange=(0.0, max_rpm), yRange=(lo, hi), padding=0)
+        self.end_line.setVisible(onset is not None and math.isfinite(onset.end))
         if onset is None:
             self.onset_line.setVisible(False)
             self.onset_label.setText("")
@@ -130,7 +149,11 @@ class StabilityMap(pg.GraphicsLayoutWidget):
             x = onset.omega * RPM
             self.onset_line.setVisible(True)
             self.onset_line.setValue(x)
-            self.onset_label.setText(f"onset {x:,.0f} rpm")
+            if math.isfinite(onset.end):
+                self.end_line.setValue(onset.end * RPM)
+                self.onset_label.setText(f"unstable {x:,.0f}–{onset.end * RPM:,.0f} rpm")
+            else:
+                self.onset_label.setText(f"onset {x:,.0f} rpm")
             self.onset_label.setPos(x, hi)
 
     def set_speed(self, rpm: float) -> None:
@@ -156,7 +179,7 @@ class FullSpectrum(pg.PlotWidget):
         p.addItem(self.axis)
         self.curve = p.plot()
         self.sync = [pg.InfiniteLine(angle=90, label=text, labelOpts={"position": 0.92})
-                     for text in ("+1X", "−1X")]
+                     for text in ("+1X", "−1X", "+2X")]
         for line in self.sync:
             p.addItem(line)
         self.free: list[pg.InfiniteLine] = []
@@ -166,19 +189,19 @@ class FullSpectrum(pg.PlotWidget):
     def apply_theme(self) -> None:
         self.axis.setPen(pg.mkPen(colors.faint, width=1))
         self.curve.setPen(pg.mkPen(colors.strong, width=1.5))
-        for line, style in zip(self.sync, (QtCore.Qt.PenStyle.SolidLine, DOT)):
+        for line, style in zip(self.sync, (QtCore.Qt.PenStyle.SolidLine, DOT, DOT)):
             line.setPen(pg.mkPen(colors.force, width=1.5, style=style))
             line.label.setColor(colors.force)
         for line, forward in zip(self.free, self.free_forward):
             line.setPen(pg.mkPen(colors.mode[1] if forward else colors.mode[3], width=1, style=DASH))
 
     def update_spectrum(self, freqs: np.ndarray, amps: np.ndarray, omega: float, modes: WhirlModes | None,
-                        damped_limit: float) -> None:
-        """The spectrum, ±1X at speed Ω (rad/s), and the lightly damped modes' frequencies."""
+                        damped_limit: float, twice: bool = False) -> None:
+        """The spectrum, ±1X at speed Ω (rad/s) (and +2X if `twice`), and the lightly damped modes' frequencies."""
         f1 = omega / (2.0 * math.pi)
-        for line, sign in zip(self.sync, (1.0, -1.0)):
-            line.setVisible(f1 > 0)
-            line.setValue(sign * f1)
+        for line, order, shown in zip(self.sync, (1.0, -1.0, 2.0), (True, True, twice)):
+            line.setVisible(f1 > 0 and shown)
+            line.setValue(order * f1)
         p = self.getPlotItem()
         marks = [] if modes is None else [(f, f > 0) for f in whirl_lines(modes, damped_limit)]
         while len(self.free) < len(marks):  # a pool of lines, reused from one update to the next
@@ -190,7 +213,7 @@ class FullSpectrum(pg.PlotWidget):
             if i < len(marks):
                 line.setValue(marks[i][0])
                 self.free_forward[i] = marks[i][1]
-        reach = max([1.6 * f1, 1.3 * min((abs(f) for f, _ in marks), default=0.0), 20.0])
+        reach = max([(2.4 if twice else 1.6) * f1, 1.3 * min((abs(f) for f, _ in marks), default=0.0), 20.0])
         p.setXRange(-reach, reach, padding=0)
         if freqs.size:
             inside = np.abs(freqs) <= reach
@@ -201,3 +224,85 @@ class FullSpectrum(pg.PlotWidget):
         else:
             self.curve.setData([], [])
         self.apply_theme()
+
+
+class AsymmetryPlot(pg.PlotWidget):
+    """The asymmetry chart: unstable cells shaded by growth rate, the axes' critical speeds, this rotor."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setToolTip(CHART_TIP)
+        p = self.getPlotItem()
+        p.setLabel("bottom", "Spin speed", units="rpm")
+        p.setLabel("left", "Asymmetry Δ")
+        for side in ("bottom", "left"):
+            p.getAxis(side).enableAutoSIPrefix(False)
+        p.showGrid(x=True, y=True, alpha=0.15)
+        p.setMenuEnabled(False)
+        p.setMouseEnabled(x=False, y=False)
+        p.hideButtons()
+        self.image = pg.ImageItem(axisOrder="row-major")
+        self.image.setZValue(-10)
+        p.addItem(self.image)
+        self.soft = p.plot()
+        self.stiff = p.plot()
+        self.level = pg.InfiniteLine(angle=0)
+        self.speed_line = pg.InfiniteLine(angle=90)
+        self.dot = pg.ScatterPlotItem(size=10)
+        for item in (self.level, self.speed_line, self.dot):
+            p.addItem(item)
+        self.legend = pg.LegendItem(offset=(-5, 5), brush=colors.legend_brush(), labelTextColor=colors.foreground)
+        self.legend.setParentItem(p.vb)
+        self.legend.addItem(self.soft, "soft axis's critical")
+        self.legend.addItem(self.stiff, "stiff axis's critical")
+        self.chart: AsymmetryChart | None = None
+        self.drawn = -1  # the chart's cells worked out when it was last drawn
+        self.here = (0.0, 0.0)
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        self.soft.setPen(pg.mkPen(colors.mode[3], width=1.5, style=DASH))
+        self.stiff.setPen(pg.mkPen(colors.mode[1], width=1.5, style=DASH))
+        self.level.setPen(pg.mkPen(colors.faint, width=1))
+        self.speed_line.setPen(pg.mkPen(colors.force, width=1))
+        self.dot.setBrush(pg.mkBrush(colors.force))
+        self.dot.setPen(pg.mkPen(colors.background, width=1.5))
+        self.legend.setBrush(colors.legend_brush())
+        self.legend.setLabelTextColor(colors.foreground)
+        self.set_chart(self.chart)
+
+    def set_chart(self, chart: AsymmetryChart | None) -> None:
+        """Draw the chart as far as it is worked out."""
+        self.chart = chart
+        self.drawn = -1 if chart is None else chart._next
+        if chart is None:
+            self.image.clear()
+            for curve in (self.soft, self.stiff):
+                curve.setData([], [])
+            return
+        growth = chart.growth
+        rgba = np.zeros(growth.shape + (4,), dtype=np.uint8)
+        c = QtGui.QColor(colors.force)
+        rgba[..., :3] = c.red(), c.green(), c.blue()
+        unstable = np.nan_to_num(growth, nan=-1.0) > 0.0
+        if unstable.any():
+            # Darker where it grows faster: by the rate's log, over a decade and a half below the fastest.
+            g = np.log10(np.where(unstable, growth, 1.0))
+            top = float(g[unstable].max())
+            rgba[..., 3] = np.where(unstable, 70 + 170 * np.clip((g - top + 1.5) / 1.5, 0.0, 1.0), 0)
+        rgba[np.isnan(growth)] = (*[int(v) for v in QtGui.QColor(colors.faint).getRgb()[:3]], 40)
+        rpm, deltas = chart.omegas * RPM, chart.asymmetries
+        dw, dd = rpm[1] - rpm[0], deltas[1] - deltas[0]
+        self.image.setImage(rgba, autoLevels=False)
+        self.image.setRect(QtCore.QRectF(rpm[0] - dw / 2, deltas[0] - dd / 2, rpm[-1] - rpm[0] + dw,
+                                         deltas[-1] - deltas[0] + dd))
+        self.soft.setData(chart.soft * RPM, deltas, connect="finite")
+        self.stiff.setData(chart.stiff * RPM, deltas, connect="finite")
+        self.getPlotItem().setRange(xRange=(rpm[0], rpm[-1]), yRange=(deltas[0], deltas[-1]), padding=0.02)
+        self.set_here(*self.here)
+
+    def set_here(self, rpm: float, asymmetry: float) -> None:
+        self.here = (rpm, asymmetry)
+        self.level.setValue(asymmetry)
+        self.speed_line.setValue(rpm)
+        self.dot.setData([rpm], [asymmetry])

@@ -8,7 +8,7 @@ from collections.abc import Collection
 
 import numpy as np
 
-from ..core.rotor import DOF_NAMES, MODE_LIMIT, RPM, XD, YD, RotorSystem, whirl_modes
+from ..core.rotor import DOF_NAMES, MODE_LIMIT, RPM, XD, YD, RotorSystem, gravity_response, whirl_modes
 from .cms_notes import fmt
 from .style import colors
 
@@ -104,6 +104,31 @@ def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = (
             f"<td align='right'>{w:+.2f}</td><td>{whirl_name(w)}</td></tr>"
         )
     rpm = omega * RPM
+    if s.asymmetry:
+        Kc, _ = s.deviatoric
+        asymmetric = (
+            f"<h4>The asymmetric shaft ΔK(φ)</h4><p>The shaft is stiffer bending toward its stiff axis, at "
+            f"θ = φ + α from x (α = {math.degrees(s.asymmetry_angle):.0f}° from the mark), than across it: "
+            f"EI(1 ± Δ) with Δ = {s.asymmetry:.3g}. Its stiffness less the mean (K<sub>shaft</sub>, in K) is, "
+            "in each plane pair,</p><p align='center'>ΔK(φ) = Δ [cos 2θ K<sub>shaft</sub> &nbsp; sin 2θ "
+            "K<sub>shaft</sub> ; sin 2θ K<sub>shaft</sub> &nbsp; −cos 2θ K<sub>shaft</sub>]</p><p>or, as "
+            "f<sub>x</sub> + i f<sub>y</sub>, −ΔK<sub>shaft</sub>e<sup>2iθ</sup>(x − iy). It turns with the "
+            "shaft, twice per revolution as seen from the bearings, so the equations have a periodic "
+            "stiffness and no fixed modes. Here it is with the stiff axis along x (θ = 0):</p>"
+            + _matrix(Kc, labels, groups, "ΔK(θ = 0)")
+            + "<p>In coordinates turning with the shaft, q = R(φ)r, it is constant, and so is everything "
+            "else if the supports are isotropic: M r̈ + (C + ΩG + 2ΩMJ) ṙ + (K + ΩH + ΔK(0) − Ω²M + ΩCJ + "
+            "Ω²GJ) r = R<sup>T</sup>f. The −Ω²M is the centrifugal force: between the two critical speeds it "
+            "outweighs the soft axis's stiffness but not the stiff one's, and the whirl grows, locked to 1X. "
+            + ("Here the supports are isotropic, so the modes below come from that constant system."
+               if s.isotropic_supports else
+               "Here the supports are not isotropic, so the modes below come from Hill's method instead: the "
+               "periodic system's Floquet exponents, from its harmonics up to ±3 × 2Ω.")
+            + " The time stepping takes each step as half a step of the rest (the exact update), the kick "
+            "of ΔK at mid-step on the velocities, and the other half step.</p>"
+        )
+    else:
+        asymmetric = ""
     if s.overhung:
         near, far = ("B", "A") if s.a > s.length else ("A", "B")
         elements = (f"Two Euler–Bernoulli beam elements: the span between the bearings (L = {s.length:.4g} m) and "
@@ -148,7 +173,23 @@ def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = (
         swirl = ""
     fb = ks @ s.bow_shape() * s.bow
     bow_journals = f"{fmt(-fb[0], 1.0)} N at A and {fmt(-fb[3], 1.0)} N at B"
-    if s.gravity:
+    if s.gravity and s.asymmetry:
+        qs = s.static_deflection(omega)
+        q2 = gravity_response(s, [omega])[1][0]
+        gravity = (
+            f"<h4>Gravity</h4><p>On a horizontal rotor f also holds the weights, constant: "
+            f"−m<sub>A</sub>g, −mg and −m<sub>B</sub>g on y<sub>A</sub>, y<sub>D</sub> and y<sub>B</sub> "
+            f"(here {fmt(s.disc_mass * s.gravity, 1.0)} N on the disc)"
+            + (f", and the shaft's own weight, {fmt(s.shaft_mass * s.gravity, 1.0)} N" if s.density else "")
+            + ". On the asymmetric shaft a constant force meets a stiffness that turns, so the rotor never "
+            "settles: its steady state is periodic, q = Q<sub>0</sub> + Re(Q<sub>2</sub>e<sup>2iφ</sup>)"
+            + ("" if s.isotropic_supports else " + (4X, ...)") + ", found by harmonic balance (each "
+            "harmonic k of the response is tied to k ± 2 by ΔK). The mean sag Q<sub>0</sub> puts the disc at "
+            f"({qs[XD] * 1e6:.4g}, {qs[YD] * 1e6:.4g}) µm; about it the disc whirls at 2X, "
+            f"{abs(q2[XD]) * 1e6:.4g} µm in x and {abs(q2[YD]) * 1e6:.4g} µm in y at this speed, most where 2Ω "
+            "meets a natural frequency: the gravity critical.</p>"
+        )
+    elif s.gravity:
         qs = s.static_deflection(omega)
         gravity = (
             f"<h4>Gravity</h4><p>On a horizontal rotor f also holds the weights, constant: "
@@ -194,7 +235,7 @@ def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = (
              "(I<sub>d</sub> − I<sub>p</sub>)τe<sup>iγ</sup>." if any(p.disc for p in s.plane_weights) else "")
     return f"""
 <h3>Equations of motion at {rpm:,.0f} rpm (Ω = {omega:.4g} rad/s)</h3>
-<p style='font-size:large' align='center'>M q̈ + (C + Ω G) q̇ + (K + Ω H) q = f(t)</p>
+<p style='font-size:large' align='center'>M q̈ + (C + Ω G) q̇ + (K + Ω H{" + ΔK(φ)" if s.asymmetry else ""}) q = f(t)</p>
 <p>q = [x<sub>A</sub>, x<sub>D</sub>, θ<sub>x</sub>, x<sub>B</sub> | y<sub>A</sub>, y<sub>D</sub>,
 θ<sub>y</sub>, y<sub>B</sub>]: the journals' displacements at A and B, the disc's displacement, and the
 shaft's slope at the disc (θ<sub>x</sub> = dx/dz, θ<sub>y</sub> = dy/dz), first in the horizontal x–z
@@ -234,6 +275,7 @@ fluid-film bearing's swirl adds its λc at the journal, where K has k<sub>xy</su
 along its orbit: per cycle it puts in energy where C takes it out. Damping falls off as the speed rises,
 and past the onset the whirl grows.</p>
 {_mat(omega * H, "Ω H")}
+{asymmetric}
 
 <h4>State space</h4>
 <p>With z = [q, q̇] the equations become z' = A(Ω) z + B u, u = f the force (or moment) on each
@@ -249,7 +291,7 @@ conjugate pairs. The modes at this speed, lowest first:</p>
 <p><small>Whirl ratio: +1 for a circular forward whirl (the same way as the spin, x toward y), −1 for
 circular backward whirl, 0 for a straight line; in between, an ellipse. The stations are weighted by
 their masses (and the slopes by I<sub>d</sub>). A negative ζ is a mode that grows: the rotor is unstable
-at this speed.</small></p>
+at this speed.{" For the asymmetric shaft these are Floquet modes, e<sup>λt</sup> times a motion periodic in φ: each is listed by its harmonic with the most kinetic energy, and a mode locked to 1X sits at exactly the speed." if s.asymmetry else ""}</small></p>
 
 <h4>The 1X forces</h4>
 <p>{unbalance} turns with the shaft, the keyphasor mark at angle φ (φ' = Ω). For the heavy spot at the
@@ -460,9 +502,9 @@ are always of the vibration).</p>
 <p>The model is linear, so the sag is a static deflection q<sub>s</sub> = (K + ΩH)<sup>−1</sup>f<sub>g</sub>
 and the vibration about it is exactly what it would be without gravity. In particular gravity alone
 makes no whirl, however different the supports' stiffness vertically and horizontally: a constant force
-on a linear rotor only moves its equilibrium. (A real rotor is less simple: a shaft stiffer one way than the other, with a keyway
-say, bends more under its weight twice per turn, a 2X excitation; and a fluid-film bearing's stiffness
-depends on the load it carries.)</p>
+on a linear rotor only moves its equilibrium. (A shaft stiffer one way than the other is the exception:
+it bends more under its weight twice per turn, a 2X excitation; see <i>The asymmetric shaft</i> below.
+And a fluid-film bearing's stiffness depends on the load it carries.)</p>
 <p>The sag need not be straight down. Where the stiffness is not symmetric the weight also pushes
 sideways. With cross-coupled bearings, k<sub>xy</sub> = 15,000 N/m, the journals settle 17° from the
 vertical in the direction of rotation, much as a fluid-film journal sits at an <i>attitude angle</i>.
@@ -595,6 +637,53 @@ unbalance shows at +1X, and the instability as a growing line below it on the fo
 linear, so the whirl would grow for ever; in a machine it grows until something rubs or the bearing's
 nonlinearity holds it to a limit cycle. The page pauses when it reaches 2% of the span.</p>
 
+<h3>The asymmetric shaft: a two-pole rotor</h3>
+<p>The rotor of a two-pole generator has slots for its winding cut along two sides, so it is stiffer
+bending one way than the other; a keyway or a flat does the same on a smaller scale (and a crack, that
+opens and closes, is a cousin). Set the <i>Asymmetry</i> ±Δ in the <i>Shaft and disc</i> box: bending
+toward its stiff axis the shaft has EI(1 + Δ), across it EI(1 − Δ). The angle is the stiff axis's from
+the keyphasor mark, drawn as the dashed diameter across the disc in the 3D view. That stiffness turns with
+the shaft, so seen from the bearings it changes twice per revolution:
+K(φ) = K + ΔK(2(φ + α)). The equations have a periodic coefficient, and three things follow.</p>
+<p><b>Two critical speeds, and an unstable band between them.</b> Seen from axes turning with the shaft
+the stiffness stands still (and so does everything else, on isotropic supports), but the centrifugal
+force −mΩ² and the Coriolis force join in. To hold a deflection along an axis the shaft needs more
+stiffness there than mΩ². Below the soft axis's critical speed it has it both ways. Between the two
+axes' critical speeds the centrifugal force beats the soft axis but not the stiff one, so a bend along
+the soft axis grows. It turns with the shaft, so from the bearings it is a forward whirl locked at
+exactly 1X, growing. Undamped, that band runs exactly between the critical speeds of round shafts as
+stiff as each axis: with Δ = 0.15 and undamped supports, 1479 to 1645 rpm. Damping narrows it, and
+below a threshold asymmetry there is none: Δ = 0.123 with the defaults' 100 N·s/m supports, 0.178 with
+400 N·s/m. Unlike the instabilities above, it ends: past the stiff axis's critical speed the rotor is
+stable again. Choose <i>Asymmetry chart</i> on the <i>Stability</i> tab to map it against Δ and the
+speed. It is an Ince–Strutt chart, like a Mathieu equation's, with one tongue between the two dashed
+critical speeds, its tip lifted off Δ = 0 by the damping. Load the <i>Two-pole rotor</i> preset
+(Δ = 0.15): its critical speeds are 1491 and 1665 rpm, and it is unstable from 1527 to 1631 rpm. Tap it
+at 1580 rpm and the whirl grows ×e every 0.56 s at 26.3 Hz: the speed, not a natural frequency.</p>
+<p><b>The gravity critical.</b> Laid horizontal, the shaft's weight is a constant force on a stiffness
+that turns, so the rotor never settles. Its deflection swings twice per revolution about a mean sag:
+a <b>2X</b> whirl, largest where 2Ω meets a natural frequency, near <b>half the critical speed</b>. The
+preset's disc whirls 447 µm at 2X at 785 rpm, more than its mean sag of 384 µm. On the Bode plot, choose
+<i>2X</i> beside the probe: run up and coast down from 500 to 1200 rpm at 200 rpm/s and they reach 93%
+and 94% of the steady-state peak. A 2X peak at half the first critical speed on a run-up is the classic
+signature of a two-pole generator (or a cracked shaft). Balancing does nothing to it.</p>
+<p><b>The unbalance angle.</b> With an asymmetric shaft the 1X response depends on where the heavy spot
+sits from the stiff axis, not only on its size. With Δ = 0.10, the supports' damping holding it stable,
+and the 20 g·mm unbalance: along the stiff axis the disc's orbit peaks at 827 µm (1589 rpm), along the
+soft axis at 848 µm (1576 rpm), but at 45° between them it has two lower peaks, 201 µm at 1547 rpm and
+195 µm at 1624 rpm. A round shaft peaks at 217 µm. So the response is no longer a complex number times
+the unbalance: turn the heavy spot by 90° and the response does not turn by 90°. Influence coefficients
+(see <i>Balancing</i>) then hold only approximately.</p>
+<p><b>How it is worked out.</b> In axes turning with the shaft on isotropic supports the rotor is
+time-invariant, so its modes are exact: each is seen from the bearings as a forward and a backward
+circle, at μ ± iΩ, and is listed at the one with more kinetic energy. On anisotropic supports the
+modes come from Hill's method, the Floquet exponents of the periodic system from its harmonics up to
+±3 × 2Ω. The steady states (the unbalance's 1X, gravity's mean sag and 2X) come from harmonic balance:
+the turning stiffness ties each harmonic k to k ± 2, which closes at once on isotropic supports (1X stays
+1X; the sag gives a forward 2X) and is cut at ±6X otherwise. The time stepping splits each step: half a
+step of the rest (the exact update), the kick of the turning stiffness at mid-step on the velocities,
+and the other half step. It agrees with the harmonic balance to about 10<sup>−5</sup>.</p>
+
 <h3>Waterfall and cascade plots</h3>
 <p>A spectrum analyser on a machine takes the spectrum of a block of signal, then of the next, and so
 on. The <i>Waterfall</i> tab does the same with the full spectrum of the orbit at a station: blocks of
@@ -725,6 +814,14 @@ then stay at one frequency.</li>
 shaft bends in its second mode, the one the dashed massless model doesn't have. Then set <i>Beam
 elements</i> to 2 and to 4, consistent and lumped, and watch the second critical move on the Campbell
 diagram.</li>
+<li>Load the <i>Two-pole rotor</i> preset, choose <i>Orbit</i> and <i>2X</i> beside the probe, and run up
+and coast down from 500 to 1200 rpm at 200 rpm/s: the 2X peaks at 785 rpm, half the critical speeds.
+On the <i>Stability</i> tab choose <i>Asymmetry chart</i>, set the target to 1580 rpm and tap the disc:
+the dot sits inside the tongue and the whirl grows at exactly 1X. Raise the support damping to 400 N·s/m
+(both directions) and the band is gone: the threshold rises to Δ = 0.178.</li>
+<li>Untick <i>Horizontal rotor</i> on the <i>Two-pole rotor</i> preset, set the asymmetry to 10% and the
+unbalance to 20 g·mm, and look at the disc's orbit on the Bode plot with the heavy spot at 0°, 45° and
+90°: one tall peak, two short ones, one tall one.</li>
 <li>Pause near the critical speed and turn the 3D view: the shaft bows in one plane, which turns with
 the spin, rather than flapping back and forth.</li>
 </ol>
@@ -756,5 +853,7 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>δ<sub>b</sub>, β</td><td>shaft bow at the disc, and its angle from the keyphasor mark</td><td>m (µm), rad</td></tr>
 <tr><td>T, W, α</td><td>trial and correction weights (mass × radius at an angle); influence coefficient (V<sub>1</sub> − V<sub>0</sub>)/T</td><td>kg·m (g·mm); m per kg·m</td></tr>
 <tr><td>τ, γ</td><td>disc skew (its axis's tilt from the shaft's), and its angle from the keyphasor mark</td><td>rad (°)</td></tr>
+<tr><td>Δ, α</td><td>shaft asymmetry (EI(1 ± Δ) about its stiff and soft axes), and the stiff axis's angle from the keyphasor mark</td><td>—, rad (°)</td></tr>
+<tr><td>ΔK(φ)</td><td>the asymmetric shaft's stiffness less its mean, turning with it</td><td>N/m</td></tr>
 </table>
 """
