@@ -149,3 +149,37 @@ def test_log_decrement():
     assert log_decrement(0.0) == 0.0
     assert log_decrement(0.046) == pytest.approx(0.2893, abs=1e-4)
     assert log_decrement(np.array([-0.01]))[0] < 0
+
+
+def test_fluid_swirl_is_cross_coupling_growing_with_speed():
+    swirl = Bearing(cx=150.0, cy=50.0, swirl=0.4)
+    s = RotorSystem(bearing_a=swirl, bearing_b=Bearing(kxy=1e3, swirl=0.5))
+    w = 3000.0 / RPM
+    kxy = s.cross_coupling(w)
+    assert kxy == pytest.approx((0.4 * 100.0 * w, 1e3 + 0.5 * 100.0 * w))  # c is the mean of cx and cy
+    fixed = RotorSystem(bearing_a=Bearing(cx=150.0, cy=50.0, kxy=kxy[0]), bearing_b=Bearing(kxy=kxy[1]))
+    np.testing.assert_allclose(s.stiffness(w), fixed.stiffness(w), atol=1e-9)
+    assert s.speed_dependent and not fixed.speed_dependent
+    with pytest.raises(ValueError):
+        RotorSystem(bearing_a=Bearing(swirl=-0.1))
+
+
+@pytest.mark.parametrize("damping", [100.0, 400.0])
+def test_oil_whip_starts_where_the_swirl_outruns_the_whirl(damping):
+    # With only the bearings' damping, the forward whirl at ω grows once λΩ > ω, however large c is.
+    for swirl in (0.5, 0.45):
+        bearing = Bearing(cx=damping, cy=damping, swirl=swirl)
+        onset = stability_onset(RotorSystem(bearing_a=bearing, bearing_b=bearing), MAX)
+        assert onset is not None and onset.whirl > 0
+        assert onset.order == pytest.approx(swirl, rel=1e-3)
+    # Above it the whirl stays near the natural frequency (whip), well below ½X.
+    zeta, f, _ = least_damped(RotorSystem(bearing_a=bearing, bearing_b=bearing), 2 * onset.omega)
+    assert zeta < 0 and f < 1.1 * onset.freq_hz and 2 * math.pi * f / (2 * onset.omega) < 0.3
+
+
+def test_swirl_turns_the_static_sag_with_speed():
+    bearing = Bearing(swirl=0.5)
+    s = RotorSystem(bearing_a=bearing, bearing_b=bearing, gravity=9.81)
+    q = s.static_deflection(np.array([0.0, 2000.0 / RPM]))
+    assert q[0, XD] == pytest.approx(0.0, abs=1e-12) and q[1, XD] > 1e-6  # pushed sideways, with the spin
+    np.testing.assert_allclose(q[1], s.static_deflection(2000.0 / RPM))

@@ -1741,3 +1741,70 @@ def test_rotor_page(app):
     assert p.sim.system == system
     p.tabs.setCurrentWidget(p.matrices)
     assert "Ω H" in p.matrices.toHtml()
+
+
+def test_rotor_presets_speed_range_and_overhung_disc(app):
+    from vib_tutorial.core.rotor import RPM, RotorSystem
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.rotor import CUSTOM
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    # The defaults are the classic preset.
+    assert p.preset.currentText() == "Classic Jeffcott rotor" and "1584 rpm" in p.preset_note.text()
+
+    # Each preset loads its rotor, speed range and target, from rest, and the panels show it exactly.
+    for preset in p.presets:
+        p.load_preset(preset.name)
+        p._refresh_analysis()
+        assert p.preset.currentText() == preset.name
+        assert p.top_rpm == preset.top_rpm and p.speed_slider.maximum() == int(preset.top_rpm)
+        assert p.sim.target == pytest.approx(preset.target_rpm / RPM) and p.sim.t == 0.0
+        assert p.campbell.omega[-1] == pytest.approx(preset.top_rpm / RPM)
+        for _ in range(5):
+            p.step(0.02)
+
+    # The overhung rotor: the disc past bearing B, drawn beyond it; one forward critical.
+    p.load_preset("Overhung rotor")
+    p._refresh_analysis()
+    assert p.sim.system.overhung and "3EI/(c²(L + c))" in p.shaft_note.text()
+    assert "1,284 rpm" in p.crit_label.text()
+    disc, bearing_b = p.view._z(p.sim.system.a), p.view._z(p.sim.system.length)
+    assert disc > bearing_b and disc == pytest.approx(2.0)  # the overhang's end is the shaft's end
+    p.tabs.setCurrentWidget(p.matrices)
+    assert "overhang" in p.matrices.toHtml()
+    # Editing a parameter makes it the user's own rotor.
+    p.disc_mass.setValue(2.0)
+    assert p.preset.currentText() == CUSTOM
+
+    # The position steps over the bearings, and a typed value on one is moved off it.
+    p.set_system(RotorSystem(position=0.95))
+    p.position.stepBy(1)
+    assert p.position.value() == pytest.approx(1.05) and p.sim.system.position == pytest.approx(1.05)
+    p.position.setValue(0.0)
+    assert p.sim.system.position == pytest.approx(0.02)
+
+    # The speed range: the controls and the analysis follow it, and a target above it comes down.
+    p.set_target_rpm(8000.0)
+    p.top_speed.setValue(4000.0)
+    p._refresh_analysis()
+    assert p.target_rpm.value() == 4000.0 and p.sim.target == pytest.approx(4000.0 / RPM)
+    assert p.sweep_to.maximum() == 4000.0 and p.campbell.omega[-1] == pytest.approx(4000.0 / RPM)
+    p.top_speed.setValue(30_000.0)
+    p._refresh_analysis()
+    assert p.speed_slider.maximum() == 30_000 and "up to 30,000 rpm" in p.crit_label.text()
+    # The order lines are drawn on request.
+    assert not p.campbell_plot.orders[2.0].isVisible()
+    p.order_boxes[2.0].setChecked(True)
+    p.order_boxes[0.5].setChecked(True)
+    assert p.campbell_plot.orders[2.0].isVisible() and p.campbell_plot.order_labels[0.5].isVisible()
+    x, y = p.campbell_plot.orders[0.5].getData()
+    assert x[-1] == 30_000.0 and y[-1] == pytest.approx(0.5 * 30_000.0 / 60.0)
+
+    # The swirl ratio goes through the panel (B follows A) and onto the stability note.
+    p.bearing_rows[0][6].setValue(0.5)
+    assert p.sim.system.bearing_a.swirl == 0.5 == p.sim.system.bearing_b.swirl
+    p._refresh_analysis()
+    assert "swirl λ = 0.5" in p.stability_note.text() and "unstable above" in p.stability_note.text()

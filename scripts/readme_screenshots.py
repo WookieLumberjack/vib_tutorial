@@ -470,12 +470,30 @@ def jeffcott_stability():
     save(w, "jeffcott_stability")
 
 
+def jeffcott_overhung():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.load_preset("Overhung rotor")
+    page._refresh_analysis()
+    page.order_boxes[0.5].setChecked(True)
+    page.ramp.setValue(2000.0)
+    page.set_target_rpm(1250.0)
+    for _ in range(200):
+        page.step(0.02)
+    print(page.readout.text())
+    save(w, "jeffcott_overhung")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
-         jeffcott_bow, jeffcott_balancing, jeffcott_stability]
+         jeffcott_bow, jeffcott_balancing, jeffcott_stability, jeffcott_overhung]
 
 
 def main(names: list[str]) -> None:

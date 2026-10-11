@@ -89,6 +89,23 @@ def matrices_html(system: RotorSystem, omega: float, hidden: bool = False) -> st
             f"<td align='right'>{w:+.2f}</td><td>{whirl_name(w)}</td></tr>"
         )
     rpm = omega * RPM
+    if s.overhung:
+        near, far = ("B", "A") if s.a > s.length else ("A", "B")
+        elements = (f"Two Euler–Bernoulli beam elements: the span between the bearings (L = {s.length:.4g} m) and "
+                    f"the overhang from bearing {near} to the disc (c = {s.overhang:.4g} m), with EI = {s.ei:.4g} N·m². "
+                    f"The disc sits at a = {s.a:.4g} m from A, outside the bearings.")
+        disc_k = f"3EI/(c²(L + c)) = {s.disc_stiffness:,.0f} N/m for the overhung disc"
+    else:
+        elements = (f"Two Euler–Bernoulli beam elements, A to the disc (a = {s.a:.4g} m) and the disc to B "
+                    f"(b = {s.b:.4g} m), with EI = {s.ei:.4g} N·m².")
+        disc_k = f"3EIL/(a²b²) = {s.disc_stiffness:,.0f} N/m"
+    kxy_a, kxy_b = s.cross_coupling(omega)
+    if s.bearing_a.swirl or s.bearing_b.swirl:
+        swirl = (f" With fluid swirl the cross-coupling grows with the speed, k<sub>xy</sub> + λcΩ, and that part "
+                 f"sits in ΩH (below): at this speed k<sub>xy</sub> is {fmt(kxy_a, 1.0)} N/m at A and "
+                 f"{fmt(kxy_b, 1.0)} N/m at B in all.")
+    else:
+        swirl = ""
     fb = ks @ s.bow_shape() * s.bow
     bow_journals = f"{fmt(-fb[0], 1.0)} N at A and {fmt(-fb[3], 1.0)} N at B"
     if s.gravity:
@@ -128,12 +145,11 @@ journal. Only the bearings' cross-coupled stiffness k<sub>xy</sub> joins the two
 K[x, y] = k<sub>xy</sub> and K[y, x] = −k<sub>xy</sub> at each journal (here
 {fmt(s.bearing_a.kxy, 1.0)} N/m at A and {fmt(s.bearing_b.kxy, 1.0)} N/m at B). That part is
 skew-symmetric, so K is symmetric only without it; with isotropic supports and no cross-coupling K has
-two identical blocks.</p>
+two identical blocks.{swirl}</p>
 {_mat(M, "M")}<br>{_mat(K, "K")}
 
 <h4>The shaft (one plane)</h4>
-<p>Two Euler–Bernoulli beam elements, A to the disc (a = {s.a:.4g} m) and the disc to B
-(b = {s.b:.4g} m), with EI = {s.ei:.4g} N·m². The bearings carry no moment, so the slopes at A and B are
+<p>{elements} The bearings carry no moment, so the slopes at A and B are
 condensed out (they follow the four DOFs kept). Moving the whole shaft sideways, or tilting it rigidly,
 takes no force: K<sub>shaft</sub>[1, 1, 0, 1]<sup>T</sup> = 0 and K<sub>shaft</sub>[0, a, 1, L]<sup>T</sup> = 0.
 The supports hold it.</p>
@@ -142,7 +158,7 @@ The supports hold it.</p>
 <h4>Damping C and the gyroscopic matrix Ω G</h4>
 <p>C has the support dampers, and the shaft's internal damping η K<sub>shaft</sub> in each plane
 (η = c<sub>i</sub>/k<sub>disc</sub> = {s.loss_time:.4g} s, so that it is c<sub>i</sub> =
-{s.internal_damping:g} N·s/m on the disc's own stiffness k<sub>disc</sub> = 3EIL/(a²b²)). G has just two entries, ±I<sub>p</sub> = ±{s.ip:.4g} kg·m², joining
+{s.internal_damping:g} N·s/m on the disc's own stiffness k<sub>disc</sub> = {disc_k}). G has just two entries, ±I<sub>p</sub> = ±{s.ip:.4g} kg·m², joining
 the disc's two slopes, one plane to the other. It is <b>skew-symmetric</b> (G<sup>T</sup> = −G), so
 q̇<sup>T</sup>(ΩG)q̇ = 0: unlike C, it takes no power out. It only turns the motion from one plane into
 the other, and it grows with the speed.</p>
@@ -151,9 +167,11 @@ the other, and it grows with the speed.</p>
 <h4>The circulatory matrix Ω H</h4>
 <p>The internal damping acts on the bending rate the spinning shaft sees, q̇ − ΩJq in fixed
 coordinates (J turns x toward y). The −ΩJq part becomes a stiffness that grows with the speed,
-ΩH = Ωη[0 K<sub>shaft</sub>; −K<sub>shaft</sub> 0], skew-symmetric like the cross-coupling in K. A skew
-stiffness pushes a forward whirl along its orbit: per cycle it puts in energy where C takes it out.
-Damping falls off as the speed rises, and past the onset the whirl grows.</p>
+ΩH = Ωη[0 K<sub>shaft</sub>; −K<sub>shaft</sub> 0], skew-symmetric like the cross-coupling in K. A
+fluid-film bearing's swirl adds its λc at the journal, where K has k<sub>xy</sub> (here λ =
+{s.bearing_a.swirl:g} at A and {s.bearing_b.swirl:g} at B). A skew stiffness pushes a forward whirl
+along its orbit: per cycle it puts in energy where C takes it out. Damping falls off as the speed rises,
+and past the onset the whirl grows.</p>
 {_mat(omega * H, "Ω H")}
 
 <h4>State space</h4>
@@ -250,6 +268,22 @@ tilting, so the gyroscopic moment never enters the first mode; only the disc's o
 mode, high above, splits. Move the disc off centre, or make the bearings different, and the
 translation and tilt couple: the first mode splits too, and its critical speed moves.</p>
 
+<h3>The overhung rotor</h3>
+<p>Fans, pump impellers and many small turbines carry their disc outside the bearings, on an overhang
+(a/L &gt; 1 past bearing B, or below 0 past A). The shaft is then a span between the bearings and a
+cantilever beyond, and at the disc it is stiffness 3EI/(c²(L + c)) for an overhang c. Pushed sideways
+the overhung disc tilts as much as it moves: in the first mode its slope is about 1/c of its
+displacement. So the gyroscopic moment, small for a disc between the bearings, acts on the first mode
+in full, and the forward and backward criticals separate strongly.</p>
+<p>The <i>Overhung rotor</i> preset puts a 3 kg disc of radius 150 mm 100 mm past bearing B, on
+supports of 200,000 N/m. At rest its first mode is 14.5 Hz (870 rpm). Spinning, the forward whirl
+stiffens and the backward one softens: 21.4 and 8.6 Hz at 1284 rpm, 28.9 and 3.1 Hz at 5000 rpm. The
+backward branch meets the 1X line at 664 rpm and the forward one at <b>1284 rpm</b>, 48% above the
+critical speed the same rotor would have without the gyroscopic effect (870 rpm, I<sub>p</sub> = 0), and
+above the textbook estimate that ignores the tilt (1046 rpm). The unbalance drives only the forward
+crossing, so that is the one critical speed it shows. The disc's conical mode (53 Hz at rest) has a
+forward branch rising faster than 1X (I<sub>p</sub> = 2I<sub>d</sub>): it is never critical.</p>
+
 <h3>The Campbell diagram and critical speeds</h3>
 <p>Plotting each damped natural frequency against the spin speed gives the Campbell diagram. The
 unbalance turns once per revolution, so it drives at f = Ω/2π: the 1X line. Where a whirl frequency
@@ -257,6 +291,13 @@ crosses the 1X line, the unbalance drives that mode at its own natural frequency
 speed</b>. In an isotropic rotor the unbalance is a purely forward rotating force, so it drives only
 the forward branches; the backward crossings are critical only for an anisotropic rotor (or for other
 excitations).</p>
+<p>Other excitations come at other multiples of the speed, and the Campbell diagram can draw their
+lines (<i>Also draw</i>), as far up in speed as <i>Speeds up to</i> is set. <b>2X</b>: a shaft stiffer
+one way than the other (a keyway, a crack) flexes twice per revolution under its own weight, and
+misalignment pulls twice per revolution; where a forward branch meets 2X, at about half its critical
+speed, such a rotor has a <i>secondary critical</i>. <b>½X</b>: the oil in a plain journal bearing
+circulates at about half the shaft's speed, so its instability begins near ½X (below). The model has no
+2X source and no ½X source; the lines show where a real machine would have trouble.</p>
 
 <h3>Anisotropic supports and backward whirl</h3>
 <p>Supports stiffer vertically than horizontally (common: gravity, foundations, oil-film bearings) split
@@ -415,10 +456,20 @@ whirl, 2πk<sub>xy</sub>r² per cycle, where a damper c takes out 2πcωr². So 
 damping and the backward ones gain it, and once k<sub>xy</sub> passes cω the forward mode grows. With the
 defaults the threshold is k<sub>xy</sub> = 16,400 N/m at both bearings, close to cω = 16,600 N/m for
 their 100 N·s/m at the 26.4 Hz whirl (ζ of the forward mode
-0.046 → 0.033 → 0.019 → 0.004 at 0, 5,000, 10,000 and 15,000 N/m). In a real bearing k<sub>xy</sub>
-grows with speed, roughly as cΩ/2 (the oil swirls at about half the shaft speed), which is why plain
-journal bearings go unstable above about twice the first critical, whirling at about half the speed
-(<i>oil whip</i>). Here k<sub>xy</sub> is a constant, so read it as the value at the speed of interest.</p>
+0.046 → 0.033 → 0.019 → 0.004 at 0, 5,000, 10,000 and 15,000 N/m).</p>
+<p><b>Oil whirl and oil whip.</b> In a real fluid-film bearing k<sub>xy</sub> is not constant: the oil
+film is dragged round at a fraction λ of the shaft's speed (λ ≈ 0.5 in a plain journal bearing, the
+fluid sticking to the turning journal and to the still bearing), and the cross-coupling grows with it,
+k<sub>xy</sub> = λcΩ for a bearing of damping c. The energy balance above then reads λcΩ against cω:
+the forward whirl at ω grows once <b>λΩ &gt; ω</b>, the oil's swirl outrunning the whirl, whatever the
+damping. With λ = 0.5 the rotor goes unstable at <b>twice its first natural frequency</b>. Set λ in the
+bearing table, or load the <i>Fluid-film bearings</i> preset: the onset is 3136 rpm, twice the forward
+whirl's 26.1 Hz, and just there the whirl is at exactly ½X. Faster, it stays locked at the natural
+frequency (26.3 Hz, 0.32×, at 5000 rpm, growing by e every 0.22 s): <i>oil whip</i>, the ratio to the
+speed falling as the speed rises. Raising the damping does not help, since it raises the cross-coupling
+with it; real machines use bearings that break up the swirl (tilting pads, pressure dams) or lower λ
+with anti-swirl devices. A real oil film also stiffens as the journal moves off-centre, so the
+whirl settles to a limit cycle of about the clearance; the linear model grows for ever.</p>
 <p><b>Internal (rotating) damping.</b> Damping in the shaft itself (material hysteresis, friction in
 shrink fits, splines and couplings) resists the bending rate that the spinning shaft sees, not the one
 seen from the bearings. In a forward whirl at ω the shaft is bent toward the orbit's centre and that bend
@@ -504,6 +555,14 @@ reading as found; <i>Reveal</i> then shows the unbalance you cancelled.</li>
 the orbits sitting below the bearings' centre. Untick <i>Static sag</i> to look at the vibration alone:
 it is the same as without gravity. Make the supports anisotropic with no unbalance: the rotor sags,
 spins up and stays still.</li>
+<li>Load the <i>Overhung rotor</i> preset and look at the Campbell diagram: the first mode's forward and
+backward branches fan out from 14.5 Hz. Run up and coast down from 600 to 2000 rpm: one critical, at
+1284 rpm. Then set the disc's polar inertia I<sub>p</sub> to a tiny value: with the gyroscopic moment
+gone the critical drops to 870 rpm, the natural frequency at rest.</li>
+<li>Load the <i>Fluid-film bearings</i> preset (λ = 0.5) and tick ½X on the Campbell diagram. Run at
+2500 rpm and tap the disc: the tap dies away. Set the target to 4000 rpm (past the onset, 3136 rpm,
+where ½X crosses the first mode) and tap again: the whirl grows at 26 Hz, 0.39× on the full spectrum, not
+at ½X. Double the support damping: the onset does not move.</li>
 <li>Pause near the critical speed and turn the 3D view: the shaft bows in one plane, which turns with
 the spin, rather than flapping back and forth.</li>
 </ol>
@@ -511,7 +570,7 @@ the spin, rather than flapping back and forth.</li>
 <h3>Notation</h3>
 <table border="1" cellspacing="0" cellpadding="4">
 <tr><th>Symbol</th><th>Meaning</th><th>Units</th></tr>
-<tr><td>L, a, b</td><td>bearing span; disc's distance from A and from B (a + b = L)</td><td>m</td></tr>
+<tr><td>L, a, b, c</td><td>bearing span; disc's distance from A and from B (a + b = L); an overhung disc's distance past its bearing</td><td>m</td></tr>
 <tr><td>d, E, EI</td><td>shaft diameter, Young's modulus, bending stiffness E π d⁴/64</td><td>m, Pa, N·m²</td></tr>
 <tr><td>m, I<sub>p</sub>, I<sub>d</sub></td><td>disc mass; its polar and diametral moments of inertia</td><td>kg, kg·m²</td></tr>
 <tr><td>k<sub>x</sub>, k<sub>y</sub>, c<sub>x</sub>, c<sub>y</sub></td><td>a support's stiffness and damping, horizontal and vertical</td><td>N/m, N·s/m</td></tr>
@@ -527,8 +586,9 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>α</td><td>angular acceleration of a ramp, Ω'</td><td>rad/s² (rpm/s)</td></tr>
 <tr><td>V</td><td>1X vector: amplitude |V|, phase lag −arg V</td><td>m</td></tr>
 <tr><td>k<sub>xy</sub></td><td>a bearing's cross-coupled stiffness (k<sub>yx</sub> = −k<sub>xy</sub>)</td><td>N/m</td></tr>
+<tr><td>λ</td><td>a fluid-film bearing's swirl ratio: k<sub>xy</sub> grows by λcΩ, c the mean of c<sub>x</sub> and c<sub>y</sub></td><td>—</td></tr>
 <tr><td>c<sub>i</sub>, η</td><td>internal (rotating) damping of the shaft, as a damper at the disc; η = c<sub>i</sub>/k<sub>disc</sub></td><td>N·s/m, s</td></tr>
-<tr><td>H</td><td>circulatory matrix: the internal damping's skew stiffness per unit speed</td><td>N·s/m</td></tr>
+<tr><td>H</td><td>circulatory matrix: the skew stiffness per unit speed, from internal damping and fluid swirl</td><td>N·s/m</td></tr>
 <tr><td>δ</td><td>log decrement, 2πζ/√(1 − ζ²)</td><td>—</td></tr>
 <tr><td>δ<sub>b</sub>, β</td><td>shaft bow at the disc, and its angle from the keyphasor mark</td><td>m (µm), rad</td></tr>
 <tr><td>T, W, α</td><td>trial and correction weights (mass × radius at an angle); influence coefficient (V<sub>1</sub> − V<sub>0</sub>)/T</td><td>kg·m (g·mm); m per kg·m</td></tr>

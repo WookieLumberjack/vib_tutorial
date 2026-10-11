@@ -11,7 +11,9 @@ theory notes.
 
 from __future__ import annotations
 
+import cmath
 import math
+from dataclasses import fields
 
 import numpy as np
 import pyqtgraph as pg
@@ -42,6 +44,7 @@ from ..core.rotor_sweep import (
     steady_vectors,
 )
 from ..core.rotor_balance import SteadyMeasurement
+from ..core.rotor_presets import rotor_presets
 from ..core.rotor_stability import Onset, full_spectrum, least_damped, stability_onset
 from .cms_time import SampleBuffer
 from .panels import spin
@@ -54,7 +57,10 @@ from .theming import add_legend, mute
 
 FRAME_MS = 16
 SPEEDS = (0.1, 0.25, 0.5, 1.0, 2.0)  # simulation speed, × real time
-MAX_RPM = 10_000.0
+TOP_RPM = 10_000.0  # the default speed range
+MAX_TOP_RPM = 60_000.0  # the widest it can be set to
+ORDERS = {2.0: "2X", 0.5: "½X"}
+CUSTOM = "Custom"  # the preset box's entry for a rotor that is none of the presets  # other orders of the speed the Campbell diagram can draw
 DIRECTION_NAMES = ("x (horizontal probe)", "y (vertical probe)", "Orbit (major axis)")
 # Columns of the history: (x, y) at each station, then the unbalance's angle φ and the speed Ω.
 PHASE, OMEGA = 8, 9
@@ -70,12 +76,24 @@ DAMPED = 0.3  # modes with more damping than this are drawn hollow and are not c
 DASH = QtCore.Qt.PenStyle.DashLine
 DOT = QtCore.Qt.PenStyle.DotLine
 STEADY_POINTS = 2000  # speeds on the steady-state curve, plus as many again around the criticals
+BEARING_WIDTHS = (56, 56, 50, 50, 46, 56, 40)  # px, the bearing table's columns: kx, ky, cx, cy, m, kxy, λ
+BEARING_GAP = 0.02  # of the span: the closest the disc may be put to a bearing
 RUB = 0.02  # of the span: a whirl this large pauses the simulation (a real rotor would rub)
 GRAVITY = 9.81  # m/s²
 SAG_SPEEDS = 201  # speeds the static sag is worked out at, with internal damping, and interpolated
 SPECTRUM_FRAMES = 6  # the full spectrum is recomputed every this many frames
 MEASURE_SPEED = 2.0  # × real time, at least, while a balancing measurement runs
 
+ORDER_TIPS = {
+    2.0: "<p>Twice the speed. A shaft stiffer one way than the other (a keyway, a crack) bends twice per "
+         "turn under its weight, and misalignment pulls twice per turn too. Where a forward branch meets "
+         "this line, at about half its critical speed, a horizontal rotor with such a shaft whirls at "
+         "2X: a <i>secondary critical</i>. The model has neither, so nothing drives it here.</p>",
+    0.5: "<p>Half the speed. Oil in a plain journal bearing swirls at just under half the shaft's speed, "
+         "so its whirl starts near ½X (<i>oil whirl</i>) and, once ½X has passed the first natural "
+         "frequency, locks onto it (<i>oil whip</i>): set the bearings' swirl ratio λ to 0.5. A rub "
+         "or loose parts can also respond at ½X.</p>",
+}
 SPEED_TIP = (
     "<p>The speed the rotor ramps toward, at the ramp rate. Drag the red line on the Campbell diagram "
     "to set it too.</p><p>Ramp slowly through a critical speed and the whirl builds up to its "
@@ -151,6 +169,13 @@ SAG_TIP = (
     "holds the rotor, as an AC-coupled probe does. The tracking, the spectrum and the phase are always "
     "of the vibration.</p>"
 )
+SWIRL_TIP = (
+    "<p>Fluid swirl ratio λ of a fluid-film bearing: the oil in the clearance is dragged round at λ times the "
+    "shaft's speed, about 0.5 in a plain journal bearing. It makes a cross-coupled stiffness that grows "
+    "with speed, k<sub>xy</sub> = λcΩ on top of the constant one (c the bearing's damping). Once the swirl "
+    "λΩ outruns a forward whirl's frequency, the oil feeds it faster than c damps it: with λ = 0.5 the "
+    "rotor goes unstable at twice its first natural frequency (<i>oil whip</i>).</p>"
+)
 ORBIT_TIP = (
     "<p>The path of the shaft's centre at each station over the last few revolutions, looking from "
     "the B end toward A: x to the right, y up, and the shaft spinning counterclockwise (x toward y). "
@@ -216,14 +241,21 @@ class RotorView(pg.PlotWidget):
         zr = -x * sy + z * cy  # toward the viewer
         return xr, y * cp - zr * sp
 
+    @property
+    def _metres(self) -> float:
+        """Metres of shaft per display unit along it: the whole shaft, overhang too, spans AXIAL."""
+        z0, z1 = self.system.extent
+        return (z1 - z0) / AXIAL
+
     def _z(self, z_m: float | np.ndarray) -> np.ndarray:
-        """Display axial coordinate (from midspan) of an axial position in metres."""
-        return (np.asarray(z_m) / self.system.length - 0.5) * AXIAL
+        """Display axial coordinate (from the shaft's middle) of an axial position in metres."""
+        z0, z1 = self.system.extent
+        return (np.asarray(z_m) - 0.5 * (z0 + z1)) / self._metres
 
     def set_system(self, system: RotorSystem) -> None:
         self.system = system
         r = math.sqrt(2.0 * system.ip / system.disc_mass) if system.ip > 0 else 0.05
-        self.disc_radius = float(np.clip(r / system.length * AXIAL, 0.2, 0.9))
+        self.disc_radius = float(np.clip(r / self._metres, 0.2, 0.9))
         self._place_static()
 
     def _segments(self, parts: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
@@ -238,7 +270,8 @@ class RotorView(pg.PlotWidget):
         w = 0.8
         plate = np.array([[-w, -h, -half], [w, -h, -half], [w, -h, half], [-w, -h, half], [-w, -h, -half]])
         walls = []
-        for zb in (-AXIAL / 2, AXIAL / 2):
+        bearings = self._z(np.array([0.0, self.system.length]))
+        for zb in bearings:
             walls.append(np.array([[-h, -0.35, zb - 0.3], [-h, 0.35, zb - 0.3], [-h, 0.35, zb + 0.3],
                                    [-h, -0.35, zb + 0.3], [-h, -0.35, zb - 0.3]]))
         self.frame.setData(*self._segments([plate, *walls]))
@@ -249,7 +282,7 @@ class RotorView(pg.PlotWidget):
         self.triad.setData(tx, ty)
         for label, e in zip(self.triad_labels, ends):
             label.setPos(*[float(c) for c in self.project(o + 1.3 * (e - o))])
-        for label, zb in zip(self.end_labels, (-AXIAL / 2, AXIAL / 2)):
+        for label, zb in zip(self.end_labels, bearings):
             label.setPos(*[float(c) for c in self.project(np.array([0.0, -h - 0.05, zb]))])
         # Range: everything the rotor can reach.
         top = SWING + self.disc_radius + 0.1
@@ -292,15 +325,15 @@ class RotorView(pg.PlotWidget):
         # The disc's own axis: the shaft's slope there plus the skew. Its rim's wobble counts as motion.
         axis = np.array([q[2], q[6]]) + s.skew * np.array([math.cos(phase + s.skew_angle),
                                                            math.sin(phase + s.skew_angle)])
-        peak = max(peak, float(np.hypot(*axis)) * self.disc_radius * s.length / AXIAL)
+        peak = max(peak, float(np.hypot(*axis)) * self.disc_radius * self._metres)
         target = SWING / max(peak, MIN_PEAK)
         # Shrink at once (keep the motion on screen), grow slowly (no flicker as it settles).
         self.gain = target if target < self.gain else self.gain + 0.08 * (target - self.gain)
         g = self.gain
-        self.scale_label.setText(f"motion ×{_round_gain(g * s.length / AXIAL)}")
+        self.scale_label.setText(f"motion ×{_round_gain(g * self._metres)}")
 
         # Shaft centre line.
-        z = np.linspace(0.0, s.length, 41)
+        z = np.union1d(np.linspace(*s.extent, 41), [0.0, s.a, s.length])
         defl = s.deflection(q, z) * g
         line = np.column_stack([defl, self._z(z)])
         self.shaft.setData(*self.project(line))
@@ -320,7 +353,7 @@ class RotorView(pg.PlotWidget):
                 curve.setData([], [])
 
         # Disc: a circle square to its own (magnified) axis.
-        scale = g * s.length / AXIAL  # display slope per radian of real slope
+        scale = g * self._metres  # display slope per radian of real slope
         n = np.array([axis[0] * scale, axis[1] * scale, 1.0])
         n /= np.linalg.norm(n)
         u = np.cross([0.0, 1.0, 0.0], n)
@@ -590,6 +623,13 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         self.damped = pg.ScatterPlotItem(size=3, name=f"heavily damped (ζ > {DAMPED:g})")
         p.addItem(self.damped)
         self.sync = p.plot(name="1X (synchronous)")
+        # Other orders of the speed, drawn on request: lines but not in the legend, labelled at their ends.
+        self.orders = {order: p.plot() for order in ORDERS}
+        self.order_labels = {order: pg.TextItem(f"{name}", anchor=(1.1, 1.0)) for order, name in ORDERS.items()}
+        for order in ORDERS:
+            self.orders[order].setVisible(False)
+            self.order_labels[order].setVisible(False)
+            p.addItem(self.order_labels[order])
         self.uncrit = pg.ScatterPlotItem(size=11, symbol="o", name="backward crossing, not driven")
         p.addItem(self.uncrit)
         self.crit = pg.ScatterPlotItem(size=11, symbol="o", name="critical speed")
@@ -618,6 +658,9 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         self.damped.setBrush(pg.mkBrush(None))
         self.damped.setPen(pg.mkPen(colors.grey, width=1))
         self.sync.setPen(pg.mkPen(colors.strong, width=1, style=DASH))
+        for order, line in self.orders.items():
+            line.setPen(pg.mkPen(colors.muted, width=1, style=DOT))
+            self.order_labels[order].setColor(colors.muted)
         self.crit.setBrush(pg.mkBrush(None))
         self.crit.setPen(pg.mkPen(colors.force, width=2))
         self.uncrit.setBrush(pg.mkBrush(None))
@@ -653,6 +696,8 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         else:
             self.onset_label.setText("")
         self.sync.setData([0.0, max_rpm], [0.0, max_rpm / 60.0])
+        for order, line in self.orders.items():
+            line.setData([0.0, max_rpm], [0.0, order * max_rpm / 60.0])
         p = self.plot
         for label in self.crit_labels:
             p.removeItem(label)
@@ -662,18 +707,32 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         others = [w * RPM for w, r in lightly_damped(result) if (w, r) not in driven]
         self.uncrit.setData(others, [c / 60.0 for c in others])
         self.crit_labels = []
-        for rpm, names in _grouped(critical_speeds(result, isotropic)):
-            label = pg.TextItem(f"{rpm:,.0f} rpm ({' + '.join(names)})", anchor=(-0.05, 1.1))
+        groups = _grouped(critical_speeds(result, isotropic))
+        for i, (rpm, names) in enumerate(groups):
+            # Right of the circle and above it, unless the next one is close: then below it.
+            crowded = i + 1 < len(groups) and groups[i + 1][0] - rpm < 0.3 * max_rpm
+            label = pg.TextItem(f"{rpm:,.0f} rpm ({' + '.join(names)})",
+                                anchor=(-0.05, -0.1) if crowded else (-0.05, 1.1))
             label.setPos(rpm, rpm / 60.0)
             p.addItem(label)
             self.crit_labels.append(label)
         top = np.nanmax(f[ok & (f < 2.5 * max_rpm / 60.0)]) if np.any(ok & (f < 2.5 * max_rpm / 60.0)) else 1.0
         y_top = 1.1 * max(top, max_rpm / 60.0)
         p.setRange(xRange=(0.0, max_rpm), yRange=(0.0, y_top), padding=0)
+        for order, label in self.order_labels.items():
+            end = min(max_rpm, 60.0 * y_top / order)  # where the line leaves the plot
+            label.setPos(end, order * end / 60.0)
+            label.setAnchor((1.1, 0.0) if end < max_rpm else (1.1, 1.0))  # out the top: hang below
         if onset is not None:
             self.onset_label.setAnchor((1.05, 0.0) if onset.omega * RPM > 0.5 * max_rpm else (-0.05, 0.0))
             self.onset_label.setPos(onset.omega * RPM, 0.97 * y_top)
         self.apply_theme()
+
+    def set_orders(self, shown: set[float]) -> None:
+        """Show the lines of these orders of the speed (keys of ORDERS)."""
+        for order in ORDERS:
+            self.orders[order].setVisible(order in shown)
+            self.order_labels[order].setVisible(order in shown)
 
     def set_speed(self, rpm: float) -> None:
         if not self.speed_line.moving:
@@ -691,6 +750,7 @@ class RotorPage(QtWidgets.QWidget):
         self.sim.target = 1000.0 / RPM
         self.history = SampleBuffer(10)
         self.campbell: Campbell | None = None
+        self.top_rpm = TOP_RPM  # the speed range: Campbell diagram, stability map, Bode plot, speed controls
         self.running = True
         self._stride = 1
         self._carry = 0  # steps since the last stored sample
@@ -700,7 +760,7 @@ class RotorPage(QtWidgets.QWidget):
         self._sweep_pairs = 0  # sweeps started since the plots were cleared (each pair's colour)
         self._steady_rpm = np.empty(0)  # the steady-state curve: speeds (rpm)
         self._steady_vectors = np.empty((0, len(STATIONS), 2), dtype=complex)  # and 1X vectors there
-        self.onset: Onset | None = None  # where the rotor goes unstable, if it does up to MAX_RPM
+        self.onset: Onset | None = None  # where the rotor goes unstable, if it does up to top_rpm
         self.rubbed = False  # the whirl grew past RUB of the span and the simulation paused
         self._sag: tuple[np.ndarray, np.ndarray] | None = None  # see _set_sag
         self._weights: tuple[complex, ...] = ()  # balance weights on the disc (kg·m)
@@ -712,6 +772,7 @@ class RotorPage(QtWidgets.QWidget):
         # --- parameters
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
+        lv.addWidget(self._preset_box())
         lv.addWidget(self._speed_box())
         self.readout = QtWidgets.QLabel()
         self.readout.setWordWrap(True)
@@ -769,8 +830,28 @@ class RotorPage(QtWidgets.QWidget):
         self.campbell_note = QtWidgets.QLabel()
         self.campbell_note.setWordWrap(True)
         mute(self.campbell_note)
+        self.top_speed = spin(1000.0, MAX_TOP_RPM, TOP_RPM, 0, " rpm")
+        self.top_speed.setSingleStep(1000.0)
+        self.top_speed.setToolTip(
+            "<p>The highest speed on the Campbell diagram, the stability map and the Bode plot, and the top "
+            "of the speed controls.</p>")
+        self.top_speed.valueChanged.connect(self.set_top_rpm)
+        self.order_boxes = {}
+        order_row = QtWidgets.QHBoxLayout()
+        order_row.addWidget(QtWidgets.QLabel("Speeds up to:"))
+        order_row.addWidget(self.top_speed)
+        order_row.addSpacing(12)
+        order_row.addWidget(QtWidgets.QLabel("Also draw:"))
+        for order, name in ORDERS.items():
+            box_ = QtWidgets.QCheckBox(name)
+            box_.setToolTip(ORDER_TIPS[order])
+            box_.toggled.connect(self._on_orders)
+            order_row.addWidget(box_)
+            self.order_boxes[order] = box_
+        order_row.addStretch(1)
         campbell_tab = QtWidgets.QWidget()
         ct = QtWidgets.QVBoxLayout(campbell_tab)
+        ct.addLayout(order_row)
         ct.addWidget(self.campbell_plot, 1)
         ct.addWidget(self.campbell_note)
         self.bode = BodePlots()
@@ -863,15 +944,32 @@ class RotorPage(QtWidgets.QWidget):
         self._draw()
 
     # ------------------------------------------------------------- panels
+    def _preset_box(self) -> QtWidgets.QGroupBox:
+        box = QtWidgets.QGroupBox("Preset")
+        v = QtWidgets.QVBoxLayout(box)
+        self.presets = rotor_presets()
+        self.preset = QtWidgets.QComboBox()
+        self.preset.addItems([p.name for p in self.presets] + [CUSTOM])
+        self.preset.setToolTip(
+            "<p>Load a rotor that shows one effect clearly, with a speed range to suit it. It starts from "
+            "rest and runs up to its target speed. Change any parameter and it becomes your own rotor.</p>")
+        self.preset.activated.connect(self._on_preset)
+        self.preset_note = QtWidgets.QLabel()
+        self.preset_note.setWordWrap(True)
+        mute(self.preset_note)
+        v.addWidget(self.preset)
+        v.addWidget(self.preset_note)
+        return box
+
     def _speed_box(self) -> QtWidgets.QGroupBox:
         box = QtWidgets.QGroupBox("Speed")
         form = QtWidgets.QFormLayout(box)
         self.speed_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.speed_slider.setRange(0, int(MAX_RPM))
+        self.speed_slider.setRange(0, int(TOP_RPM))
         self.speed_slider.setSingleStep(10)
         self.speed_slider.setPageStep(250)
         self.speed_slider.setToolTip(SPEED_TIP)
-        self.target_rpm = spin(0.0, MAX_RPM, 1000.0, 0, " rpm")
+        self.target_rpm = spin(0.0, TOP_RPM, 1000.0, 0, " rpm")
         self.target_rpm.setToolTip(SPEED_TIP)
         self.speed_slider.setValue(1000)
         self.speed_slider.valueChanged.connect(lambda v: self.target_rpm.setValue(float(v)))
@@ -905,8 +1003,8 @@ class RotorPage(QtWidgets.QWidget):
     def _sweep_box(self) -> QtWidgets.QGroupBox:
         box = QtWidgets.QGroupBox("Run-up and coast-down")
         form = QtWidgets.QFormLayout(box)
-        self.sweep_from = spin(60.0, MAX_RPM, 800.0, 0, " rpm")
-        self.sweep_to = spin(60.0, MAX_RPM, 2400.0, 0, " rpm")
+        self.sweep_from = spin(60.0, TOP_RPM, 800.0, 0, " rpm")
+        self.sweep_to = spin(60.0, TOP_RPM, 2400.0, 0, " rpm")
         for w in (self.sweep_from, self.sweep_to):
             w.setToolTip(SWEEP_TIP)
             w.valueChanged.connect(self._fit_tracking_range)
@@ -971,13 +1069,15 @@ class RotorPage(QtWidgets.QWidget):
         self.diameter.setToolTip("Shaft diameter d; EI = E π d⁴/64")
         self.youngs = spin(1.0, 1000.0, s.youngs / 1e9, 1, " GPa")
         self.youngs.setToolTip("Young's modulus E of the shaft (steel ≈ 200 GPa)")
-        self.position = spin(0.05, 0.95, s.position, 3)
-        self.position.setSingleStep(0.05)
+        self.position = PositionBox()
+        self.position.setValue(s.position)
         self.position.setToolTip(
             "<p>Where the disc sits, a/L from bearing A. At 0.5 (midspan) with identical bearings the "
             "disc's translation and tilt are uncoupled, so the spin's gyroscopic moment never shows in "
             "the translational whirl: the classic Jeffcott rotor. Move it off centre and the disc tilts "
-            "as it whirls.</p>"
+            "as it whirls.</p><p>Above 1 the disc overhangs bearing B (below 0, bearing A): an "
+            "<i>overhung</i> rotor, like a fan or a pump impeller. The disc then tilts as much as it "
+            "moves, and the gyroscopic moment moves even the first critical speed.</p>"
         )
         self.disc_mass = spin(0.01, 1000.0, s.disc_mass, 3, " kg")
         self.ip = spin(1e-6, 100.0, s.ip, 6, " kg·m²")
@@ -1040,24 +1140,35 @@ class RotorPage(QtWidgets.QWidget):
         b = Bearing()
         box = QtWidgets.QGroupBox("Bearing supports")
         grid = QtWidgets.QGridLayout(box)
-        heads = (("k<sub>x</sub> [N/m]", "Horizontal support stiffness"),
-                 ("k<sub>y</sub> [N/m]", "Vertical support stiffness"),
-                 ("c<sub>x</sub> [N·s/m]", "Horizontal support damping"),
-                 ("c<sub>y</sub> [N·s/m]", "Vertical support damping"),
-                 ("m [kg]", "Mass of the journal and whatever moves with it on the support"),
-                 ("k<sub>xy</sub> [N/m]", KXY_TIP))
+        grid.setHorizontalSpacing(4)
+        # Units on a second line, so that the headers are no wider than the boxes below them.
+        heads = (("k<sub>x</sub><br>[N/m]", "Horizontal support stiffness"),
+                 ("k<sub>y</sub><br>[N/m]", "Vertical support stiffness"),
+                 ("c<sub>x</sub><br>[N·s/m]", "Horizontal support damping"),
+                 ("c<sub>y</sub><br>[N·s/m]", "Vertical support damping"),
+                 ("m<br>[kg]", "Mass of the journal and whatever moves with it on the support"),
+                 ("k<sub>xy</sub><br>[N/m]", KXY_TIP),
+                 ("λ<br>&nbsp;", SWIRL_TIP))
+        for c, width in enumerate(BEARING_WIDTHS):
+            grid.setColumnStretch(c + 1, width)
         for c, (text, tip) in enumerate(heads):
             label = QtWidgets.QLabel(text)
             label.setToolTip(tip)
+            label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             grid.addWidget(label, 0, c + 1)
         self.bearing_rows: list[list[QtWidgets.QDoubleSpinBox]] = []
         for r, name in enumerate("AB"):
             grid.addWidget(QtWidgets.QLabel(f"<b>{name}</b>"), r + 1, 0)
             row = [spin(1e2, 1e10, b.kx, 0), spin(1e2, 1e10, b.ky, 0), spin(0.0, 1e6, b.cx, 1),
-                   spin(0.0, 1e6, b.cy, 1), spin(0.001, 100.0, b.mass, 3), spin(-1e9, 1e9, b.kxy, 0)]
+                   spin(0.0, 1e6, b.cy, 1), spin(0.001, 100.0, b.mass, 3), spin(-1e9, 1e9, b.kxy, 0),
+                   spin(0.0, 1.0, b.swirl, 2)]
             row[5].setToolTip(KXY_TIP)
+            row[6].setToolTip(SWIRL_TIP)
+            row[6].setSingleStep(0.05)
             for c, w in enumerate(row):
-                w.setMinimumWidth(52)
+                # No arrows (the wheel and the arrow keys still step): seven columns leave no room for them.
+                w.setButtonSymbols(QtWidgets.QAbstractSpinBox.ButtonSymbols.NoButtons)
+                w.setMinimumWidth(BEARING_WIDTHS[c])
                 w.valueChanged.connect(self._on_params)
                 grid.addWidget(w, r + 1, c + 1)
             self.bearing_rows.append(row)
@@ -1076,8 +1187,8 @@ class RotorPage(QtWidgets.QWidget):
         )
         for c in (self.isotropic, self.same_bearings):
             c.toggled.connect(self._on_params)
-        grid.addWidget(self.isotropic, 3, 0, 1, 7)
-        grid.addWidget(self.same_bearings, 4, 0, 1, 7)
+        grid.addWidget(self.isotropic, 3, 0, 1, 8)
+        grid.addWidget(self.same_bearings, 4, 0, 1, 8)
         return box
 
     # ------------------------------------------------------------- parameters
@@ -1100,7 +1211,7 @@ class RotorPage(QtWidgets.QWidget):
             length=self.length.value(),
             diameter=self.diameter.value() / 1e3,
             youngs=self.youngs.value() * 1e9,
-            position=self.position.value(),
+            position=_off_bearing(self.position.value()),
             disc_mass=self.disc_mass.value(),
             ip=self.ip.value(),
             id=self.id.value(),
@@ -1146,11 +1257,34 @@ class RotorPage(QtWidgets.QWidget):
         self.isotropic.setChecked(all(b.kx == b.ky and b.cx == b.cy for b in (A, B)))
         self.same_bearings.setChecked(A == B)
         for row, b in zip(self.bearing_rows, (A, B)):
-            for w, v in zip(row, (b.kx, b.ky, b.cx, b.cy, b.mass, b.kxy)):
+            for w, v in zip(row, (b.kx, b.ky, b.cx, b.cy, b.mass, b.kxy, b.swirl)):
                 w.setValue(v)
         for w in boxes:
             w.blockSignals(False)
         self._on_params()
+
+    def load_preset(self, name: str) -> None:
+        """Load the preset called `name`: its rotor, speed range and target speed, starting from rest."""
+        preset = next(p for p in self.presets if p.name == name)
+        self.set_top_rpm(preset.top_rpm)
+        self.set_system(preset.system)
+        self.set_target_rpm(preset.target_rpm)
+        self.reset()
+
+    def _on_preset(self, index: int) -> None:
+        if index < len(self.presets):
+            self.load_preset(self.presets[index].name)
+        else:
+            self._show_preset(self.sim.system)  # Custom is not a rotor: show what is loaded
+
+    def _show_preset(self, system: RotorSystem) -> None:
+        """Select the preset this rotor is, or Custom, and show its note."""
+        index = next((i for i, p in enumerate(self.presets) if _same_rotor(p.system, system)), len(self.presets))
+        self.preset.blockSignals(True)
+        self.preset.setCurrentIndex(index)
+        self.preset.blockSignals(False)
+        self.preset_note.setText(self.presets[index].note if index < len(self.presets)
+                                 else "Your own rotor: pick a preset to start again from one.")
 
     def set_weights(self, weights: tuple[complex, ...]) -> None:
         """Put these balance weights on the disc (kg·m each), in place of any there."""
@@ -1202,34 +1336,40 @@ class RotorPage(QtWidgets.QWidget):
             self.clear_sweeps()  # their steady-state curve is about to change
         self.cancel_measurement()
         self.sim.set_system(system)
+        self._show_preset(system)
         self.view.set_system(system)
         self.orbits.set_midspan_shown(abs(system.position - 0.5) > 1e-9)
         self._stride = max(1, round(STORE_DT / self.sim.step_size()))
         self._set_sag(system)
         ks = 48.0 * system.ei / system.length**3
+        if system.overhung:
+            formula = f" = 3EI/(c²(L + c)), overhung by c = {system.overhang * 1e3:.4g} mm"
+        elif abs(system.position - 0.5) < 1e-9:
+            formula = " = 48EI/L³"
+        else:
+            formula = f" (48EI/L³ = {ks:,.0f} N/m at midspan)"
         self.shaft_note.setText(
             f"EI = {system.ei:.4g} N·m²; shaft stiffness at the disc (bearings rigid) "
-            f"{3 * system.ei * system.length / (system.a * system.b) ** 2:,.0f} N/m"
-            + (" = 48EI/L³" if abs(system.position - 0.5) < 1e-9 else f" (48EI/L³ = {ks:,.0f} N/m at midspan)")
-            + self._sag_text(system)
+            f"{system.disc_stiffness:,.0f} N/m" + formula + self._sag_text(system)
         )
         self._analysis_timer.start()
 
     def _refresh_analysis(self) -> None:
         """The Campbell diagram and critical speeds for the current parameters."""
         system = self.sim.system
-        self.campbell = campbell(system, MAX_RPM / RPM, n_modes=8)
-        self.onset = stability_onset(system, MAX_RPM / RPM)
+        top = self.top_rpm
+        self.campbell = campbell(system, top / RPM, n_modes=8)
+        self.onset = stability_onset(system, top / RPM)
         iso = _isotropic(system)
-        self.campbell_plot.set_result(self.campbell, MAX_RPM, iso, self.onset)
-        self.stability_map.set_result(self.campbell, self.onset, MAX_RPM)
+        self.campbell_plot.set_result(self.campbell, top, iso, self.onset)
+        self.stability_map.set_result(self.campbell, self.onset, top)
         crits = critical_speeds(self.campbell, iso)
         self.time.set_criticals([w * RPM for w, _ in crits])
         lines = [f"{w * RPM:,.0f} rpm ({w / (2 * math.pi):.4g} Hz), {whirl_name(r)} whirl" for w, r in crits]
         jeff = system.jeffcott_speed() * RPM
         self.crit_label.setText(
             "<b>Critical speeds</b> (where a whirl frequency equals the spin speed, up to "
-            f"{MAX_RPM:,.0f} rpm):<br>" + ("<br>".join(lines) if lines else "none")
+            f"{top:,.0f} rpm):<br>" + ("<br>".join(lines) if lines else "none")
             + ("<br><small>The backward whirl crossings are not critical: an isotropic rotor's unbalance "
                "drives only forward whirl.</small>" if iso else "")
             + f"<br><small>Textbook Jeffcott estimate (massless journals, no tilt): {jeff:,.0f} rpm</small>"
@@ -1251,7 +1391,7 @@ class RotorPage(QtWidgets.QWidget):
     def _onset_text(self) -> str:
         o = self.onset
         if o is None:
-            return f"stable up to {MAX_RPM:,.0f} rpm."
+            return f"stable up to {self.top_rpm:,.0f} rpm."
         whirl = whirl_name(o.whirl)
         if o.omega == 0.0:
             return f"<b>unstable even at rest</b>: the {whirl} whirl at {o.freq_hz:.3g} Hz grows."
@@ -1262,17 +1402,19 @@ class RotorPage(QtWidgets.QWidget):
         s = self.sim.system
         coupled = [f"k<sub>xy</sub> = {b.kxy:,.0f} N/m at {n}" for n, b in (("A", s.bearing_a), ("B", s.bearing_b))
                    if b.kxy]
+        coupled += [f"swirl λ = {b.swirl:g} at {n}" for n, b in (("A", s.bearing_a), ("B", s.bearing_b))
+                    if b.swirl * b.damping]
         if s.internal_damping:
             coupled.append(f"internal damping c<sub>i</sub> = {s.internal_damping:g} N·s/m")
         cause = ("With " + " and ".join(coupled) + ": " if coupled else
                  "No cross-coupling and no internal damping: every mode stays damped, however fast it spins. "
-                 "Set c<sub>i</sub> or k<sub>xy</sub> to see one go unstable. ")
+                 "Set c<sub>i</sub>, k<sub>xy</sub> or λ to see one go unstable. ")
         return (f"<small>{cause}{self._onset_text()} Modes damped more than ζ = {DAMPED:g} are left off. "
                 "Below: the full spectrum of the strip chart's station.</small>")
 
     def _refresh_steady(self) -> None:
         """The steady-state 1X vectors at every station, finely around each critical speed."""
-        w = [np.linspace(MAX_RPM / STEADY_POINTS, MAX_RPM, STEADY_POINTS) / RPM]
+        w = [np.linspace(self.top_rpm / STEADY_POINTS, self.top_rpm, STEADY_POINTS) / RPM]
         crits = [c for c, _, _ in self.campbell.criticals] if self.campbell else []
         w += [np.linspace(0.8 * c, 1.2 * c, STEADY_POINTS // max(len(crits), 1)) for c in crits]
         w = np.unique(np.concatenate(w))
@@ -1310,8 +1452,23 @@ class RotorPage(QtWidgets.QWidget):
         self._draw()
 
     # ------------------------------------------------------------- speed and actions
+    def set_top_rpm(self, rpm: float) -> None:
+        """Show speeds up to `rpm`: on the plots, and as the top of the speed controls."""
+        if self.top_speed.value() != rpm:
+            self.top_speed.setValue(rpm)  # comes back here
+            return
+        self.top_rpm = rpm
+        self.speed_slider.setRange(0, int(rpm))
+        for w in (self.target_rpm, self.sweep_from, self.sweep_to):
+            w.setMaximum(rpm)  # a target above it comes down (and the speed with it)
+        self._set_sag(self.sim.system)
+        self._analysis_timer.start()
+
+    def _on_orders(self) -> None:
+        self.campbell_plot.set_orders({order for order, box_ in self.order_boxes.items() if box_.isChecked()})
+
     def set_target_rpm(self, rpm: float) -> None:
-        self.target_rpm.setValue(min(max(rpm, 0.0), MAX_RPM))
+        self.target_rpm.setValue(min(max(rpm, 0.0), self.top_rpm))
 
     def _on_target(self, rpm: float) -> None:
         self.stop_sweep(hold_speed=False)  # the user took over the speed
@@ -1715,7 +1872,7 @@ class RotorPage(QtWidgets.QWidget):
         if not system.gravity:
             self._sag = None
             return
-        speeds = np.linspace(0.0, MAX_RPM / RPM, SAG_SPEEDS if system.internal_damping else 1)
+        speeds = np.linspace(0.0, self.top_rpm / RPM, SAG_SPEEDS if system.speed_dependent else 1)
         qs = system.static_deflection(speeds)
         self._sag = (speeds, self._columns(qs, speeds, speeds)[:, :8])
 
@@ -1785,3 +1942,40 @@ def _fmt_len(meters: float) -> str:
     if meters >= 1e-6:
         return f"{meters * 1e6:.3g} µm"
     return f"{meters * 1e9:.3g} nm"
+
+
+class PositionBox(QtWidgets.QDoubleSpinBox):
+    """The disc's position a/L: between the bearings or overhung past either, stepping over the bearings."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setRange(-1.0, 2.0)
+        self.setDecimals(3)
+        self.setSingleStep(0.05)
+        self.setKeyboardTracking(False)
+
+    def stepBy(self, steps: int) -> None:  # noqa: N802 (Qt override)
+        super().stepBy(steps)
+        if _off_bearing(self.value()) != self.value():
+            super().stepBy(1 if steps > 0 else -1)
+
+
+def _same_rotor(a: RotorSystem, b: RotorSystem) -> bool:
+    """True if the two rotors are the same up to round-off (the panels' values pass through decimals)."""
+    def close(u, v) -> bool:
+        if isinstance(u, Bearing):
+            return all(close(getattr(u, f.name), getattr(v, f.name)) for f in fields(Bearing))
+        if isinstance(u, tuple):
+            return len(u) == len(v) and all(close(x, y) for x, y in zip(u, v))
+        return cmath.isclose(u, v, rel_tol=1e-9, abs_tol=1e-15)
+
+    return all(close(getattr(a, f.name), getattr(b, f.name)) for f in fields(RotorSystem))
+
+
+def _off_bearing(position: float) -> float:
+    """a/L moved off a bearing: the disc cannot sit on one (it would have no shaft on one side)."""
+    for bearing in (0.0, 1.0):
+        if abs(position - bearing) < BEARING_GAP:
+            inward = 0.5 - bearing  # toward midspan, if it is right on the bearing
+            return bearing + math.copysign(BEARING_GAP, position - bearing if position != bearing else inward)
+    return position
