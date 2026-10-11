@@ -2018,3 +2018,46 @@ def test_rotor_asymmetric_shaft(app):
     assert p.asymmetry.value() == 0.0 and not len(p.view.stiff_axis.getData()[0])
     assert p.probe_order.currentIndex() == 1
     assert "nothing drives 2X on a round shaft" in p.sweep_summary.text()
+
+
+def test_rotor_fluid_film_bearing(app):
+    from vib_tutorial.core.fluid_bearing import JournalBearing
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    p.running = False
+    panel = p.bearing_panel
+    p.tabs.setCurrentWidget(panel)
+    app.processEvents()
+    assert panel.bearing() == JournalBearing()
+    assert "At rest" in panel.readout.text() and "21,3" in panel.readout.text()  # stable over the range
+    assert not panel.unstable_path.getData()[0].size
+    # At speed: the readings follow the rotor, the dot moves off the bottom, the speed line is drawn.
+    p.set_target_rpm(3000.0)
+    while p.sim.omega < p.sim.target:
+        p.step(0.5)
+    p._draw()
+    assert "At 3,000 rpm" in panel.readout.text() and "= 0.50: the swirl ratio λ" in panel.readout.text()
+    x, y = panel.dot.getData()
+    assert x[0] > 0.0 and -1.0 < y[0] < 0.0
+    assert panel.speed_lines[0].value() == pytest.approx(3000.0)
+    # A looser bearing on a wider range: a rigid rotor whirls inside it, drawn red on the locus.
+    panel.set_bearing(JournalBearing(clearance=60e-6))
+    p.set_top_rpm(20_000.0)
+    assert panel.unstable_path.getData()[0].size and "whirls unstably" in panel.readout.text()
+    # Against the Sommerfeld number: log scales, dashed negative parts, the speed line at log10(S).
+    panel.against.setCurrentIndex(1)
+    assert panel.k_plot.ctrl.logXCheck.isChecked()
+    s = panel.bearing().sommerfeld(3000.0 / 60.0 * 2.0 * 3.141592653589793)
+    assert panel.speed_lines[1].value() == pytest.approx(math.log10(s))
+    pos, neg = panel.k_curves[2]  # k_yx: negative throughout
+    assert np.isnan(pos.getData()[1]).all() and np.isfinite(neg.getData()[1]).all()
+    panel.against.setCurrentIndex(0)
+    assert not panel.k_plot.ctrl.logXCheck.isChecked()
+    # A long bearing is flagged.
+    panel.length.setValue(20.0)
+    assert "L/D = 2" in panel.note.text()
+    w.set_theme("Dark")

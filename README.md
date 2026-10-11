@@ -575,6 +575,13 @@ the speed ramps to a target.
   line's speed are marked under it. Tapped all through a run-up, the peaks trace the Campbell
   diagram's branches. The block length trades frequency resolution against the smear of 1X while
   the speed ramps.
+- **Fluid-film bearing**: a plain journal bearing by short-bearing (Ocvirk) theory, from its
+  diameter, length, clearance, oil viscosity and load: the Sommerfeld number, the journal's
+  eccentricity and attitude angle, its locus in the clearance circle as the speed rises, and the
+  eight linearized stiffness and damping coefficients against the speed or (dimensionless, as on a
+  design chart) the Sommerfeld number, read at the rotor's speed now. Their skew part is exactly the
+  λ = ½ swirl of the bearing table, and Lund's formula gives the speed at which a rigid rotor on the
+  bearing goes into oil whirl. The rotor's supports are still the springs and dampers for now.
 - **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
   the shaft's beam stiffness (condensed, or with mass reduced to the stations and the shaft's modes), the state matrix A(Ω), and the modes at the current
   speed. G is skew-symmetric: it sits beside C but does no work.
@@ -587,7 +594,8 @@ the speed ramps to a target.
   single- and two-plane balancing by influence coefficients (where the planes go, and why planes
   close together need large weights: the influence matrix's condition number),
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
-  c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whirl and whip at λΩ = ω), waterfall and
+  c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whirl and whip at λΩ = ω), the
+  fluid-film bearing (the film's sideways push, the locus, the coefficients and the threshold), waterfall and
   cascade plots (a measured Campbell diagram; block length against ramp rate), the shaft's own mass
   (beam elements, consistent against lumped mass, the reduction), and why the solution uses state
   space.
