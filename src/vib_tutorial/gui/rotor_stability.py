@@ -17,7 +17,7 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..core.rotor import RPM, Campbell, WhirlModes
-from ..core.rotor_stability import Onset, log_decrement
+from ..core.rotor_stability import Onset, log_decrement, whirl_lines
 from .style import colors
 
 DASH = QtCore.Qt.PenStyle.DashLine
@@ -180,16 +180,7 @@ class FullSpectrum(pg.PlotWidget):
             line.setVisible(f1 > 0)
             line.setValue(sign * f1)
         p = self.getPlotItem()
-        natural, marks = [], []
-        if modes is not None:
-            for f, z, w in zip(modes.freq_hz, modes.zeta, modes.whirl):
-                if z <= damped_limit:
-                    natural.append(f)
-                    # Each mode shows on its own whirl side; a straight-line whirl on both.
-                    if w >= -0.1:
-                        marks.append((f, True))
-                    if w <= 0.1:
-                        marks.append((-f, False))
+        marks = [] if modes is None else [(f, f > 0) for f in whirl_lines(modes, damped_limit)]
         while len(self.free) < len(marks):  # a pool of lines, reused from one update to the next
             self.free.append(pg.InfiniteLine(angle=90))
             self.free_forward.append(True)
@@ -199,7 +190,7 @@ class FullSpectrum(pg.PlotWidget):
             if i < len(marks):
                 line.setValue(marks[i][0])
                 self.free_forward[i] = marks[i][1]
-        reach = max([1.6 * f1, 1.3 * min(natural, default=0.0), 20.0])
+        reach = max([1.6 * f1, 1.3 * min((abs(f) for f, _ in marks), default=0.0), 20.0])
         p.setXRange(-reach, reach, padding=0)
         if freqs.size:
             inside = np.abs(freqs) <= reach

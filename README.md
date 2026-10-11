@@ -500,7 +500,8 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   once-per-revolution (keyphasor) marks. A line on the disc's orbit points at the heavy spot,
   so the phase lag can be read off it: 0° below the critical speed, 90° at it, 180° above.
 - **Speed**: a target and a ramp rate, for run-ups and coast-downs through the criticals.
-  Tapping the disc rings every mode, forward and backward.
+  Tapping the disc rings every mode, forward and backward; it can also tap again and again as
+  it runs, like an impact test at speed.
 - **Run-up and coast-down**: one button ramps to a starting speed, lets the start-up transient
   die away, then runs up to a second speed and back at the ramp rate. Once per revolution a
   keyphasor-triggered DFT takes the 1X vector (a tracking filter), along with the largest
@@ -546,6 +547,12 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   crosses zero. Below it, the full spectrum of an orbit (the FFT of x + iy) separates forward
   from backward whirl, so past the onset the subsynchronous whirl shows as a growing line below
   +1X. The simulation pauses once the whirl reaches 2% of the span.
+- **Waterfall and cascade**: full spectra of a station's orbit taken block by block as the rotor
+  runs, stacked against the speed of the latest run-up or coast-down (a cascade) or against time
+  (a waterfall), on a log or linear scale. The 1X line and the free whirl frequencies at each
+  line's speed are marked under it. Tapped all through a run-up, the peaks trace the Campbell
+  diagram's branches. The block length trades frequency resolution against the smear of 1X while
+  the speed ramps.
 - **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
   the shaft's condensed beam stiffness, the state matrix A(Ω), and the modes at the current
   speed. G is skew-symmetric: it sits beside C but does no work.
@@ -556,7 +563,8 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   gravity's static sag,
   single-plane balancing by influence coefficients,
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
-  c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whirl and whip at λΩ = ω), and why the solution
+  c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whirl and whip at λΩ = ω), waterfall and
+  cascade plots (a measured Campbell diagram; block length against ramp rate), and why the solution
   uses state space.
 
 The default is the classic case: the disc at midspan on identical, isotropic supports, so its
@@ -607,6 +615,15 @@ unstable at 3136 rpm, twice its first natural frequency, and above that whirls a
 frequency whatever the speed (oil whip).
 
 ![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1947 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
+
+![Cascade of the overhung rotor's disc orbit, run up from rest to 2500 rpm at 200 rpm/s with the disc tapped every 0.5 s: 49 full spectra on a log scale. The taps' peaks follow the first mode's backward whirl down from −14.5 to −5.7 Hz and its forward whirl up to 25.5 Hz, and the 1X ridge peaks at 209 µm at 1350 rpm, just past the forward critical](docs/images/jeffcott_waterfall.png)
+
+A cascade plot stacks the spectra taken through a run-up at their speeds. The unbalance makes a
+ridge along 1X; a tap rings the free whirl frequencies, which move only as the gyroscopic effect
+moves them. Tapped all the way up, the overhung rotor draws its own Campbell diagram: the
+backward whirl falls and the forward one rises, and the 1X ridge grows where it crosses the
+forward branch. On a full spectrum the backward branch lies on the other side of zero, so 1X
+never meets it, which is why the backward crossing is not a critical speed.
 
 ## The math, briefly
 
@@ -752,6 +769,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
   and a note.
 - `core/rotor_stability.py`: the least damped mode, the onset speed of instability (swept,
   then bisected), the log decrement, and the full spectrum of an orbit.
+- `core/rotor_waterfall.py`: `Waterfall`, full spectra of the orbits taken block by block as
+  samples are fed in, each with the free whirl frequencies at its speed, and the latest run-up
+  or coast-down among them.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and
@@ -876,6 +896,12 @@ whip = RotorSystem(bearing_a=Bearing(swirl=0.5), bearing_b=Bearing(swirl=0.5))  
 stability_onset(whip, 1000.0).order                            # 0.5: the whirl at half the speed at onset
 overhung = RotorSystem(position=1.2)                           # the disc 0.2 L past bearing B
 f, amp = full_spectrum(r.t, r.q[:, [1, 5]])                    # disc orbit: +f forward, −f backward
+
+from vib_tutorial.core.rotor_waterfall import Waterfall
+
+wf = Waterfall(0.5, 100.0, rotor)                              # 0.5 s blocks, |f| up to 100 Hz
+wf.feed(r.t, r.q[:, 1] + 1j * r.q[:, 5], r.omega)              # z = x + iy, (k, stations); returns new blocks
+[(b.omega * RPM, b.natural) for b in wf.latest_ramp(up=True)]  # each block's speed, free whirl lines (Hz)
 
 from vib_tutorial.core.rotor_balance import SteadyMeasurement, correction, influence, weight
 

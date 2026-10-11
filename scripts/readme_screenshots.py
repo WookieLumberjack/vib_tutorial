@@ -488,12 +488,32 @@ def jeffcott_overhung():
     save(w, "jeffcott_overhung")
 
 
+def jeffcott_waterfall():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.load_preset("Overhung rotor")
+    page._refresh_analysis()
+    page.ramp.setValue(200.0)
+    page.tabs.setCurrentWidget(page.waterfall_plot.parentWidget())
+    page.repeat_taps.setChecked(True)
+    page.set_target_rpm(2500.0)
+    while page.sim.omega < page.sim.target:
+        page.step(0.02)
+    page._draw()
+    print(page.waterfall_note.text())
+    save(w, "jeffcott_waterfall")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
-         jeffcott_bow, jeffcott_balancing, jeffcott_stability, jeffcott_overhung]
+         jeffcott_bow, jeffcott_balancing, jeffcott_stability, jeffcott_overhung, jeffcott_waterfall]
 
 
 def main(names: list[str]) -> None:
