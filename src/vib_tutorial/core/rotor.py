@@ -68,6 +68,12 @@ with the shaft and drive it once per revolution (1X):
 The internal damping acts on q - q_bow too, but the bow does not move in the
 shaft, so it adds nothing there: C_i q_bow' + Ω H q_bow = 0.
 
+On a horizontal rotor gravity pulls the disc and the journals down (-y), a
+constant force f_g. It moves the equilibrium to the static deflection
+q_s = (K + Ω H)^{-1} f_g, about which the rotor vibrates exactly as without it
+(the model is linear): the static sag, sideways too where K + ΩH is not
+symmetric. The tracking and the spectra work on q - q_s, the vibration.
+
 Time stepping uses the state z = [q, q'], z' = A(Ω) z + B u, with the same exact
 first-order-hold matrix-exponential update as the chain's Simulator. A depends
 on Ω, so while the speed ramps A is held at the speed at the middle of each short
@@ -126,6 +132,7 @@ class RotorSystem:
     skew: float = 0.0  # rad, the disc's principal axis's tilt from the shaft's
     skew_angle: float = 0.0  # rad, of the skew's direction from the keyphasor mark
     weights: tuple[complex, ...] = ()  # balance weights on the disc, each m r e^{iθ} (kg·m) from the mark
+    gravity: float = 0.0  # m/s², pulling in -y (9.81 for a horizontal rotor; 0 for a vertical one)
 
     def __post_init__(self) -> None:
         if not 0.0 < self.position < 1.0:
@@ -136,6 +143,8 @@ class RotorSystem:
             raise ValueError("lengths, Young's modulus, masses and Id must be positive")
         if self.internal_damping < 0.0:
             raise ValueError("the internal damping cannot be negative")
+        if self.gravity < 0.0:
+            raise ValueError("gravity pulls down (-y): give its size")
         if self.bow < 0.0 or self.skew < 0.0:
             raise ValueError("the bow and the skew are sizes; give their direction as an angle")
 
@@ -231,6 +240,27 @@ class RotorSystem:
                               (self.id - self.ip) * self.skew * np.exp(1j * self.skew_angle), 0.0])
         bow = self.shaft_stiffness() @ self.bow_shape() * self.bow * np.exp(1j * self.bow_angle)
         return per_drive, bow
+
+    def gravity_load(self) -> np.ndarray:
+        """f_g (8,): the weights of the journals and the disc, in -y (N)."""
+        f = np.zeros(N_DOF)
+        f[[YA, YD, YB]] = -self.gravity * np.array([self.bearing_a.mass, self.disc_mass, self.bearing_b.mass])
+        return f
+
+    def static_deflection(self, omega: float | np.ndarray = 0.0) -> np.ndarray:
+        """q_s = (K + ΩH)^{-1} f_g: where gravity holds the rotor, (8,) or (len(omega), 8).
+
+        Without internal damping it does not depend on the speed.
+        """
+        omega = np.asarray(omega, dtype=float)
+        if not self.gravity:
+            return np.zeros(omega.shape + (N_DOF,))
+        f = self.gravity_load()
+        if not self.internal_damping or omega.ndim == 0:
+            q = np.linalg.solve(self.stiffness(float(omega) if omega.ndim == 0 else 0.0), f)
+            return q if omega.ndim == 0 else np.broadcast_to(q, omega.shape + (N_DOF,)).copy()
+        K, H = self.matrices()[3], self.circulatory()
+        return np.linalg.solve(K + omega[..., None, None] * H, np.broadcast_to(f, omega.shape + (N_DOF,))[..., None])[..., 0]
 
     def bow_displacement(self, phase: float) -> np.ndarray:
         """q_bow (8,): the bow at shaft angle φ, as displacements in fixed coordinates."""
@@ -537,8 +567,9 @@ class RotorSimulator:
         self._f_still = self._highest_freq_still()
 
     def _rest(self) -> np.ndarray:
-        """The state at rest: the shaft in its bowed shape, which loads nothing."""
-        return np.concatenate([self.system.bow_displacement(self.phase), np.zeros(N_DOF)])
+        """The state at rest: the shaft in its bowed shape (which loads nothing), sagging under gravity."""
+        q = self.system.bow_displacement(self.phase) + self.system.static_deflection(0.0)
+        return np.concatenate([q, np.zeros(N_DOF)])
 
     def reset(self) -> None:
         """Back to rest, not spinning (the target speed is kept)."""
@@ -561,9 +592,10 @@ class RotorSimulator:
     def energy(self) -> tuple[float, float]:
         """(kinetic, potential) energy of the vibration (J); the spin's own energy left out."""
         M, _, _, K = self.system.matrices()
-        # The shaft's strain is measured from its bow (zero at the journals, where the
-        # supports act). Only K's symmetric part stores energy: the cross-coupling does work instead.
-        q = self.q - self.system.bow_displacement(self.phase) if self.system.bow else self.q
+        # Measured from the equilibrium: the shaft's strain from its bow (zero at the journals, where
+        # the supports act), the springs' from where gravity holds them (gravity's own potential energy
+        # cancels the rest). Only K's symmetric part stores energy: the cross-coupling does work instead.
+        q = self.q - self.system.bow_displacement(self.phase) - self.system.static_deflection(self.omega)
         return 0.5 * float(self.qdot @ M @ self.qdot), 0.5 * float(q @ K @ q)
 
     # ------------------------------------------------------------- stepping
@@ -594,9 +626,9 @@ class RotorSimulator:
         return out
 
     def force(self, phase: np.ndarray, omega: np.ndarray, alpha: np.ndarray) -> np.ndarray:
-        """The 1X load f (..., 8) on q: the unbalance, the skew's moment and the bow's force."""
+        """The load f (..., 8) on q: the 1X unbalance, skew moment and bow force, and gravity."""
         p = self.system.rotating_load(omega, alpha) * np.exp(1j * np.asarray(phase))[..., None]
-        return np.concatenate([p.real, p.imag], axis=-1)
+        return np.concatenate([p.real, p.imag], axis=-1) + self.system.gravity_load()
 
     def _speeds(self, h: float, n: int) -> np.ndarray:
         """Ω at the end of each of the next n steps, ramping toward the target at self.accel."""

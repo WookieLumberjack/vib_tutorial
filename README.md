@@ -514,6 +514,12 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   starts from it, and well above the critical the disc settles on the bearings' axis. Against
   the unbalance it adds or cancels, depending on its angle. The skew τ is a couple unbalance,
   a moment (I<sub>d</sub> − I<sub>p</sub>)τΩ² on the disc's tilt.
+- **Gravity**: lay the rotor horizontal and it sags (378 µm at the disc with the defaults)
+  and whirls about the sagged position, its orbits below the bearings' centre. *Static sag*
+  switches the drawing between a DC-coupled probe's view and an AC-coupled one. The tracking,
+  the spectrum and the phase always use the vibration about the sag, which is exactly the
+  response without gravity: gravity alone makes no whirl, even on anisotropic supports.
+  Cross-coupled bearings and internal damping push the sag sideways.
 - **Single-plane balancing**: the field procedure by influence coefficients. Read the slow
   roll, the 1X vector as found, then with a trial weight, and the page works out the
   correction weight (grams at a radius and an angle from the keyphasor mark), puts it on and
@@ -538,6 +544,7 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   backward whirl, anisotropic supports, run-ups through a critical speed (why a fast ramp
   peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²), the bent
   shaft (slow-roll runout, why it is subtracted before balancing), the couple unbalance,
+  gravity's static sag,
   single-plane balancing by influence coefficients,
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
   c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whip), and why the solution
@@ -827,6 +834,7 @@ M, C, G, K = rotor.matrices()                                  # 8x8; M q'' + (C
 Q = synchronous_response(rotor, np.array([150.0]))             # steady whirl at 150 rad/s, complex (1, 8)
 bent = rotor.with_(bow=10e-6, bow_angle=np.pi, skew=np.radians(0.1))  # bow against the heavy spot, disc skewed
 weighted = rotor.with_(weights=(2e-5 * np.exp(1j * np.pi),))  # a 20 g·mm balance weight at 180° from the mark
+rotor.with_(gravity=9.81).static_deflection()                  # sag under its own weight, (8,)
 spin = RotorSimulator(rotor)
 spin.target = 3000 / RPM                                       # ramps at spin.accel (rad/s²)
 r = spin.advance(0.25)                                         # r.t, r.q (steps, 8), r.omega, r.phase
