@@ -71,6 +71,8 @@ DASH = QtCore.Qt.PenStyle.DashLine
 DOT = QtCore.Qt.PenStyle.DotLine
 STEADY_POINTS = 2000  # speeds on the steady-state curve, plus as many again around the criticals
 RUB = 0.02  # of the span: a whirl this large pauses the simulation (a real rotor would rub)
+GRAVITY = 9.81  # m/s²
+SAG_SPEEDS = 201  # speeds the static sag is worked out at, with internal damping, and interpolated
 SPECTRUM_FRAMES = 6  # the full spectrum is recomputed every this many frames
 MEASURE_SPEED = 2.0  # × real time, at least, while a balancing measurement runs
 
@@ -136,6 +138,18 @@ SKEW_TIP = (
     "It drives the disc's tilt directly, and pushes a thin disc (I<sub>p</sub> &gt; I<sub>d</sub>) toward "
     "square to the spin axis, bending the shaft at the disc by −τ at high speed.</p><p>At midspan on "
     "identical bearings it only tilts the disc; move the disc off centre and it moves it too.</p>"
+)
+GRAVITY_TIP = (
+    "<p>A horizontal rotor: gravity pulls the disc and the journals down. The shaft sags and the "
+    "supports give, so the rotor whirls about a point below the bearings' centre. The model is linear, "
+    "so the vibration about that point is just as without gravity: on these supports gravity alone "
+    "makes no whirl. With cross-coupled bearings or internal damping the sag also goes sideways.</p>"
+)
+SAG_TIP = (
+    "<p>Draw the motion with the static sag, as a DC-coupled probe reads the shaft's position in its "
+    "bearing: the orbits sit below the centre. Untick to draw only the vibration about where gravity "
+    "holds the rotor, as an AC-coupled probe does. The tracking, the spectrum and the phase are always "
+    "of the vibration.</p>"
 )
 ORBIT_TIP = (
     "<p>The path of the shaft's centre at each station over the last few revolutions, looking from "
@@ -464,8 +478,10 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
         layout.setColumnMaximumWidth(2, 1e6 if shown else 0)
         self.apply_theme()
 
-    def update_orbits(self, trails: list[np.ndarray], keys: list[np.ndarray], heavy_angle: float | None) -> None:
-        """Each station's trail (k, 2), its keyphasor points, and the heavy spot's angle now."""
+    def update_orbits(self, trails: list[np.ndarray], keys: list[np.ndarray], heavy_angle: float | None,
+                      centre: tuple[float, float] = (0.0, 0.0)) -> None:
+        """Each station's trail (k, 2), its keyphasor points, and the heavy spot's angle now, drawn from
+        `centre` on the disc's orbit (where it whirls about: its sag, if drawn)."""
         peaks = [float(np.abs(xy).max()) if xy.size else 0.0 for xy in trails]
         if self.same_scale:
             shown = [p for i, p in enumerate(peaks) if self.plots[i].isVisible()]
@@ -488,7 +504,8 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
             self.heavy.setData([], [])
         else:
             r = 0.9 * self.spans[1]
-            self.heavy.setData([0.0, r * math.cos(heavy_angle)], [0.0, r * math.sin(heavy_angle)])
+            x0, y0 = centre
+            self.heavy.setData([x0, x0 + r * math.cos(heavy_angle)], [y0, y0 + r * math.sin(heavy_angle)])
 
 
 class TimePlots(pg.GraphicsLayoutWidget):
@@ -685,6 +702,7 @@ class RotorPage(QtWidgets.QWidget):
         self._steady_vectors = np.empty((0, len(STATIONS), 2), dtype=complex)  # and 1X vectors there
         self.onset: Onset | None = None  # where the rotor goes unstable, if it does up to MAX_RPM
         self.rubbed = False  # the whirl grew past RUB of the span and the simulation paused
+        self._sag: tuple[np.ndarray, np.ndarray] | None = None  # see _set_sag
         self._weights: tuple[complex, ...] = ()  # balance weights on the disc (kg·m)
         self._hidden: tuple[float, float] | None = None  # (unbalance, angle) kept out of the panels
         self.measurement: SteadyMeasurement | None = None  # a balancing measurement running, if any
@@ -723,9 +741,15 @@ class RotorPage(QtWidgets.QWidget):
         self.same_scale = QtWidgets.QCheckBox("Same scale")
         self.same_scale.setToolTip("Draw the orbits at one scale, to compare their sizes")
         self.same_scale.toggled.connect(self._on_same_scale)
+        self.show_sag = QtWidgets.QCheckBox("Static sag")
+        self.show_sag.setChecked(True)
+        self.show_sag.setEnabled(False)
+        self.show_sag.setToolTip(SAG_TIP)
+        self.show_sag.toggled.connect(lambda _: self._draw())
         row = QtWidgets.QHBoxLayout()
         row.addWidget(QtWidgets.QLabel("Orbits, seen from the B end:"))
         row.addWidget(self.same_scale)
+        row.addWidget(self.show_sag)
         row.addStretch(1)
         row.addWidget(QtWidgets.QLabel("Strip chart:"))
         row.addWidget(self.station)
@@ -998,6 +1022,10 @@ class RotorPage(QtWidgets.QWidget):
         self.internal_damping = spin(0.0, 1e5, s.internal_damping, 1, " N·s/m")
         self.internal_damping.setToolTip(INTERNAL_TIP)
         form.addRow("Internal damping c<sub>i</sub>:", self.internal_damping)
+        self.gravity = QtWidgets.QCheckBox(f"Horizontal rotor (g = {GRAVITY} m/s²)")
+        self.gravity.setToolTip(GRAVITY_TIP)
+        self.gravity.toggled.connect(self._on_params)
+        form.addRow("Gravity:", self.gravity)
         self.shaft_note = QtWidgets.QLabel()
         self.shaft_note.setWordWrap(True)
         mute(self.shaft_note)
@@ -1082,6 +1110,7 @@ class RotorPage(QtWidgets.QWidget):
             unbalance_angle=(math.radians(self.unbalance_angle.value()) if self._hidden is None
                              else self._hidden[1]),
             weights=self._weights,
+            gravity=GRAVITY if self.gravity.isChecked() else 0.0,
             bow=self.bow.value() / 1e6,
             bow_angle=math.radians(self.bow_angle.value()),
             skew=math.radians(self.skew.value()),
@@ -1093,7 +1122,7 @@ class RotorPage(QtWidgets.QWidget):
         """Show and use `system` (for scripts and tests)."""
         boxes = (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip, self.id,
                  self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle, self.internal_damping,
-                 self.isotropic, self.same_bearings, *(w for row in self.bearing_rows for w in row))
+                 self.gravity, self.isotropic, self.same_bearings, *(w for row in self.bearing_rows for w in row))
         for w in boxes:
             w.blockSignals(True)
         self.length.setValue(system.length)
@@ -1107,6 +1136,7 @@ class RotorPage(QtWidgets.QWidget):
         self.unbalance.setValue(system.unbalance * 1e6)
         self.unbalance_angle.setValue(math.degrees(system.unbalance_angle))
         self._weights = system.weights
+        self.gravity.setChecked(system.gravity > 0.0)
         self.bow.setValue(system.bow * 1e6)
         self.bow_angle.setValue(math.degrees(system.bow_angle))
         self.skew.setValue(math.degrees(system.skew))
@@ -1175,11 +1205,13 @@ class RotorPage(QtWidgets.QWidget):
         self.view.set_system(system)
         self.orbits.set_midspan_shown(abs(system.position - 0.5) > 1e-9)
         self._stride = max(1, round(STORE_DT / self.sim.step_size()))
+        self._set_sag(system)
         ks = 48.0 * system.ei / system.length**3
         self.shaft_note.setText(
             f"EI = {system.ei:.4g} N·m²; shaft stiffness at the disc (bearings rigid) "
             f"{3 * system.ei * system.length / (system.a * system.b) ** 2:,.0f} N/m"
             + (" = 48EI/L³" if abs(system.position - 0.5) < 1e-9 else f" (48EI/L³ = {ks:,.0f} N/m at midspan)")
+            + self._sag_text(system)
         )
         self._analysis_timer.start()
 
@@ -1597,23 +1629,32 @@ class RotorPage(QtWidgets.QWidget):
         w = abs(sim.omega)
         trail_time = min(ORBIT_MAX_TIME, ORBIT_REVS * 2 * math.pi / w) if w > 0 else ORBIT_MAX_TIME
         _, y = self.history.window(trail_time)
-        trails = [y[:, 2 * i : 2 * i + 2] for i in range(len(STATIONS))]
+        shown = self._shown(y)
+        trails = [shown[:, 2 * i : 2 * i + 2] for i in range(len(STATIONS))]
         keys = [np.empty((0, 2))] * len(STATIONS)
         if y.shape[0] > 1:
             turns = np.floor(y[:, PHASE] / (2 * math.pi))
             idx = np.flatnonzero(np.diff(turns) != 0) + 1
             keys = [t[idx] for t in trails]
-        here = self._columns(sim.q[None, :], np.array([sim.phase]), np.array([sim.omega]))[0]
+        q_vib = sim.q - sim.system.static_deflection(sim.omega) if sim.system.gravity else sim.q
+        q_shown = sim.q if self.show_sag.isChecked() else q_vib
+        here = self._columns(q_shown[None, :], np.array([sim.phase]), np.array([sim.omega]))[0]
         peak = max([float(np.abs(t).max()) for t in trails if t.size] + [float(np.abs(here[:8]).max())])
-        self.view.update_state(sim.q, sim.phase, trails, peak)
+        self.view.update_state(q_shown, sim.phase, trails, peak)
         steady = sim.omega == sim.target and w > 0
+        here = self._columns(q_vib[None, :], np.array([sim.phase]), np.array([sim.omega]))[0]
         r_disc = math.hypot(here[2], here[3])
         heavy = self._heavy_angle()
-        self.orbits.update_orbits(trails, keys, heavy if w > 0 else None)
+        centre = (0.0, 0.0)
+        if self._sag is not None and self.show_sag.isChecked():
+            sag = self._sag_at(np.array([sim.omega]))[0]
+            centre = (float(sag[2]), float(sag[3]))
+        self.orbits.update_orbits(trails, keys, heavy if w > 0 else None, centre)
 
         t, hist = self.history.window(self.window.value())
         st = self.station.currentIndex()
-        self.time.update_curves(t, hist[:, 2 * st : 2 * st + 2], hist[:, OMEGA] * RPM, self.window.value())
+        self.time.update_curves(t, self._shown(hist)[:, 2 * st : 2 * st + 2], hist[:, OMEGA] * RPM,
+                                self.window.value())
         self.campbell_plot.set_speed(sim.omega * RPM)
         self.stability_map.set_speed(sim.omega * RPM)
         self._draw_tracking()
@@ -1631,9 +1672,11 @@ class RotorPage(QtWidgets.QWidget):
         crits = [c for c, _ in critical_speeds(self.campbell, _isotropic(sim.system))] if self.campbell else []
         if crits and w > 0:
             parts.append(f"Ω / first critical = {sim.omega / crits[0]:.2f}")
-        disc = trails[1]
+        disc = self._vibration(y)[:, 2:4]
         if disc.size:
-            text = f"disc orbit up to {_fmt_len(float(np.hypot(disc[:, 0], disc[:, 1]).max()))} from centre"
+            text = f"disc whirling up to {_fmt_len(float(np.hypot(disc[:, 0], disc[:, 1]).max()))}"
+            if sim.system.gravity:
+                text += " about its sag"
             if w > 0 and disc.shape[0] > 2:
                 # Signed area swept (x dy - y dx): positive turns x toward y, the way the shaft spins.
                 swept = float(np.sum(disc[:-1, 0] * np.diff(disc[:, 1]) - disc[:-1, 1] * np.diff(disc[:, 0])))
@@ -1665,11 +1708,44 @@ class RotorPage(QtWidgets.QWidget):
             return None
         return self.sim.phase + math.atan2(net.imag, net.real)
 
+    # ------------------------------------------------------------- static sag
+    def _set_sag(self, system: RotorSystem) -> None:
+        """The static sag at the history's columns, at a grid of speeds (one row if it does not vary)."""
+        self.show_sag.setEnabled(system.gravity > 0.0)
+        if not system.gravity:
+            self._sag = None
+            return
+        speeds = np.linspace(0.0, MAX_RPM / RPM, SAG_SPEEDS if system.internal_damping else 1)
+        qs = system.static_deflection(speeds)
+        self._sag = (speeds, self._columns(qs, speeds, speeds)[:, :8])
+
+    def _sag_at(self, omega: np.ndarray) -> np.ndarray:
+        """The static sag (len(omega), 8) in the history's station columns."""
+        speeds, cols = self._sag
+        if speeds.size == 1:
+            return np.broadcast_to(cols[0], (np.size(omega), 8))
+        return np.column_stack([np.interp(np.abs(omega), speeds, c) for c in cols.T])
+
+    def _vibration(self, y: np.ndarray) -> np.ndarray:
+        """History rows' station columns less the static sag: the vibration."""
+        return y[:, :8] if self._sag is None else y[:, :8] - self._sag_at(y[:, OMEGA])
+
+    def _shown(self, y: np.ndarray) -> np.ndarray:
+        """History rows' station columns as drawn: with the sag or without, as ticked."""
+        return y[:, :8] if self.show_sag.isChecked() else self._vibration(y)
+
+    def _sag_text(self, system: RotorSystem) -> str:
+        if not system.gravity:
+            return ""
+        q = system.static_deflection(0.0)
+        return (f"<br>Static sag at rest: disc {_fmt_len(-q[YD])}, journals {_fmt_len(-q[YA])} (A) and "
+                f"{_fmt_len(-q[YB])} (B)")
+
     def _draw_spectrum(self) -> None:
         """The full spectrum at the strip chart's station over the strip chart's window."""
         t, hist = self.history.window(self.window.value())
         st = self.station.currentIndex()
-        freqs, amps = full_spectrum(t, hist[:, 2 * st : 2 * st + 2])
+        freqs, amps = full_spectrum(t, self._vibration(hist)[:, 2 * st : 2 * st + 2])
         omega = self.sim.omega
         self.spectrum.update_spectrum(freqs, amps, omega, whirl_modes(self.sim.system, omega), DAMPED)
         self.spectrum_note.setText(

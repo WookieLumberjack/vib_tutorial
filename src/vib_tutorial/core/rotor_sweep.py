@@ -5,7 +5,8 @@ steady-state peak. To show it, the response is measured as on a real machine:
 a keyphasor marks each revolution (here, the mark on the shaft passing +x,
 φ = 2πk; the heavy spot is at the mark unless the unbalance is moved),
 and over each revolution a one-period DFT gives the 1X vector, as a tracking
-filter does. The largest displacement over the revolution is kept too.
+filter does. The largest displacement over the revolution is kept too. Both
+are of the vibration, about where gravity holds the rotor (an AC-coupled probe).
 
 Both are taken at four stations (the two bearings, the disc and midspan) and
 read in one of three directions: a probe in x, a probe in y, or the orbit's
@@ -37,6 +38,17 @@ TWO_PI = 2.0 * math.pi
 def station_positions(system: RotorSystem) -> np.ndarray:
     """Axial positions (m) of the stations: bearing A, the disc, midspan, bearing B."""
     return np.array([0.0, system.a, 0.5 * system.length, system.length])
+
+
+def vibration(system: RotorSystem, q: np.ndarray, omega: np.ndarray) -> np.ndarray:
+    """q (..., 8) less the static deflection under gravity at the speeds Ω (...): the vibration.
+
+    As a proximity probe's AC signal: the 1X filter and the peaks measure the motion
+    about where gravity holds the rotor, not its sag.
+    """
+    if not system.gravity:
+        return q
+    return q - system.static_deflection(omega)
 
 
 def station_motion(system: RotorSystem, q: np.ndarray) -> np.ndarray:
@@ -230,7 +242,7 @@ class StagedRun:
                 break
             parts.append(r)
             if self._tracker is not None:
-                self._tracker.feed(r.phase, r.omega, station_motion(sim.system, r.q))
+                self._tracker.feed(r.phase, r.omega, station_motion(sim.system, vibration(sim.system, r.q, r.omega)))
             if self.stage != "done" and self._until_next_stage() <= 0.5 * h:
                 self._next_stage()
         if not parts:

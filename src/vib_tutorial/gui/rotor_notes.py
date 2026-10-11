@@ -6,7 +6,7 @@ import math
 
 import numpy as np
 
-from ..core.rotor import DOF_NAMES, RPM, RotorSystem, whirl_modes
+from ..core.rotor import DOF_NAMES, RPM, XD, YD, RotorSystem, whirl_modes
 from .cms_notes import fmt
 from .style import colors
 
@@ -91,6 +91,17 @@ def matrices_html(system: RotorSystem, omega: float, hidden: bool = False) -> st
     rpm = omega * RPM
     fb = ks @ s.bow_shape() * s.bow
     bow_journals = f"{fmt(-fb[0], 1.0)} N at A and {fmt(-fb[3], 1.0)} N at B"
+    if s.gravity:
+        qs = s.static_deflection(omega)
+        gravity = (
+            f"<h4>Gravity</h4><p>On a horizontal rotor f also holds the weights, constant: "
+            f"−m<sub>A</sub>g, −mg and −m<sub>B</sub>g on y<sub>A</sub>, y<sub>D</sub> and y<sub>B</sub> "
+            f"(here {fmt(s.disc_mass * s.gravity, 1.0)} N on the disc). They hold the rotor at the static "
+            f"deflection q<sub>s</sub> = (K + ΩH)<sup>−1</sup>f<sub>g</sub>, here the disc at "
+            f"({qs[XD] * 1e6:.4g}, {qs[YD] * 1e6:.4g}) µm, about which it vibrates as without gravity.</p>"
+        )
+    else:
+        gravity = ""
     net = s.mass_unbalance
     if hidden:
         unbalance, force = "The unbalance (hidden: find it on the <i>Balancing</i> tab)", "hidden"
@@ -176,6 +187,7 @@ mark) gives the same form on its slopes, M<sub>x</sub> + i M<sub>y</sub> =
 {s.bow * 1e6:.4g} µm (toward {math.degrees(s.bow_angle):.0f}°) gives K<sub>shaft</sub>q<sub>bow</sub>
 turning with the shaft whatever the speed: {fmt(s.disc_stiffness * s.bow, 1.0)} N on the disc, and the
 bearings' share of it back on the journals, {bow_journals}.</p>
+{gravity}
 """
 
 
@@ -336,6 +348,27 @@ off centre and the tilt and the translation couple, so the skew moves the disc t
 unbalance (the mass off the axis) can be corrected by one weight in one plane; a <i>couple</i>
 unbalance needs two weights in two planes, equal and opposite.</p>
 
+<h3>Gravity on a horizontal rotor</h3>
+<p>Laid horizontal, the rotor carries its own weight: the disc's mg bends the shaft, and the bearings'
+share of it, with the journals' own weight, compresses the supports. With the defaults the disc sags
+378 µm and the journals 118 µm, nineteen times the unbalance's 20 µm eccentricity. The rotor whirls
+about that sagged position, so its orbits sit below the bearings' centre: a DC-coupled proximity probe,
+which reads the gap, sees the orbit offset by the sag; an AC-coupled one sees only the vibration (the
+<i>Static sag</i> box switches the drawing between the two; the tracking, the spectrum and the phase
+are always of the vibration).</p>
+<p>The model is linear, so the sag is a static deflection q<sub>s</sub> = (K + ΩH)<sup>−1</sup>f<sub>g</sub>
+and the vibration about it is exactly what it would be without gravity. In particular gravity alone
+makes no whirl, however different the supports' stiffness vertically and horizontally: a constant force
+on a linear rotor only moves its equilibrium. (A real rotor is less simple: a shaft stiffer one way than the other, with a keyway
+say, bends more under its weight twice per turn, a 2X excitation; and a fluid-film bearing's stiffness
+depends on the load it carries.)</p>
+<p>The sag need not be straight down. Where the stiffness is not symmetric the weight also pushes
+sideways. With cross-coupled bearings, k<sub>xy</sub> = 15,000 N/m, the journals settle 17° from the
+vertical in the direction of rotation, much as a fluid-film journal sits at an <i>attitude angle</i>.
+With internal damping the shaft turns through its own sag, bent the same way at every angle, and the
+damping resists that: with c<sub>i</sub> = 20 N·s/m the disc moves sideways by 14 µm at 1000 rpm,
+42 µm at 3000 rpm and 78 µm at 6000 rpm.</p>
+
 <h3>Single-plane balancing</h3>
 <p>Balancing puts a weight on the rotor to cancel its unbalance. Where the heavy spot is cannot be seen,
 and the phase lag between it and the high spot depends on the speed, so it is found from measurements,
@@ -467,6 +500,10 @@ slow roll, as found, trial run, correct and check. The check should read well un
 reading as found; <i>Reveal</i> then shows the unbalance you cancelled.</li>
 <li>Set a bow of 20 µm at 90°, put the probe on the disc, and balance at 1200 rpm with and without
 <i>Subtract slow roll</i>: compare the curves as found and now under the vectors.</li>
+<li>Tick <i>Gravity</i>: the rotor sags, 378 µm at the disc, and whirls about the sagged position,
+the orbits sitting below the bearings' centre. Untick <i>Static sag</i> to look at the vibration alone:
+it is the same as without gravity. Make the supports anisotropic with no unbalance: the rotor sags,
+spins up and stays still.</li>
 <li>Pause near the critical speed and turn the 3D view: the shaft bows in one plane, which turns with
 the spin, rather than flapping back and forth.</li>
 </ol>
@@ -483,6 +520,7 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>Ω, φ</td><td>spin speed; angle of the keyphasor mark on the shaft from +x (φ' = Ω)</td><td>rad/s (rpm), rad</td></tr>
 <tr><td>U = m e, ψ</td><td>unbalance: disc mass times its centre of mass's offset e; the heavy spot's angle from the mark</td><td>kg·m (g·mm), rad</td></tr>
 <tr><td>M, C, G, K</td><td>mass, damping, gyroscopic and stiffness matrices (8 × 8)</td><td>—</td></tr>
+<tr><td>g, f<sub>g</sub>, q<sub>s</sub></td><td>gravity; the weights on the journals and the disc; the static deflection under them</td><td>m/s², N, m</td></tr>
 <tr><td>A(Ω), B</td><td>state matrix (16 × 16) and input matrix</td><td>—</td></tr>
 <tr><td>ω<sub>c</sub></td><td>critical speed</td><td>rad/s (rpm)</td></tr>
 <tr><td>ζ</td><td>damping ratio of a mode, −Re λ / |λ|</td><td>—</td></tr>

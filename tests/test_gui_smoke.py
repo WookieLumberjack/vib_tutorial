@@ -1645,6 +1645,28 @@ def test_rotor_page(app):
     assert abs(p._steady_vectors[0, 1, 0]) == pytest.approx(30e-6, rel=1e-2)  # the slow-roll runout
     w.set_theme("Light")
 
+    # Gravity: the rotor rests sagged and whirls about the sag; unticking Static sag draws the vibration.
+    p.set_system(RotorSystem())
+    assert not p.show_sag.isEnabled()
+    p.gravity.setChecked(True)
+    assert p.sim.system.gravity == pytest.approx(9.81) and p.show_sag.isEnabled()
+    assert "Static sag at rest: disc 378 µm" in p.shaft_note.text()
+    p.reset()
+    sag = p.sim.system.static_deflection()
+    np.testing.assert_allclose(p.sim.q, sag)
+    p.ramp.setValue(5000.0)
+    p.set_target_rpm(1200.0)
+    for _ in range(30):
+        p.step(0.05)
+    disc = p.orbits.trails[1].getData()
+    assert np.mean(disc[1]) == pytest.approx(sag[5], rel=0.05)  # below the centre
+    p.show_sag.setChecked(False)
+    disc = p.orbits.trails[1].getData()
+    assert abs(np.mean(disc[1])) < 0.1 * abs(sag[5])
+    assert "about its sag" in p.readout.text()
+    p.gravity.setChecked(False)
+    assert not p.show_sag.isEnabled()
+
     # Balancing: a hidden unbalance, found in four measured steps and cancelled by one weight.
     p.set_system(RotorSystem())
     b = p.balancing
