@@ -449,6 +449,27 @@ def jeffcott_balancing():
     save(w, "jeffcott_balancing")
 
 
+def jeffcott_two_plane():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.set_system(RotorSystem(position=0.3, skew=math.radians(0.5)))
+    page._refresh_analysis()
+    page.ramp.setValue(5000.0)
+    b = page.balancing
+    page.tabs.setCurrentWidget(b)
+    b.mode.setCurrentIndex(1)  # the disc's faces, 40 mm apart; probes at A and B
+    for button in b.step_buttons:
+        button.click()
+        while page.measurement is not None:
+            page.step(0.02)
+    print(b.results.text())
+    save(w, "jeffcott_two_plane")
+
+
 def jeffcott_stability():
     w = window()
     page = w.rotor_page
@@ -532,7 +553,7 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
-         jeffcott_bow, jeffcott_balancing, jeffcott_stability, jeffcott_overhung, jeffcott_waterfall,
+         jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass]
 
 

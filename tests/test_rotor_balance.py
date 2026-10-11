@@ -1,21 +1,37 @@
-"""Single-plane balancing of the Jeffcott rotor: measurement, influence coefficient, correction."""
+"""Single- and two-plane balancing of the Jeffcott rotor: measurement, influence coefficients, corrections."""
 
 import math
 
 import numpy as np
 import pytest
 
-from vib_tutorial.core.rotor import RPM, XD, RotorSimulator, RotorSystem, synchronous_response
+from vib_tutorial.core.rotor import (
+    RPM,
+    STEEL,
+    XD,
+    YD,
+    Bearing,
+    PlaneWeight,
+    RotorSimulator,
+    RotorSystem,
+    synchronous_response,
+)
 from vib_tutorial.core.rotor_balance import (
     SteadyMeasurement,
     correction,
+    corrections,
     influence,
+    influence_matrix,
     weight,
     weight_parts,
 )
+from vib_tutorial.core.rotor_presets import rotor_presets
 from vib_tutorial.core.rotor_sweep import probe, steady_vectors
 
-BEARING_A, DISC = 0, 1
+BEARING_A, DISC, BEARING_B = 0, 1, 3
+PROBES = ((BEARING_A, "x"), (BEARING_B, "x"))
+TRIAL = weight(0.5e-3, 0.02, 0.0)
+SKEWED = RotorSystem(position=0.3, skew=math.radians(0.5))  # the theory notes' example
 
 
 def reading(system: RotorSystem, rpm: float, station: int = BEARING_A, direction: str = "x") -> complex:
@@ -111,3 +127,128 @@ def test_balancing_by_measurement_takes_out_most_of_the_reading():
     sim.set_system(s.with_(weights=(correction(v0, influence(v0, v1, trial)),)))
     v2 = measure()
     assert abs(v2) < 0.01 * abs(v0)
+
+
+def readings(system: RotorSystem, rpm, probes=PROBES) -> np.ndarray:
+    """Steady-state 1X readings (len(rpm), len(probes)) of the probes."""
+    v = steady_vectors(system, np.atleast_1d(np.asarray(rpm, dtype=float)) / RPM)
+    return np.array([[probe(v[i, station], d) for station, d in probes] for i in range(v.shape[0])])
+
+
+def balance_two(system: RotorSystem, rpm: float, planes, noise=None) -> tuple[RotorSystem, np.ndarray, np.ndarray]:
+    """Two-plane balancing on steady readings: (the rotor with its corrections on, the weights, α)."""
+    read = (lambda v: v) if noise is None else noise
+    v0 = read(readings(system, rpm)[0])
+    runs = read(np.array([readings(system.with_(plane_weights=(p._replace(weight=TRIAL),)), rpm)[0] for p in planes]))
+    alpha = influence_matrix(v0, runs, [TRIAL, TRIAL])
+    w = corrections(v0, alpha)
+    return system.with_(plane_weights=tuple(p._replace(weight=x) for p, x in zip(planes, w))), w, alpha
+
+
+def faces(system: RotorSystem, apart: float) -> tuple[PlaneWeight, PlaneWeight]:
+    return PlaneWeight(system.a - apart / 2, 0j, True), PlaneWeight(system.a + apart / 2, 0j, True)
+
+
+def grams(w: complex) -> tuple[float, int]:
+    mass, angle = weight_parts(w, 0.02)
+    return round(mass * 1e3, 2), round(math.degrees(angle)) % 360
+
+
+def test_plane_weights_on_the_disc_make_a_force_and_a_couple():
+    s = RotorSystem(position=0.3, unbalance=0.0)
+    w = weight(1e-3, 0.02, 1.0)
+    on = s.with_(plane_weights=(PlaneWeight(s.a + 0.03, w, True),))
+    assert on.mass_unbalance == pytest.approx(w) and on.couple_unbalance == pytest.approx(0.03 * w)
+    # A pair equal and opposite, h apart, is a pure couple: it cancels a skew exactly, at every speed.
+    skewed = s.with_(skew=math.radians(0.3), skew_angle=2.0)
+    m = skewed.couple_unbalance / 0.04
+    fixed = skewed.with_(plane_weights=(PlaneWeight(s.a - 0.02, m, True), PlaneWeight(s.a + 0.02, -m, True)))
+    assert abs(fixed.couple_unbalance) < 1e-15 and abs(fixed.mass_unbalance) < 1e-15
+    assert np.abs(synchronous_response(fixed, [100.0, 183.0, 600.0])).max() < 1e-18
+    # A weight on the shaft at the disc's plane is a weight on the disc.
+    at_disc = s.with_(plane_weights=(PlaneWeight(s.a, w),))
+    assert at_disc.mass_unbalance == pytest.approx(w)
+    np.testing.assert_allclose(synchronous_response(at_disc, [150.0]), synchronous_response(s.with_(weights=(w,)), [150.0]))
+    with pytest.raises(ValueError):
+        RotorSystem(plane_weights=(PlaneWeight(0.6, w),))  # past the shaft's end
+
+
+def test_a_weight_on_the_shaft_is_a_point_force_there():
+    # Rigid bearings and a massless shaft: the disc moves as a simply supported beam's formula says.
+    rigid = Bearing(kx=1e12, ky=1e12)
+    s = RotorSystem(bearing_a=rigid, bearing_b=rigid, unbalance=0.0, plane_weights=(PlaneWeight(0.15, 1.0 + 0j),))
+    q = np.linalg.solve(s.stiffness(0.0), s.plane_load(s.rotating_load(1.0)))
+    L, x, z = s.length, s.a, 0.15
+    assert q[XD] == pytest.approx(z * (L - x) * (2 * L * x - x**2 - z**2) / (6 * s.ei * L), rel=1e-6)
+    assert abs(q[YD]) < 1e-20
+
+
+def test_the_influence_matrix_reduces_to_the_coefficient():
+    v0, v1, t = 3e-6 + 1e-6j, 5e-6 - 2e-6j, 1e-5j
+    alpha = influence_matrix([v0], [[v1]], [t])
+    assert alpha.shape == (1, 1) and alpha[0, 0] == pytest.approx(influence(v0, v1, t))
+    assert corrections([v0], alpha, 1e-7)[0] == pytest.approx(correction(v0, influence(v0, v1, t), 1e-7))
+    with pytest.raises(ValueError):
+        corrections([v0, v0], np.ones((2, 2)))  # both planes act alike: no solution
+    with pytest.raises(ValueError):
+        influence_matrix([v0, v0], [[v1, v1], [v1, v1]], [t, 0j])
+
+
+def test_two_planes_on_the_disc_balance_it_at_every_speed():
+    s = SKEWED
+    grid = np.linspace(100.0, 10_000.0, 3961)
+    found = np.abs(readings(s, grid, [(DISC, "x")]))[:, 0]
+    assert round(found.max() * 1e6) == 72 and grid[found.argmax()] == pytest.approx(1752.5)
+    fixed, w, alpha = balance_two(s, 1200.0, faces(s, 0.04))
+    assert [grams(x) for x in w] == [(7.32, 180), (6.32, 0)]
+    assert round(np.linalg.cond(alpha), 1) == 27.6
+    assert abs(fixed.mass_unbalance) < 1e-9 * abs(s.mass_unbalance)
+    assert abs(fixed.couple_unbalance) < 1e-9 * abs(s.couple_unbalance)
+    assert np.abs(readings(fixed, grid, [(DISC, "x"), *PROBES])).max() < 1e-9 * found.max()
+    assert round(np.linalg.cond(balance_two(s, 1200.0, faces(s, 0.1))[2])) == 11
+
+
+def test_two_planes_on_the_shaft_balance_only_at_the_balancing_speed():
+    s = SKEWED
+    crit = 1752.5
+
+    def disc(system: RotorSystem, rpm: float) -> float:
+        return abs(readings(system, rpm, [(DISC, "x")])[0, 0]) * 1e6
+
+    near, w, _ = balance_two(s, 1200.0, (PlaneWeight(0.1, 0j), PlaneWeight(0.2, 0j)))
+    assert [grams(x) for x in w] == [(3.23, 180), (2.22, 0)]
+    assert [grams(x) for x in balance_two(s, 1200.0, faces(s, 0.1))[1]] == [(3.23, 180), (2.23, 0)]
+    assert np.abs(readings(near, 1200.0)).max() < 1e-12
+    assert round(disc(near, crit), 1) == 2.7 and round(disc(near, 6000.0), 1) == 1.2
+    far, w, alpha = balance_two(s, 1200.0, (PlaneWeight(0.02, 0j), PlaneWeight(0.48, 0j)))
+    assert [grams(x) for x in w] == [(1.25, 180), (0.33, 0)] and round(np.linalg.cond(alpha), 1) == 1.5
+    assert np.abs(readings(far, 1200.0)).max() < 1e-12
+    assert round(disc(far, crit), 1) == 12.8
+    assert round(disc(s, 6000.0), 1) == 13.6
+
+
+def test_planes_close_together_amplify_errors_in_the_readings():
+    s = SKEWED
+    rng = np.random.default_rng(0)
+
+    def noisy(v: np.ndarray) -> np.ndarray:
+        return v * (1 + 0.01 * (rng.standard_normal(v.shape) + 1j * rng.standard_normal(v.shape)) / math.sqrt(2))
+
+    def left(apart: float) -> float:
+        out = [abs(readings(balance_two(s, 1200.0, faces(s, apart), noisy)[0], 1752.5, [(DISC, "x")])[0, 0])
+               for _ in range(1000)]
+        return float(np.median(out)) * 1e6
+
+    # A sampled median: the notes say about 18 µm and about 8 µm.
+    assert 17.0 < left(0.04) < 20.0 and 7.5 < left(0.1) < 8.8
+
+
+def test_two_planes_on_the_disc_balance_the_long_shaft_and_the_overhung_rotor():
+    presets = {p.name: p.system for p in rotor_presets()}
+    for name, rpm, top in (("Long shaft, with its mass", 1200.0, 10_000.0), ("Overhung rotor", 1000.0, 3000.0)):
+        s = presets[name].with_(skew=math.radians(0.05), skew_angle=1.0)
+        fixed, _, _ = balance_two(s, rpm, faces(s, 0.05))
+        grid = np.linspace(100.0, top, 400)
+        before = np.abs(readings(s, grid, [(DISC, "x"), *PROBES])).max()
+        assert np.abs(readings(fixed, grid, [(DISC, "x"), *PROBES])).max() < 1e-8 * before
+    assert presets["Long shaft, with its mass"].density == STEEL

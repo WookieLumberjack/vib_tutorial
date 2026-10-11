@@ -531,14 +531,19 @@ the speed ramps to a target.
   the spectrum and the phase always use the vibration about the sag, which is exactly the
   response without gravity: gravity alone makes no whirl, even on anisotropic supports.
   Cross-coupled bearings and internal damping push the sag sideways.
-- **Single-plane balancing**: the field procedure by influence coefficients. Read the slow
-  roll, the 1X vector as found, then with a trial weight, and the page works out the
+- **Balancing, in one plane or two**: the field procedure by influence coefficients. Read the
+  slow roll, the 1X vector as found, then with a trial weight, and the page works out the
   correction weight (grams at a radius and an angle from the keyphasor mark), puts it on and
   checks it. Each reading is a measurement on the running simulation: ramp, settle, average
   ten revolutions. *Mystery unbalance* hides the heavy spot to find. The response before and
   after against speed shows what one weight can and cannot do: subtract the slow roll and a
   bowed rotor is balanced at every speed, leaving only its runout; balance the raw reading and
   it is out of balance away from the balancing speed; a skewed disc's couple needs two planes.
+  - **Two planes**: two probes, a trial run in each plane in turn, the 2 × 2 influence matrix
+    with its condition number, and the two weights from its inverse. The planes are the disc's
+    two faces (a set distance apart), which cancel its unbalance and couple at every speed, or
+    anywhere on the shaft, which cancel the readings only at the balancing speed unless the
+    planes are close to the unbalance. *Mystery unbalance* then hides a skew too.
 - **Campbell diagram**: the damped natural frequencies against speed, coloured by whirl
   direction, with the 1X line and the critical speeds, and the onset of instability with the
   growing modes crossed. Drag the speed line to set the target. The speed range is adjustable
@@ -568,7 +573,8 @@ the speed ramps to a target.
   peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²), the bent
   shaft (slow-roll runout, why it is subtracted before balancing), the couple unbalance,
   gravity's static sag,
-  single-plane balancing by influence coefficients,
+  single- and two-plane balancing by influence coefficients (where the planes go, and why planes
+  close together need large weights: the influence matrix's condition number),
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
   c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whirl and whip at λΩ = ω), waterfall and
   cascade plots (a measured Campbell diagram; block length against ramp rate), the shaft's own mass
@@ -603,6 +609,13 @@ Balancing a bowed rotor shows why the slow roll is subtracted first. Relative to
 a bowed shaft sees an unbalance m·δ<sub>b</sub>, so one weight removes every force the bow makes,
 at every speed. What remains is the runout itself, which no weight removes and which makes no
 force.
+
+![Two-plane balancing of a disc at a/L = 0.3 skewed by 0.5°, with the 20 g·mm unbalance, in planes on the disc's faces 40 mm apart, probes at both bearings, balanced at 1200 rpm. The influence matrix's condition number is 27.6, the corrections are 7.27 g at 180° and 6.27 g at 0°, and afterwards both probes read flat at every speed, where as found bearing A peaked at 37 µm at the critical](docs/images/jeffcott_two_plane.png)
+
+A skewed disc is a couple unbalance, which one weight can't cancel. Two weights on the disc's
+faces make a force and a couple, the same form as the unbalance and the skew, so they cancel both
+at every speed. Planes on the shaft would cancel the readings only at the balancing speed, and
+planes close together need large weights, which errors in the readings swing.
 
 ![Jeffcott rotor's stability map and full spectrum with internal damping 20 N·s/m: the forward mode's damping crosses zero at 3910 rpm, and at 5000 rpm a tap grows into a forward whirl at 26.9 Hz, 0.32× the speed](docs/images/jeffcott_stability.png)
 
@@ -781,8 +794,8 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/rotor_sweep.py`: run-up and coast-down: the steady-state 1X vectors at each station,
   once-per-revolution tracking of the 1X vector and peak (`RevolutionTracker`), and
   `RunUpCoastDown`, which drives the stepper through a sweep and records each leg.
-- `core/rotor_balance.py`: single-plane balancing: influence coefficient, correction weight,
-  and `SteadyMeasurement`, which runs the stepper at a speed, lets it settle and averages the
+- `core/rotor_balance.py`: single- and two-plane balancing: influence coefficient and matrix,
+  correction weights, and `SteadyMeasurement`, which runs the stepper at a speed, lets it settle and averages the
   1X vector over some revolutions.
 - `core/rotor_presets.py`: the rotor page's presets, each a `RotorSystem` with a speed range
   and a note.
@@ -825,7 +838,7 @@ from vib_tutorial.core import modal_energies
 
 E = modal_energies(chain, res, x, v)                           # (steps, N), J; rows sum to T + V
 sim.energy_added + sim.work - sim.dissipated - sim.stored_energy  # ~1e-15 J: exact balance
-added, work, dissipated = sim.ledger.T                          # the same ledger at each step of the last advance
+added, work, dissipated, friction = sim.ledger.T                # the same ledger at each step of the last advance
 
 from vib_tutorial.core import ForceController, ForceKind, ForceSettings, element_forces, pluck_shape, transmissibility
 
@@ -931,6 +944,23 @@ trial = weight(0.5e-3, 0.02, 0.0)                              # 0.5 g at 20 mm,
 spin.set_system(rotor.with_(weights=(trial,)))
 v1 = probe(SteadyMeasurement(spin, 1200 / RPM).run()[1], "x")
 W = correction(v0, influence(v0, v1, trial))                   # the weight that cancels v0 (kg·m)
+
+# Two planes on the disc's faces (PlaneWeight(z, w, disc=True)), probes at A and B (x).
+from vib_tutorial.core.rotor import PlaneWeight
+from vib_tutorial.core.rotor_balance import corrections, influence_matrix
+
+skewed = rotor.with_(position=0.3, skew=np.radians(0.5))
+planes = [PlaneWeight(skewed.a - 0.02, 0j, disc=True), PlaneWeight(skewed.a + 0.02, 0j, disc=True)]
+
+def read(s):                                                   # steady 1X readings at the two bearings
+    v = steady_vectors(s, np.array([1200 / RPM]))[0]
+    return np.array([probe(v[0], "x"), probe(v[3], "x")])
+
+v0 = read(skewed)
+runs = [read(skewed.with_(plane_weights=(p._replace(weight=trial),))) for p in planes]
+alpha = influence_matrix(v0, runs, [trial, trial])             # 2 x 2: a column per plane
+W = corrections(v0, alpha)                                     # [7.32 g, 6.32 g] at 20 mm, 180° and 0°
+balanced = skewed.with_(plane_weights=tuple(p._replace(weight=w) for p, w in zip(planes, W)))
 ```
 
 ## Ideas for extension

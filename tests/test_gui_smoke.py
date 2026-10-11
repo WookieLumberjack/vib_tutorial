@@ -1699,6 +1699,42 @@ def test_rotor_page(app):
     assert p.view.show_heavy and b.show_heavy.isChecked()
     b.remove_weights()
     assert p.sim.system.weights == () and b.reading("found") is None
+    # Two planes on the disc's faces: a hidden unbalance and skew, cancelled at every speed in five steps.
+    p.set_system(RotorSystem(position=0.3))
+    b.mode.setCurrentIndex(1)
+    assert len(b.step_buttons) == 5 and b.station2.isVisible() == b.station.isVisible()
+    b.new_mystery()
+    hidden = p.sim.system
+    assert hidden.skew > 0 and p.skew.text() == "hidden" and not p.skew.isEnabled()
+    p.tabs.setCurrentWidget(p.matrices)
+    p._refresh_matrices()
+    assert "skew τ (hidden)" in p.matrices.toPlainText()
+    p.tabs.setCurrentWidget(b)
+    for button in b.step_buttons:
+        button.click()
+        for _ in range(400):
+            p.step(0.05)
+            if p.measurement is None:
+                break
+        assert p.measurement is None
+    s = p.sim.system
+    assert s.weights == () and len(s.plane_weights) == 2 and all(w.disc for w in s.plane_weights)
+    assert abs(s.mass_unbalance) < 0.02 * abs(hidden.mass_unbalance)
+    # The faces are close, cond(α) ≈ 28, so the measured readings' small errors grow in the couple.
+    assert abs(s.couple_unbalance) < 0.05 * abs(hidden.couple_unbalance)
+    slow = b.readings("slow")
+    assert np.all(np.abs(b.readings("verify") - slow) < 0.03 * np.abs(b.readings("found") - slow))
+    assert "influence matrix" in b.results.text().lower() and "W<sub>2</sub>" in b.results.text()
+    p.reveal_unbalance()
+    assert p.skew.isEnabled() and p.skew.value() == pytest.approx(math.degrees(hidden.skew), abs=1e-3)
+    # The planes changed: the trial runs no longer apply.
+    b.mode.setCurrentIndex(2)
+    assert b.reading("trial") is None and b.reading("found") is not None
+    assert not b._buttons["verify"].isEnabled()
+    b.remove_weights()
+    assert p.sim.system.plane_weights == ()
+    b.mode.setCurrentIndex(0)
+
     # Taking over the speed cancels a measurement.
     b.step_buttons[1].click()
     p.set_target_rpm(700.0)

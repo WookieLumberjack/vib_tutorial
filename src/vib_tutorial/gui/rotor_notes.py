@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import cmath
 import math
+from collections.abc import Collection
 
 import numpy as np
 
@@ -73,10 +75,11 @@ def _labels(system: RotorSystem) -> tuple[list[str], list[str]]:
             GROUPS + ["i"] * len(r) + ["b"] * len(r))
 
 
-def matrices_html(system: RotorSystem, omega: float, hidden: bool = False) -> str:
+def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = ()) -> str:
     """The equations of motion, every matrix with the current numbers, and the modes at speed Ω.
 
-    With `hidden`, the unbalance's size and angle are left out (a balancing exercise).
+    `hidden` names the RotorSystem fields a balancing exercise keeps out of sight: the
+    unbalance's size and angle, and perhaps the skew's.
     """
     M, C, G, K = system.matrices()
     H = system.circulatory()
@@ -167,10 +170,28 @@ def matrices_html(system: RotorSystem, omega: float, hidden: bool = False) -> st
     else:
         unbalance = (f"The unbalance U = m e = {s.unbalance * 1e6:.4g} g·mm at ψ = "
                      f"{math.degrees(s.unbalance_angle):.0f}°")
-        if s.weights:
-            unbalance += (f", with {len(s.weights)} balance weight{'s' if len(s.weights) > 1 else ''}"
+        on_disc = len(s.weights) + sum(s.on_disc(p) for p in s.plane_weights)
+        if on_disc:
+            unbalance += (f", with {on_disc} balance weight{'s' if on_disc > 1 else ''}"
                           f" (net {abs(net) * 1e6:.4g} g·mm at {math.degrees(math.atan2(net.imag, net.real)):.0f}°),")
         force = fmt(abs(net) * omega**2, 1.0)
+    on_shaft = [p for p in s.plane_weights if not s.on_disc(p)]
+    if on_shaft:
+        listed = "; ".join(f"{abs(p.weight) * 1e6:.4g} g·mm at {math.degrees(cmath.phase(p.weight)) % 360:.0f}°, "
+                           f"z = {p.z * 1e3:.0f} mm" for p in on_shaft)
+        shaft_weights = (f" Balance weights on the shaft ({listed}) are point forces of the same form, shared over "
+                         f"the DOFs as a load at z is, S(z)<sup>T</sup>.")
+    else:
+        shaft_weights = ""
+    if "skew" in hidden:
+        skew = "The disc's skew τ (hidden)"
+        moment = "hidden"
+    else:
+        skew = (f"The disc's skew τ = {math.degrees(s.skew):.4g}° (toward {math.degrees(s.skew_angle):.0f}° from "
+                f"the mark)")
+        moment = fmt(abs(s.couple_unbalance) * omega**2, 1.0) + " N·m"
+    faces = (" Balance weights on the disc's faces, a distance h from its centre plane, add wh to "
+             "(I<sub>d</sub> − I<sub>p</sub>)τe<sup>iγ</sup>." if any(p.disc for p in s.plane_weights) else "")
     return f"""
 <h3>Equations of motion at {rpm:,.0f} rpm (Ω = {omega:.4g} rad/s)</h3>
 <p style='font-size:large' align='center'>M q̈ + (C + Ω G) q̇ + (K + Ω H) q = f(t)</p>
@@ -237,11 +258,9 @@ mark, keeping the disc's centre of mass on its path takes</p>
 <p>on the disc's x<sub>D</sub> and y<sub>D</sub>, or in general f<sub>x</sub> + i f<sub>y</sub> =
 Ue<sup>iψ</sup>(Ω² − iΩ')e<sup>iφ</sup>, with ψ the heavy spot's angle from the mark. Balance weights add
 to Ue<sup>iψ</sup>. Here the force is {force} N turning once per revolution. Ω' is the ramp's angular
-acceleration, while the speed changes.</p>
-<p>The disc's skew τ = {math.degrees(s.skew):.4g}° (toward {math.degrees(s.skew_angle):.0f}° from the
-mark) gives the same form on its slopes, M<sub>x</sub> + i M<sub>y</sub> =
-(I<sub>d</sub> − I<sub>p</sub>)τ(Ω² − iΩ')e<sup>i(φ+γ)</sup>: here
-{fmt(abs(s.id - s.ip) * s.skew * omega**2, 1.0)} N·m. The shaft's bow δ<sub>b</sub> =
+acceleration, while the speed changes.{shaft_weights}</p>
+<p>{skew} gives the same form on its slopes, M<sub>x</sub> + i M<sub>y</sub> =
+(I<sub>d</sub> − I<sub>p</sub>)τ(Ω² − iΩ')e<sup>i(φ+γ)</sup>: here {moment}.{faces} The shaft's bow δ<sub>b</sub> =
 {s.bow * 1e6:.4g} µm (toward {math.degrees(s.bow_angle):.0f}°) gives K<sub>shaft</sub>q<sub>bow</sub>
 turning with the shaft whatever the speed: {fmt(s.disc_stiffness * s.bow, 1.0)} N on the disc, and the
 bearings' share of it back on the journals, {bow_journals}.</p>
@@ -481,9 +500,44 @@ too fast spoils it a little: at 300 rpm it already holds some unbalance response
 the critical instead of 19.4.</p>
 <p><b>What one plane cannot do.</b> A weight in the disc's plane makes a force; a skewed disc makes a
 moment. Off centre, both move the disc, so a single weight can cancel the reading at the balancing speed
-but not at every speed: with a/L = 0.3 and a skew of 0.5°, balanced at 1200 rpm, 172 µm at the critical
+but not at every speed: with a/L = 0.3 and a skew of 0.5°, balanced at 1200 rpm, 72 µm at the critical
 falls only to 5.7 µm, and 9 µm is left at 6000 rpm. A couple unbalance needs <b>two-plane
 balancing</b>, with weights in two planes, the influence coefficients forming a 2 × 2 matrix.</p>
+
+<h3>Two-plane balancing</h3>
+<p>A rigid body's unbalance is a force and a couple, so cancelling it takes two weights in two planes,
+and two probes to see it. The procedure is the single-plane one with vectors (the <i>Balancing</i>
+tab, <i>Two planes</i>): read the slow roll S and the readings as found, V<sub>0</sub> (one per probe);
+put the trial weight T in plane 1 alone and read V<sub>1</sub>; move it to plane 2 and read
+V<sub>2</sub>. Each trial run gives a column of the <b>influence matrix</b>,</p>
+<p align='center'>α<sub>ij</sub> = (V<sub>j</sub> − V<sub>0</sub>)<sub>i</sub> / T, &nbsp; and the
+correction &nbsp; W = −α<sup>−1</sup>(V<sub>0</sub> − S),</p>
+<p>a weight for each plane, with both trials taken off. With more probes than planes the same formula
+gives the least-squares weights.</p>
+<p><b>Where the planes are matters.</b> The same rotor as above (a/L = 0.3, skew 0.5°, the default
+20 g·mm unbalance), probes at the two bearings, balanced at 1200 rpm, read at the disc:</p>
+<ul>
+<li><b>On the disc's faces</b>, 40 mm apart: 7.32 g at 180° and 6.32 g at 0°, nearly equal and
+opposite: mostly a couple. Together they make a force and a moment on the disc, the same form as the
+unbalance and the skew, so they cancel both exactly, and the rotor is balanced at <i>every</i> speed:
+72 µm at the critical falls to nothing, as does 13.6 µm at 6000 rpm.</li>
+<li><b>On the shaft</b>, 50 mm either side of the disc: 3.23 g and 2.22 g, almost what faces 100 mm
+apart would need (3.23 g and 2.23 g). But the shaft between them and the disc bends, so they are not
+quite a force and a couple on the disc. Both probes read zero
+at 1200 rpm, and 2.7 µm is left at the critical, 1.2 µm at 6000 rpm.</li>
+<li><b>On the shaft near the bearings</b> (20 and 480 mm): small weights (1.25 g and 0.33 g), since
+the planes are far apart, but the forces are now far from the unbalance. The probes read zero at
+1200 rpm; at the critical the disc still reads 12.8 µm. A flexible rotor balanced away from its
+unbalance is balanced only at the balancing speed (or, with more planes, at more speeds:
+<i>modal balancing</i> puts a set of weights against each mode in turn).</li>
+</ul>
+<p><b>Planes close together are hard to tell apart.</b> A weight in one face of the disc moves the
+probes almost as one in the other does, so the columns of α are nearly parallel. Their difference,
+which is what the couple acts through, is small, and dividing by it inflates the weights and any error
+in the readings. The <b>condition number</b> of α measures this: 27.6 for faces 40 mm apart, 11 at
+100 mm, 1.5 for planes near the bearings. With 1% random error in every reading (the simulation's
+readings have none), the disc's faces 40 mm apart leave a median of about 18 µm at the critical
+instead of 0; 100 mm apart, about 8 µm. Real balancing machines put the planes as far apart as the rotor allows.</p>
 
 <h3>Stability: cross-coupling and internal damping</h3>
 <p>Everything so far is forced vibration: the unbalance drives the rotor, and however hard it shakes at
@@ -646,6 +700,10 @@ slow roll, as found, trial run, correct and check. The check should read well un
 reading as found; <i>Reveal</i> then shows the unbalance you cancelled.</li>
 <li>Set a bow of 20 µm at 90°, put the probe on the disc, and balance at 1200 rpm with and without
 <i>Subtract slow roll</i>: compare the curves as found and now under the vectors.</li>
+<li>Move the disc to a/L = 0.3, choose <i>Two planes: the disc's faces</i> on the <i>Balancing</i> tab
+and press <i>Mystery unbalance</i>: now the disc is skewed too, by a hidden angle. Balance it in five
+steps; the curve <i>Now</i> stays flat at every speed. Then try <i>Two planes on the shaft</i>, near
+the bearings, and see the critical come back.</li>
 <li>Tick <i>Gravity</i>: the rotor sags, 378 µm at the disc, and whirls about the sagged position,
 the orbits sitting below the bearings' centre. Untick <i>Static sag</i> to look at the vibration alone:
 it is the same as without gravity. Make the supports anisotropic with no unbalance: the rotor sags,
