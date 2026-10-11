@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .fluid_bearing import JournalBearing
-from .rotor import STEEL, Bearing, RotorSystem
+from .rotor import STEEL, Bearing, Crack, RotorSystem
 
 # The overhung rotor: a 3 kg disc of radius 150 mm (I_p = m R²/2, I_d = m R²/4), 100 mm past
 # bearing B, on stiffer supports so that the shaft, not the supports, does the bending.
@@ -79,6 +79,15 @@ def rotor_presets() -> list[RotorPreset]:
             "generator's slots make it. Laid horizontal, its weight drives a 2X whirl, 447 µm at 785 rpm: "
             "the gravity critical, half the axes' critical speeds (1491 and 1665 rpm). From 1527 to 1631 rpm "
             "it is unstable.",
+        ),
+        RotorPreset(
+            "Cracked shaft (breathing crack)",
+            RotorSystem(crack=Crack(position=0.5, depth=0.4), gravity=9.81, unbalance=5e-6), 3000.0, 783.0,
+            "A crack 40% through the shaft at the disc, laid horizontal: the weight opens it as its mouth "
+            "turns down and shuts it as it turns up, so the stiffness changes once a turn, with 2X and 3X in "
+            "it. The weight drives 2X, 37.6 µm at 783 rpm, and 3X, 18.6 µm at 522 rpm: a half and a third of "
+            "the critical speeds (1562 and 1574 rpm). Its 1X adds to the unbalance's: 164 µm at the critical, "
+            "against 54 µm uncracked.",
         ),
         RotorPreset(
             "Oil swirl λ = ½ (oil whip)",

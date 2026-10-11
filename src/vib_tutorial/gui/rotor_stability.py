@@ -41,7 +41,7 @@ SPECTRUM_TIP = (
     "the Fourier transform of x + iy. Forward whirl (with the spin) shows at positive frequencies, "
     "backward whirl at negative ones; a straight-line vibration shows at both, half each.</p>"
     "<p>The red lines are ±1X, the speed: the unbalance drives +1X (and +2X for an asymmetric shaft, "
-    "which its weight drives). The thin dashed lines are the free "
+    "which its weight drives, and +2X and +3X for a breathing crack). The thin dashed lines are the free "
     "whirl frequencies at this speed. An unstable rotor whirls at its natural frequency, below +1X: a "
     "subsynchronous line that grows.</p>"
 )
@@ -179,7 +179,7 @@ class FullSpectrum(pg.PlotWidget):
         p.addItem(self.axis)
         self.curve = p.plot()
         self.sync = [pg.InfiniteLine(angle=90, label=text, labelOpts={"position": 0.92})
-                     for text in ("+1X", "−1X", "+2X")]
+                     for text in ("+1X", "−1X", "+2X", "+3X")]
         for line in self.sync:
             p.addItem(line)
         self.free: list[pg.InfiniteLine] = []
@@ -189,17 +189,17 @@ class FullSpectrum(pg.PlotWidget):
     def apply_theme(self) -> None:
         self.axis.setPen(pg.mkPen(colors.faint, width=1))
         self.curve.setPen(pg.mkPen(colors.strong, width=1.5))
-        for line, style in zip(self.sync, (QtCore.Qt.PenStyle.SolidLine, DOT, DOT)):
+        for line, style in zip(self.sync, (QtCore.Qt.PenStyle.SolidLine, DOT, DOT, DOT)):
             line.setPen(pg.mkPen(colors.force, width=1.5, style=style))
             line.label.setColor(colors.force)
         for line, forward in zip(self.free, self.free_forward):
             line.setPen(pg.mkPen(colors.mode[1] if forward else colors.mode[3], width=1, style=DASH))
 
     def update_spectrum(self, freqs: np.ndarray, amps: np.ndarray, omega: float, modes: WhirlModes | None,
-                        damped_limit: float, twice: bool = False) -> None:
-        """The spectrum, ±1X at speed Ω (rad/s) (and +2X if `twice`), and the lightly damped modes' frequencies."""
+                        damped_limit: float, top: int = 1) -> None:
+        """The spectrum, ±1X at speed Ω (rad/s) and +2X, +3X up to `top`, and the lightly damped modes' frequencies."""
         f1 = omega / (2.0 * math.pi)
-        for line, order, shown in zip(self.sync, (1.0, -1.0, 2.0), (True, True, twice)):
+        for line, order, shown in zip(self.sync, (1.0, -1.0, 2.0, 3.0), (True, True, top >= 2, top >= 3)):
             line.setVisible(f1 > 0 and shown)
             line.setValue(order * f1)
         p = self.getPlotItem()
@@ -213,7 +213,7 @@ class FullSpectrum(pg.PlotWidget):
             if i < len(marks):
                 line.setValue(marks[i][0])
                 self.free_forward[i] = marks[i][1]
-        reach = max([(2.4 if twice else 1.6) * f1, 1.3 * min((abs(f) for f, _ in marks), default=0.0), 20.0])
+        reach = max([(top + 0.4 if top > 1 else 1.6) * f1, 1.3 * min((abs(f) for f, _ in marks), default=0.0), 20.0])
         p.setXRange(-reach, reach, padding=0)
         if freqs.size:
             inside = np.abs(freqs) <= reach

@@ -593,13 +593,37 @@ def jeffcott_asymmetry_chart():
     save(w, "jeffcott_asymmetry_chart")
 
 
+def jeffcott_cracked():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.load_preset("Cracked shaft (breathing crack)")
+    page._refresh_analysis()
+    page.probe_direction.setCurrentIndex(2)  # the orbit
+    page.probe_order.setCurrentIndex(2)  # 3X
+    page.sweep_from.setValue(400.0)
+    page.sweep_to.setValue(1000.0)
+    page.ramp.setValue(100.0)
+    page.start_sweep()
+    while page.run_up is not None:
+        page.step(0.02)
+    page.set_target_rpm(522.0)
+    for _ in range(100):
+        page.step(0.02)
+    print(page.sweep_summary.text())
+    save(w, "jeffcott_cracked")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_overhung, jeffcott_waterfall,
-         jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart]
+         jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked]
 
 
 def main(names: list[str]) -> None:

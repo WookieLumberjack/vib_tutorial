@@ -120,19 +120,35 @@ Either way they are Floquet modes. Its steady states come by harmonic balance
 a mean sag and a 2X whirl (gravity_response), largest near half a critical
 speed. Between the critical speeds of its two axes it may be unstable.
 
+The shaft may be cracked (`crack`): a straight-fronted transverse crack, its
+mouth toward angle φ + β_c, cut to a depth a from the surface. Where it is open it
+is a hinge: the shaft's slope jumps across it by c M (M the bending moment
+there), c its compliance from fracture mechanics (crack_compliance), large
+bending that opens it and small across. The crack is condensed out exactly, a
+rank-one loss of stiffness on the stations (_crack_deficits). A breathing crack
+is opened and closed by the shaft's weight alone (weight dominance, as in Mayes
+and Davies' model): fully open where the weight's bending puts its mouth in
+tension, shut half a turn later, open by (1 + cos)/2 between. So its stiffness
+is periodic in φ with 1X, 2X and 3X in it, not only the asymmetric shaft's 2X,
+and even on isotropic supports it changes in axes turning with the shaft (the
+weight does not turn), so its modes come by Hill's method and its steady states
+by harmonic balance over every harmonic. Its weight then drives 1X, 2X and 3X,
+the last two most near a half and a third of a critical speed. An open crack
+(not breathing, a notch) turns with the shaft as the asymmetric shaft does.
+
 Time stepping uses the state z = [q, q'], z' = A(Ω) z + B u, with the same exact
 first-order-hold matrix-exponential update as the chain's Simulator. A depends
 on Ω, so while the speed ramps A is held at the speed at the middle of each short
 chunk of steps (CHUNK_TIME), and the unbalance force follows the exact phase.
-An asymmetric shaft's turning stiffness is split off each step as a kick to the
-velocities at mid-step, between two exact half steps of the rest.
+An asymmetric or cracked shaft's turning stiffness is split off each step as a
+kick to the velocities at mid-step, between two exact half steps of the rest.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
-from functools import cached_property
+from functools import cached_property, lru_cache
 from typing import NamedTuple
 
 import numpy as np
@@ -150,9 +166,66 @@ MODE_LIMIT = 1000.0  # Hz: the shaft's fixed-interface modes are kept up to this
 MAX_MODES = 12  # and at most this many in each plane
 CHUNK_TIME = 2e-3  # s; while the speed ramps, A(Ω) is held over chunks this long
 HARMONICS = 3  # an asymmetric shaft on anisotropic supports: harmonics kept each side of the 1X (or 0X) one
-HILL_ORDER = 3  # and harmonics of 2Ω kept each side in Hill's method for its modes
+HILL_ORDER = 3  # and harmonics of 2Ω (Ω with a breathing crack) kept each side in Hill's method for its modes
 RPM = 60.0 / (2.0 * math.pi)  # rpm per rad/s
 MIN_GAP = 1e-3  # of the span: the closest the disc may come to a bearing
+POISSON = 0.3  # the shaft's Poisson's ratio, for a crack's compliance
+CRACK_DEPTH_MAX = 0.5  # a / D: the strip model's crack compliance holds to half the shaft's diameter
+
+
+def _edge_crack_factor(s: np.ndarray, bending: bool) -> np.ndarray:
+    """F(a/h): K = σ √(πa) F for an edge crack of depth a in a strip of height h (Tada's fits, 0.5%)."""
+    x = 0.5 * math.pi * s
+    root = np.sqrt(np.tan(x) / x) / np.cos(x)
+    if bending:
+        return root * (0.923 + 0.199 * (1.0 - np.sin(x)) ** 4)
+    return root * (0.752 + 2.02 * s + 0.37 * (1.0 - np.sin(x)) ** 3)
+
+
+@lru_cache(maxsize=64)
+def crack_compliance(depth: float) -> tuple[float, float]:
+    """A straight-fronted crack's bending compliance in a round shaft, per (1 - ν²)/(E R³): (opening, across).
+
+    Its depth is a/D, from the surface (Dimarogonas and Papadopoulos). The crack is
+    cut into strips across its front, each an edge crack in a strip as tall as the
+    shaft there; the energy released as the crack grows, ∫ (1 - ν²) K²/E dA, gives
+    the extra rotation c M across the crack under a bending moment M. Bending that
+    pulls the crack's mouth open (the moment along its front) loads every strip in
+    bending; across, each strip is in tension or compression by its distance off
+    the middle. So the crack gives much more to the first, until it is deep.
+    """
+    if depth <= 0.0:
+        return 0.0, 0.0
+    radius, a = 1.0, 2.0 * depth
+    half = math.sqrt(a * (2.0 * radius - a))  # half the crack front's length
+    inertia = math.pi * radius**4 / 4.0
+    x, w = np.polynomial.legendre.leggauss(96)
+    xi, wx = half * x, half * w
+    chord = np.sqrt(radius**2 - xi**2)
+    height = 2.0 * chord  # each strip's height, and its crack's depth
+    deep = chord - (radius - a)
+    alpha = 0.5 * deep[:, None] * (x[None, :] + 1.0)
+    wa = 0.5 * deep[:, None] * w[None, :]
+    s = alpha / height[:, None]
+    opening = (0.5 * height[:, None] / inertia) ** 2 * math.pi * alpha * _edge_crack_factor(s, True) ** 2
+    across = (xi[:, None] / inertia) ** 2 * math.pi * alpha * _edge_crack_factor(s, False) ** 2
+    return float(2.0 * wx @ np.sum(wa * opening, axis=1)), float(2.0 * wx @ np.sum(wa * across, axis=1))
+
+
+@dataclass(frozen=True)
+class Crack:
+    """A transverse crack in the shaft, at z = position L, its mouth at `angle` from the keyphasor mark.
+
+    Breathing, it is opened and closed by the shaft's weight as it turns; not
+    breathing, it is held open (as a sawn notch). `compliance` (rad/(N·m), opening
+    and across) overrides the one its depth gives.
+    """
+
+    position: float = 0.5  # z / L, as the disc's position (past 0 or 1 on an overhang)
+    depth: float = 0.3  # a / D, from the shaft's surface
+    angle: float = 0.0  # rad, of the crack's mouth from the keyphasor mark, in the direction of spin
+    breathing: bool = True
+    compliance: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -242,6 +315,7 @@ class RotorSystem:
     lumped: bool = False  # the shaft's mass lumped at the nodes, rather than the consistent mass matrix
     asymmetry: float = 0.0  # Δ: the shaft's EI is EI(1 + Δ) bending toward its stiff axis, EI(1 - Δ) across it
     asymmetry_angle: float = 0.0  # rad, α: the stiff axis's angle from the keyphasor mark
+    crack: Crack | None = None  # a transverse crack in the shaft
 
     def __post_init__(self) -> None:
         if min(abs(self.position), abs(self.position - 1.0)) < MIN_GAP:
@@ -267,6 +341,11 @@ class RotorSystem:
         lo, hi = self.extent
         if any(not p.disc and not lo <= p.z <= hi for p in self.plane_weights):
             raise ValueError("balance weights go on the shaft, between its ends")
+        if self.crack is not None:
+            if not 0.0 <= self.crack.depth <= CRACK_DEPTH_MAX:
+                raise ValueError(f"the crack's depth a/D is in [0, {CRACK_DEPTH_MAX}]")
+            if not lo < self.crack.position * self.length < hi:
+                raise ValueError("the crack is in the shaft, between its ends")
 
     def with_(self, **changes) -> RotorSystem:
         return replace(self, **changes)
@@ -334,9 +413,13 @@ class RotorSystem:
     def _mesh(self) -> tuple[np.ndarray, tuple[int, int, int]]:
         """The shaft's nodes' z (m) in axial order, and the nodes at bearing A, the disc and bearing B.
 
-        Each stretch between the stations gets elements in proportion to its length, at least one.
+        Each stretch between the stations gets elements in proportion to its length, at
+        least one. A crack has a node of its own, unless it is next to a station.
         """
-        stations = sorted(((0.0, 0), (self.a, 1), (self.length, 2)))
+        stations = [(0.0, 0), (self.a, 1), (self.length, 2)]
+        if self.crack is not None and min(abs(self.crack_z - z) for z, _ in stations) > MIN_GAP * self.length:
+            stations.append((self.crack_z, 3))
+        stations.sort()
         span = stations[-1][0] - stations[0][0]
         z, node = [stations[0][0]], {stations[0][1]: 0}
         for (z0, _), (z1, n1) in zip(stations, stations[1:]):
@@ -344,6 +427,127 @@ class RotorSystem:
             z.extend(np.linspace(z0, z1, k + 1)[1:])
             node[n1] = len(z) - 1
         return np.array(z), (node[0], node[1], node[2])
+
+    @property
+    def crack_z(self) -> float:
+        """The crack's axial position (m from bearing A); NaN without one."""
+        return math.nan if self.crack is None else self.crack.position * self.length
+
+    @cached_property
+    def _assembled(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """(K, M, R): one plane's whole shaft, on every node's [w, θ] (see _reduced)."""
+        z = self._mesh[0]
+        n = 2 * z.size
+        K, M, R = np.zeros((n, n)), np.zeros((n, n)), np.zeros((n, n))
+        rho_a, rho_i = self.density * self.area, self.density * math.pi * self.diameter**4 / 64.0
+        for e, length in enumerate(np.diff(z)):
+            d = slice(2 * e, 2 * e + 4)
+            translation, rotation = beam_mass(rho_a, rho_i, length, self.lumped)
+            K[d, d] += beam_stiffness(self.ei, length)
+            M[d, d] += translation + rotation
+            R[d, d] += rotation
+        return K, M, R
+
+    @property
+    def _station_dofs(self) -> list[int]:
+        """The stations' [w_A, w_D, θ_D, w_B] in the whole shaft's DOFs."""
+        na, nd, nb = self._mesh[1]
+        return [2 * na, 2 * nd, 2 * nd + 1, 2 * nb]
+
+    @property
+    def crack_compliances(self) -> tuple[float, float]:
+        """The crack's compliance (rad/(N·m)): to bending that opens it, and across; zeros without one."""
+        if self.crack is None:
+            return 0.0, 0.0
+        if self.crack.compliance is not None:
+            return self.crack.compliance
+        scale = (1.0 - POISSON**2) / (self.youngs * (0.5 * self.diameter) ** 3)
+        c_open, c_across = crack_compliance(self.crack.depth)
+        return c_open * scale, c_across * scale
+
+    @cached_property
+    def _crack_hinge(self) -> tuple[np.ndarray, float]:
+        """(b (4,), s): the crack as a hinge, a jump Δθ in the shaft's slope there, condensed onto the stations.
+
+        The shaft's energy on [stations, Δθ], everything else free (statically), is
+        ½ [q; Δθ]^T [[K_ss, b], [b^T, s]] [q; Δθ]: b is the bending moment at the
+        crack the stations' displacements make (per unit of each), s the shaft's
+        stiffness against the jump with the stations held.
+        """
+        z, _ = self._mesh
+        K = self._assembled[0]
+        n = K.shape[0]
+        node = int(np.argmin(np.abs(z - self.crack_z)))
+        # The jump turns the element past the crack at its near end (or, at the shaft's end, the one before it).
+        e, j = (node, 1) if node < z.size - 1 else (node - 1, 3)
+        ke = beam_stiffness(self.ei, z[e + 1] - z[e])
+        g = np.arange(2 * e, 2 * e + 4)
+        Kx = np.zeros((n + 1, n + 1))
+        Kx[:n, :n] = K
+        Kx[n, g] += ke[j]
+        Kx[g, n] += ke[:, j]
+        Kx[n, n] += ke[j, j]
+        kept = self._station_dofs + [n]
+        inner = [i for i in range(n + 1) if i not in kept]
+        Kc = Kx[np.ix_(kept, kept)] - Kx[np.ix_(kept, inner)] @ np.linalg.solve(
+            Kx[np.ix_(inner, inner)], Kx[np.ix_(inner, kept)])
+        return Kc[:4, 4].copy(), float(Kc[4, 4])
+
+    def _hinge_loss(self, compliance: float) -> np.ndarray:
+        """One plane's stiffness lost (4 + r square) to a hinge of this compliance at the crack.
+
+        Condensing the jump out, the stations' stiffness is K_ss - b b^T c/(1 + c s):
+        exact for the massless shaft. With the shaft's mass its fixed-interface modes
+        are those of the uncracked shaft (the crack's own inertia is left out).
+        """
+        loss = np.zeros((4 + self.modes_kept,) * 2)
+        if compliance > 0.0:
+            b, s = self._crack_hinge
+            loss[:4, :4] = np.outer(b, b) * compliance / (1.0 + compliance * s)
+        return loss
+
+    @cached_property
+    def crack_sign(self) -> int:
+        """Where the weight opens a breathing crack: +1 its mouth down (the shaft sags there), -1 up, 0 never.
+
+        The sign of the shaft's curvature at the crack under its weight, the journals
+        held (the bending moment of a shaft on two bearings does not depend on them).
+        """
+        if self.crack is None or not self.gravity:
+            return 0
+        z, (na, nd, nb) = self._mesh
+        K, M, _ = self._assembled
+        n = K.shape[0]
+        f = -M @ np.tile([1.0, 0.0], z.size)
+        f[2 * nd] -= self.disc_mass
+        free = [i for i in range(n) if i not in (2 * na, 2 * nb)]
+        u = np.zeros(n)
+        u[free] = np.linalg.solve(K[np.ix_(free, free)], f[free])
+        node = int(np.argmin(np.abs(z - self.crack_z)))
+        e, end = (node, 0.0) if node < z.size - 1 else (node - 1, 1.0)
+        length = z[e + 1] - z[e]
+        # w'' of the element's cubic at its end, from its [w1, θ1, w2, θ2].
+        curve = np.array([12 * end - 6, length * (6 * end - 4), 6 - 12 * end, length * (6 * end - 2)]) / length**2
+        w2 = float(curve @ u[2 * e:2 * e + 4])
+        scale = float(np.abs(curve) @ np.abs(u[2 * e:2 * e + 4])) + 1e-300
+        return 0 if abs(w2) <= 1e-9 * scale else (1 if w2 > 0 else -1)
+
+    @property
+    def crack_opening(self) -> float:
+        """How open the crack is on average over a turn: 1 held open, ½ breathing, 0 shut (or none)."""
+        if self.crack is None or not self.crack.depth and self.crack.compliance is None:
+            return 0.0
+        if not self.crack.breathing:
+            return 1.0
+        return 0.5 if self.crack_sign else 0.0
+
+    def crack_open(self, phase: float | np.ndarray) -> np.ndarray:
+        """How open the crack is (0 to 1) with the keyphasor mark at angle φ: (1 - s sin θ)/2, θ its mouth's angle."""
+        if not self.crack_opening:
+            return np.zeros(np.shape(phase))
+        if not self.crack.breathing:
+            return np.ones(np.shape(phase))
+        return 0.5 * (1.0 - self.crack_sign * np.sin(np.asarray(phase, dtype=float) + self.crack.angle))
 
     @property
     def nodes(self) -> np.ndarray:
@@ -363,17 +567,9 @@ class RotorSystem:
         gyroscopic matrix is 2R: a round section's polar inertia is twice its
         diametral). freqs (Hz) are the modes kept.
         """
-        z, (na, nd, nb) = self._mesh
-        n = 2 * z.size
-        K, M, R = np.zeros((n, n)), np.zeros((n, n)), np.zeros((n, n))
-        rho_a, rho_i = self.density * self.area, self.density * math.pi * self.diameter**4 / 64.0
-        for e, length in enumerate(np.diff(z)):
-            d = slice(2 * e, 2 * e + 4)
-            translation, rotation = beam_mass(rho_a, rho_i, length, self.lumped)
-            K[d, d] += beam_stiffness(self.ei, length)
-            M[d, d] += translation + rotation
-            R[d, d] += rotation
-        kept = [2 * na, 2 * nd, 2 * nd + 1, 2 * nb]
+        K, M, R = self._assembled
+        n = K.shape[0]
+        kept = self._station_dofs
         inner = [j for j in range(n) if j not in kept]
         static = -np.linalg.solve(K[np.ix_(inner, inner)], K[np.ix_(inner, kept)])
         if self.density > 0.0:
@@ -523,15 +719,15 @@ class RotorSystem:
         """q_s = (K + ΩH)^{-1} f_g: where gravity holds the rotor, (n_dof,) or (len(omega), n_dof).
 
         Unless the stiffness depends on the speed (speed_dependent), neither does this.
-        With an asymmetric shaft the rotor never holds still under gravity: q_s is
-        then the mean of its periodic response (gravity_response), the sag about
-        which the 2X gravity vibration swings, and it depends on the speed.
+        With an asymmetric or cracked shaft the rotor never holds still under
+        gravity: q_s is then the mean of its periodic response (gravity_response),
+        the sag about which the gravity vibration swings, and it depends on the speed.
         """
         omega = np.asarray(omega, dtype=float)
         n = self.n_dof
         if not self.gravity:
             return np.zeros(omega.shape + (n,))
-        if self.asymmetry:
+        if self.periodic:
             return gravity_response(self, omega.ravel())[0].real.reshape(omega.shape + (n,))
         if not self.speed_dependent or omega.ndim == 0:
             w = float(omega) if omega.ndim == 0 else 0.0
@@ -546,16 +742,16 @@ class RotorSystem:
 
     @property
     def sag_varies(self) -> bool:
-        """True if the static sag depends on the speed: a speed-dependent stiffness, or an asymmetric shaft."""
-        return bool(self.gravity and (self.speed_dependent or self.asymmetry))
+        """True if the static sag depends on the speed: a speed-dependent stiffness, or a turning one."""
+        return bool(self.gravity and (self.speed_dependent or self.periodic))
 
     def rest_deflection(self, phase: float = 0.0) -> np.ndarray:
         """Where gravity holds the rotor at rest, its keyphasor mark at angle φ (n_dof,).
 
-        As static_deflection(0), except that an asymmetric shaft at rest sags on the
-        stiffness it has at that angle, not on its mean.
+        As static_deflection(0), except that an asymmetric or cracked shaft at rest
+        sags on the stiffness it has at that angle, not on its mean.
         """
-        if not self.gravity or not self.asymmetry:
+        if not self.gravity or not self.periodic:
             return self.static_deflection(0.0)
         return np.linalg.solve(self.stiffness_at(0.0, phase), self.gravity_load(0.0))
 
@@ -622,7 +818,7 @@ class RotorSystem:
         gp = 2.0 * self._reduced[3]
         gp[2, 2] += self.ip
         G = self._blocks(np.zeros_like(gp), np.zeros_like(gp), gp, -gp)
-        return M, C, G, K
+        return M, C, G, K + self._periodic_terms[0]
 
     def circulatory(self) -> np.ndarray:
         """H (8x8): the skew stiffness per unit speed, Ω H in the equations.
@@ -746,26 +942,78 @@ class RotorSystem:
         return self._blocks(dk, -dk), self._blocks(zero, zero, dk, dk)
 
     @cached_property
-    def _deviatoric_harmonics(self) -> tuple[np.ndarray, np.ndarray]:
-        """(E₊, E₋): the deviatoric stiffness is E₊ e^{2iφ} + E₋ e^{-2iφ}, E₋ = conj(E₊)."""
-        Kc, Ks = self._deviatoric
-        Ep = 0.5 * (Kc - 1j * Ks) * np.exp(2j * self.asymmetry_angle)
-        return Ep, Ep.conj()
+    def _periodic_terms(self) -> tuple[np.ndarray, dict[int, np.ndarray]]:
+        """(the crack's mean loss of stiffness (n_dof square, in K), {k: E_k}): the turning part's harmonics.
+
+        The stiffness less its mean is Σ_k E_k e^{ikφ} + conj, k ≥ 1. The asymmetric
+        shaft's deviatoric part is E_2 alone. An open crack takes D_o off the shaft's
+        stiffness bending along its mouth's direction θ = φ + β_c, D_a across: in fixed
+        axes P + Re(W' e^{2iθ}), P = (D_o + D_a)/2 on both planes and W' the
+        deviatoric part of (D_o - D_a)/2, as for the asymmetric shaft. Breathing, it
+        is open by g = (1 - s sin θ)/2, so g (P + W e^{2iθ} + W̄ e^{-2iθ}) takes
+        harmonics 0 to 3 of θ.
+        """
+        n = self.n_dof
+        mean, E = np.zeros((n, n)), {}
+        if self.asymmetry:
+            Kc, Ks = self._deviatoric
+            E[2] = 0.5 * (Kc - 1j * Ks) * np.exp(2j * self.asymmetry_angle)
+        opening = self.crack_opening
+        if opening:
+            c_open, c_across = self.crack_compliances
+            d_open, d_across = self._hinge_loss(c_open), self._hinge_loss(c_across)
+            dm, dd = 0.5 * (d_open + d_across), 0.5 * (d_open - d_across)
+            zero = np.zeros_like(dm)
+            P = self._blocks(dm, dm)
+            W = 0.5 * (self._blocks(dd, -dd) - 1j * self._blocks(zero, zero, dd, dd))
+            turn = np.exp(1j * self.crack.angle)
+            mean -= opening * P
+            E[2] = E.get(2, 0.0) - opening * W * turn**2
+            if self.crack.breathing:  # g = ½ + (is/4) e^{iθ} - (is/4) e^{-iθ}
+                quarter = 0.25j * self.crack_sign
+                E[1] = -quarter * (P - W) * turn
+                E[3] = -quarter * W * turn**3
+        return mean, {k: E[k] for k in sorted(E) if np.any(E[k])}
+
+    @property
+    def periodic(self) -> bool:
+        """True if the stiffness changes as the shaft turns: an asymmetric shaft, or an open or breathing crack."""
+        return bool(self._periodic_terms[1])
+
+    @property
+    def spacing(self) -> int:
+        """The harmonics of φ the stiffness changes by are multiples of this: 2 (turning with the shaft) or 1."""
+        return math.gcd(*self._periodic_terms[1]) if self.periodic else 2
+
+    @property
+    def rotating_frame(self) -> bool:
+        """True if the rotor is time-invariant in axes turning with the shaft (see rotating_state_matrix).
+
+        Its stiffness has to turn rigidly with the shaft (only 2X: not a breathing
+        crack, opened by the weight that stays put), on isotropic supports.
+        """
+        return self.spacing == 2 and self.isotropic_supports
 
     @cached_property
-    def _kick(self) -> np.ndarray:
-        """[M^{-1} K_c; M^{-1} K_s] (2n x n): the deviatoric stiffness's pull on the accelerations."""
-        Kc, Ks = self._deviatoric
-        return np.vstack([self.mass_inverse @ Kc, self.mass_inverse @ Ks])
+    def _kick(self) -> tuple[np.ndarray, np.ndarray]:
+        """(k, S): the turning stiffness's pull on the accelerations is M^{-1} ΔK(φ) q = (cos kφ, sin kφ) S q.
+
+        k (m,) the harmonics and S (2m x n x n) stacked [2 M^{-1} Re E_k, ..., -2 M^{-1} Im E_k, ...].
+        """
+        E = self._periodic_terms[1]
+        Minv = self.mass_inverse
+        ks = np.array(list(E), dtype=float)
+        S = np.array([2.0 * Minv @ e.real for e in E.values()] + [-2.0 * Minv @ e.imag for e in E.values()])
+        return ks, S
 
     def stiffness_at(self, omega: float, phase: float | np.ndarray) -> np.ndarray:
         """K + Ω H + the deviatoric part at shaft angle φ: the whole stiffness at that instant, (..., n, n)."""
         K = self.stiffness(omega)
-        if not self.asymmetry:
-            return np.broadcast_to(K, np.shape(phase) + K.shape).copy()
-        theta = 2.0 * (np.asarray(phase, dtype=float) + self.asymmetry_angle)
-        Kc, Ks = self._deviatoric
-        return K + np.cos(theta)[..., None, None] * Kc + np.sin(theta)[..., None, None] * Ks
+        phase = np.asarray(phase, dtype=float)
+        K = np.broadcast_to(K, phase.shape + K.shape).copy()
+        for k, e in self._periodic_terms[1].items():
+            K += 2.0 * (np.exp(1j * k * phase)[..., None, None] * e).real
+        return K
 
     @property
     def isotropic_supports(self) -> bool:
@@ -775,7 +1023,7 @@ class RotorSystem:
         no film (whose stiffness depends on the load's direction).
 
         Then an asymmetric shaft is time-invariant in coordinates turning with it,
-        so a few harmonics give its response and modes exactly.
+        so a few harmonics give its response and modes exactly (rotating_frame).
         """
         return all(b.film is None and b.kx == b.ky and b.cx == b.cy and b.cxy == b.cyx == 0.0
                    and b.k_yx == -b.kxy for b in (self.bearing_a, self.bearing_b))
@@ -783,10 +1031,24 @@ class RotorSystem:
     def axis_system(self, stiff: bool) -> RotorSystem:
         """The same rotor with a round shaft as stiff as this one's stiff (or soft) axis: EI(1 ± Δ).
 
-        Its critical speed is that axis's: an asymmetric shaft has two.
+        Its critical speed is that axis's: an asymmetric shaft has two. A crack's
+        axes are along its mouth (soft) and across: in axes turning with the shaft
+        it takes ḡ D_o and ḡ D_a off them on average (ḡ = crack_opening), so each
+        axis's round shaft has a crack that takes that off both planes. With both an
+        asymmetry and a crack, whose axes need not line up, the crack's mean loss
+        goes on both axes: approximate.
         """
-        return self.with_(youngs=self.youngs * (1.0 + (self.asymmetry if stiff else -self.asymmetry)),
-                          asymmetry=0.0)
+        f = 1.0 + (self.asymmetry if stiff else -self.asymmetry)
+        out = self.with_(youngs=self.youngs * f, asymmetry=0.0)
+        opening = self.crack_opening
+        if not opening:
+            return out.with_(crack=None) if self.crack is not None else out
+        _, s = self._crack_hinge
+        taus = [c / (1.0 + c * s) for c in self.crack_compliances]  # each loss is b b^T τ
+        tau = opening * (0.5 * sum(taus) if self.asymmetry else taus[1] if stiff else taus[0])
+        # Its hinge's b and s scale with EI, by f: f² τ(c') = τ.
+        c = tau / (f * (f - tau * s)) if f > tau * s else 1e12
+        return out.with_(crack=replace(self.crack, breathing=False, compliance=(c, c)))
 
     @cached_property
     def mass_inverse(self) -> np.ndarray:
@@ -933,14 +1195,14 @@ class WhirlModes:
 def whirl_modes(system: RotorSystem, omega: float) -> WhirlModes:
     """Eigen-solution of A(Ω): the oscillatory modes (Im λ > 0), lowest first.
 
-    An asymmetric shaft's stiffness turns with it, so A depends on time and its
-    modes are Floquet's: e^{λt} times a motion periodic in φ. Each is listed by
-    the harmonic of it that carries the most kinetic energy (see _rotating_modes
-    and _hill_modes): that is its frequency here, and its shape and whirl are that
-    harmonic's.
+    An asymmetric or cracked shaft's stiffness turns with it, so A depends on
+    time and its modes are Floquet's: e^{λt} times a motion periodic in φ. Each is
+    listed by the harmonic of it that carries the most kinetic energy (see
+    _rotating_modes and _hill_modes): that is its frequency here, and its shape
+    and whirl are that harmonic's.
     """
-    if system.asymmetry:
-        lam, vec = _rotating_modes(system, omega) if system.isotropic_supports else _hill_modes(system, omega)
+    if system.periodic:
+        lam, vec = _rotating_modes(system, omega) if system.rotating_frame else _hill_modes(system, omega)
         order = np.argsort(lam.imag)
         lam, vec = lam[order], vec[:, order]
     else:
@@ -974,7 +1236,7 @@ def rotating_state_matrix(system: RotorSystem, omega: float) -> np.ndarray:
 
     R(φ) turns each plane pair by φ, R' = Ω R J. Every matrix but the asymmetric
     shaft's commutes with R when the supports are isotropic, so R^T(...)R leaves
-    them, the shaft's deviatoric part is held at φ = 0, and
+    them, the shaft's deviatoric part is held at φ = 0 (so is an open crack's), and
         M r'' + (C + ΩG + 2ΩMJ) r' + (K + ΩH + ΔK(0) - Ω²M + ΩCJ + Ω²GJ) r = R^T f.
     """
     M, _, G, _ = system._matrices
@@ -1028,32 +1290,32 @@ def _rotating_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.n
 
 
 def _hill_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.ndarray]:
-    """An asymmetric shaft's modes on anisotropic supports, by Hill's method: (λ, shapes (n_dof, k)), Im λ > 0.
+    """A turning shaft's modes, by Hill's method: (λ, shapes (n_dof, k)), Im λ > 0.
 
-    A(t) = A_0 + A_+ e^{2iφ} + A_- e^{-2iφ}; a Floquet mode z = e^{λt} Σ c_k
-    e^{2ikΩt} has λ c_k = (A_0 - 2ikΩ) c_k + A_+ c_{k-1} + A_- c_{k+1}, an
-    eigenproblem in the c_k, |k| ≤ HILL_ORDER. Each mode turns up once for every
-    k, shifted by 2iΩ (and so does its conjugate); the copies kept are those whose
-    kinetic energy is centred on c_0, within half a harmonic (the copies near the
-    truncation are the inaccurate ones, and their energy is off at the edges).
-    A whirl locked to 1X has its energy split evenly between two harmonics, so
-    two of its copies sit on that edge; turned to Im λ > 0 they are one λ, kept
-    once. Its shape is c_0.
+    A(t) = A_0 + Σ_k A_k e^{ikφ}, k = ±p, ±2p, ... (p = spacing: 2 for an
+    asymmetric shaft, 1 for a breathing crack); a Floquet mode z = e^{λt} Σ c_j
+    e^{ijpΩt} has λ c_j = (A_0 - ijpΩ) c_j + Σ_k A_k c_{j-k/p}, an eigenproblem in
+    the c_j, |j| ≤ HILL_ORDER. Each
+    mode turns up once for every j, shifted by ipΩ (and so does its conjugate);
+    the copies kept are those whose kinetic energy is centred on c_0, within half
+    a harmonic (the copies near the truncation are the inaccurate ones, and their
+    energy is off at the edges). A whirl locked to pX/2 has its energy split
+    evenly between two harmonics, so two of its copies sit on that edge; turned
+    to Im λ > 0 they are one λ, kept once. Its shape is c_0.
     """
-    n, H = system.n_dof, HILL_ORDER
+    n, p, H = system.n_dof, system.spacing, HILL_ORDER
     A0 = system.state_matrix(omega).astype(complex)
-    Ap = np.zeros_like(A0)
-    Ap[n:, :n] = -system.mass_inverse @ system._deviatoric_harmonics[0]
-    Am = Ap.conj()
     size, blocks = 2 * n, 2 * H + 1
     big = np.zeros((blocks * size, blocks * size), dtype=complex)
-    for i, k in enumerate(range(-H, H + 1)):
+    for i in range(blocks):
         d = slice(i * size, (i + 1) * size)
-        big[d, d] = A0 - 2j * k * omega * np.eye(size)
-        if i > 0:
-            big[d, (i - 1) * size:i * size] = Ap
-        if i < blocks - 1:
-            big[d, (i + 1) * size:(i + 2) * size] = Am
+        big[d, d] = A0 - 1j * (i - H) * p * omega * np.eye(size)
+    for k, e in system._periodic_terms[1].items():
+        Ak = -system.mass_inverse @ e
+        for i in range(blocks - k // p):  # A_k takes c_j to c_{j + k/p}, its conjugate back
+            lo, hi = slice(i * size, (i + 1) * size), slice((i + k // p) * size, (i + k // p + 1) * size)
+            big[hi, lo][n:, :n] = Ak
+            big[lo, hi][n:, :n] = Ak.conj()
     lam, vec = np.linalg.eig(big)
     disp = vec.reshape(blocks, size, -1)[:, :n]  # (harmonic, DOF, mode)
     M = system._matrices[0]
@@ -1064,9 +1326,18 @@ def _hill_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.ndarr
     flip = lam.imag < 0
     lam[flip], shapes[:, flip] = lam[flip].conj(), shapes[:, flip].conj()
     keep = lam.imag > _oscillating(lam)
-    lam, shapes = lam[keep], shapes[:, keep]
+    lam, shapes, flip = lam[keep], shapes[:, keep], flip[keep]
+    # A mode and its conjugate (turned) are one: pair each turned copy with an unturned one of the same λ. A
+    # double root (a round rotor's two whirls) has two of each, and stays double.
     tol = 1e-7 * max(1.0, float(np.abs(lam).max())) if lam.size else 0.0
-    single = [i for i in range(lam.size) if not np.any(np.abs(lam[:i] - lam[i]) <= tol)]
+    single, paired = [], set()
+    for i in range(lam.size):
+        mate = next((j for j in single if j not in paired and flip[j] != flip[i]
+                     and abs(lam[j] - lam[i]) <= tol), None)
+        if mate is None:
+            single.append(i)
+        else:
+            paired.add(mate)
     return lam[single], shapes[:, single]
 
 
@@ -1085,8 +1356,9 @@ def campbell(system: RotorSystem, omega_max: float, n_speeds: int = 241, n_modes
     """Sweep the speed 0..omega_max and find where each branch crosses the synchronous (1X) line.
 
     An asymmetric shaft's modes lock onto 1X between its two critical speeds, so
-    its branches do not cross the line cleanly. Its critical speeds are taken as
-    those of a round shaft as stiff as each axis (RotorSystem.axis_system): where,
+    its branches do not cross the line cleanly. Its critical speeds (and a cracked
+    shaft's) are taken as those of a round shaft as stiff as each axis
+    (RotorSystem.axis_system): where,
     turning with the shaft, the rotor has no stiffness left along that axis
     against the centrifugal force. With no damping and no gyroscopic coupling
     they are exactly the ends of the band where it is unstable.
@@ -1100,7 +1372,7 @@ def campbell(system: RotorSystem, omega_max: float, n_speeds: int = 241, n_modes
         k = min(n_modes, m.freq_hz.size)
         freq[i, :k], zeta[i, :k], whirl[i, :k] = m.freq_hz[:k], m.zeta[:k], m.whirl[:k]
     criticals = []
-    if system.asymmetry:
+    if system.periodic:
         for stiff in (False, True):
             criticals += campbell(system.axis_system(stiff), omega_max, n_speeds, n_modes).criticals
         criticals.sort()
@@ -1145,52 +1417,68 @@ def synchronous_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
     the stability onset this particular solution still exists, but the free whirl
     grows over it, so the rotor never settles to it.
 
-    With an asymmetric shaft the response to a 1X load has 3X, 5X, ... in it too,
-    unless the supports are isotropic (harmonic_response); this is its 1X part.
+    With an asymmetric or cracked shaft the response to a 1X load has other
+    harmonics in it too (harmonic_response; on isotropic supports none, for the
+    asymmetric shaft); this is its 1X part. A breathing crack's weight drives 1X
+    as well: that is gravity_response's, and steady_harmonics adds the two.
     """
     M, _, G, _ = system.matrices()
     omegas = np.atleast_1d(np.asarray(omegas, dtype=float))
     out = np.empty((omegas.size, system.n_dof), dtype=complex)
-    load = system.rotating_load(omegas)
-    # f_x + i f_y = P e^{iφ}: f_x = Re(P e^{iφ}), f_y = Re(-iP e^{iφ}).
-    f = system.merge(load, -1j * load)
-    if system.asymmetry:
+    f = _rotating_force(system, omegas)
+    if system.periodic:
         orders = harmonic_orders(system, odd=True)
-        one = int(np.searchsorted(orders, 1))
         F = np.zeros((omegas.size, orders.size, system.n_dof), dtype=complex)
-        F[:, one], F[:, one - 1] = 0.5 * f, 0.5 * f.conj()
-        return 2.0 * harmonic_response(system, omegas, orders, F)[:, one]
+        F[:, _index(orders, 1)], F[:, _index(orders, -1)] = 0.5 * f, 0.5 * f.conj()
+        return 2.0 * harmonic_response(system, omegas, orders, F)[:, _index(orders, 1)]
     for i, w in enumerate(omegas):
         out[i] = np.linalg.solve(system.stiffness(w) - w * w * M + 1j * w * (system.damping(w) + w * G), f[i])
     return out
 
 
-def harmonic_orders(system: RotorSystem, odd: bool) -> np.ndarray:
-    """The harmonics of φ an asymmetric shaft's steady state needs: odd (to a 1X load) or even (to gravity).
+def _rotating_force(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
+    """F (len(omegas), n_dof) complex: the 1X load at each speed is Re(F e^{iφ})."""
+    load = system.rotating_load(omegas)
+    # f_x + i f_y = P e^{iφ}: f_x = Re(P e^{iφ}), f_y = Re(-iP e^{iφ}).
+    return system.merge(load, -1j * load)
 
-    Its deviatoric stiffness shifts a harmonic k to k ± 2, so a load at 1X
-    reaches the odd ones and a constant load the even ones. On isotropic supports
-    the chain closes at once: a forward whirl at 1X stays 1X (in x and y, ±1),
-    and the 0X sag gives only a forward 2X (0, ±2). Otherwise HARMONICS each side.
+
+def _index(orders: np.ndarray, k: int) -> int:
+    return int(np.searchsorted(orders, k))
+
+
+def harmonic_orders(system: RotorSystem, odd: bool | None) -> np.ndarray:
+    """The harmonics of φ a turning shaft's steady state needs: odd (to a 1X load), even (to gravity) or all.
+
+    An asymmetric shaft's deviatoric stiffness shifts a harmonic k to k ± 2, so a
+    load at 1X reaches the odd ones and a constant load the even ones. On
+    isotropic supports the chain closes at once: a forward whirl at 1X stays 1X
+    (in x and y, ±1), and the 0X sag gives only a forward 2X (0, ±2). Otherwise
+    HARMONICS each side. A breathing crack's shifts them by 1 too, so every load
+    reaches every harmonic: 2 HARMONICS each side, whichever is asked.
     """
-    top = (1 if odd else 2) if system.isotropic_supports else (2 * HARMONICS - 1 if odd else 2 * HARMONICS)
-    return np.arange(-top, top + 1, 2)
+    if system.spacing == 1:
+        return np.arange(-2 * HARMONICS, 2 * HARMONICS + 1)
+    top = 1 if system.rotating_frame else 2 * HARMONICS - 1  # the top odd harmonic, the even one past it
+    if odd is None:
+        return np.arange(-top - 1, top + 2)
+    return np.arange(-top, top + 1, 2) if odd else np.arange(-top - 1, top + 2, 2)
 
 
 def harmonic_response(system: RotorSystem, omega: float | np.ndarray, orders: np.ndarray,
                       loads: np.ndarray) -> np.ndarray:
     """Harmonic balance at constant speed Ω: the periodic q = Σ Q_k e^{ikφ} under f = Σ F_k e^{ikφ}.
 
-    orders (m,) are the harmonics k, each 2 more than the last; loads (..., m, n_dof)
-    the F_k (F_{-k} = conj(F_k) for a real load). Returns the Q_k, (m, n_dof) for one
-    speed or (len(omega), m, n_dof) for several (loads then one set for all, or one
-    per speed). Row k reads (K(Ω) - k²Ω²M + ikΩ(C(Ω) + ΩG)) Q_k + E₊ Q_{k-2} + E₋
-    Q_{k+2} = F_k, the deviatoric stiffness being E₊ e^{2iφ} + E₋ e^{-2iφ};
+    orders (m,) are the harmonics k, in order; loads (..., m, n_dof) the F_k (F_{-k}
+    = conj(F_k) for a real load). Returns the Q_k, (m, n_dof) for one speed or
+    (len(omega), m, n_dof) for several (loads then one set for all, or one per
+    speed). Row k reads (K(Ω) - k²Ω²M + ikΩ(C(Ω) + ΩG)) Q_k + Σ_j E_j Q_{k-j} =
+    F_k, the turning stiffness being Σ_j E_j e^{ijφ} (E_{-j} = conj(E_j));
     harmonics past the ends are taken as zero.
     """
     M, C, G, K = system._matrices
     H = system._circulatory if system.speed_dependent else np.zeros_like(K)
-    Ep, Em = system._deviatoric_harmonics
+    E = system._periodic_terms[1]
     n, m = system.n_dof, len(orders)
     w = np.atleast_1d(np.asarray(omega, dtype=float))
     F = np.broadcast_to(np.asarray(loads, dtype=complex), (w.size, m, n)).reshape(w.size, m * n)
@@ -1208,10 +1496,10 @@ def harmonic_response(system: RotorSystem, omega: float | np.ndarray, orders: np
             s = k * wc
             d = slice(i * n, (i + 1) * n)
             A[:, d, d] = Kw - s * s * M + 1j * s * (Cw + wc * G)
-            if i > 0:
-                A[:, d, (i - 1) * n:i * n] = Ep
-            if i < m - 1:
-                A[:, d, (i + 1) * n:(i + 2) * n] = Em
+            for j, kj in enumerate(orders):
+                gap = int(k - kj)
+                if gap and abs(gap) in E:
+                    A[:, d, j * n:(j + 1) * n] = E[gap] if gap > 0 else E[-gap].conj()
         out[c:c + chunk] = np.linalg.solve(A, F[c:c + chunk, :, None])[..., 0]
     out = out.reshape(w.size, m, n)
     return out[0] if np.ndim(omega) == 0 else out
@@ -1220,26 +1508,59 @@ def harmonic_response(system: RotorSystem, omega: float | np.ndarray, orders: np
 def gravity_response(system: RotorSystem, omegas: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Gravity's steady state at constant speeds: (mean sag Q_0, 2X vector Q_2), each (len(omegas), n_dof).
 
-    q = Q_0 + Re(Q_2 e^{2iφ}) + (4X, ...: only on anisotropic supports). A round
-    shaft just sags: Q_0 = (K + ΩH)^{-1} f_g and Q_2 = 0. An asymmetric shaft's
-    weight acts on a stiffness that changes twice per revolution, so it vibrates
-    at 2X, most where 2Ω meets a natural frequency: the gravity critical, near
-    half the critical speed.
+    q = Q_0 + Re(Q_2 e^{2iφ}) + (4X, ...: only on anisotropic supports; and 1X, 3X,
+    ... with a breathing crack: see steady_harmonics). A round shaft just sags: Q_0
+    = (K + ΩH)^{-1} f_g and Q_2 = 0. An asymmetric shaft's weight acts on a
+    stiffness that changes twice per revolution, so it vibrates at 2X, most where
+    2Ω meets a natural frequency: the gravity critical, near half the critical speed.
     """
+    Q0, V = periodic_steady(system, omegas, gravity=True, rotating=False, top=2)
+    return Q0, V[:, 1]
+
+
+def steady_harmonics(system: RotorSystem, omegas: np.ndarray, top: int = 3) -> tuple[np.ndarray, np.ndarray]:
+    """The whole steady state, gravity and the 1X loads together: (Q_0 (len(omegas), n_dof), V (len, top, n_dof)).
+
+    q = Q_0 + Re Σ_k V_k e^{ikφ}, k = 1 ... top (V[:, k - 1]). A round shaft has
+    only the sag and the 1X (synchronous_response); a turning one has the others
+    from harmonic balance. A breathing crack mixes the two: its weight drives 1X,
+    2X and 3X, and the unbalance 2X and the mean too.
+    """
+    return periodic_steady(system, omegas, gravity=True, rotating=True, top=top)
+
+
+def periodic_steady(system: RotorSystem, omegas: np.ndarray, gravity: bool, rotating: bool,
+                    top: int) -> tuple[np.ndarray, np.ndarray]:
+    """As steady_harmonics, from gravity's load, the 1X loads, or both: (Q_0, V_k for k = 1 ... top)."""
     omegas = np.atleast_1d(np.asarray(omegas, dtype=float))
     n = system.n_dof
-    if not system.gravity:
-        return np.zeros((omegas.size, n), dtype=complex), np.zeros((omegas.size, n), dtype=complex)
-    if not system.asymmetry:
-        return system.static_deflection(omegas).astype(complex), np.zeros((omegas.size, n), dtype=complex)
-    orders = harmonic_orders(system, odd=False)
-    zero = int(np.searchsorted(orders, 0))
+    Q0 = np.zeros((omegas.size, n), dtype=complex)
+    V = np.zeros((omegas.size, top, n), dtype=complex)
+    gravity = gravity and bool(system.gravity)
+    if not system.periodic:
+        if gravity:
+            Q0[:] = system.static_deflection(omegas)
+        if rotating and top:
+            V[:, 0] = synchronous_response(system, omegas)
+        return Q0, V
+    if not gravity and not rotating:
+        return Q0, V
+    orders = harmonic_orders(system, None if gravity and rotating else not gravity)
     # Each speed once: a steady run asks for the same one again and again.
     speeds, back = np.unique(omegas, return_inverse=True)
     F = np.zeros((speeds.size, orders.size, n), dtype=complex)
-    F[:, zero] = [system.gravity_load(w) for w in speeds] if system.films else system.gravity_load()
+    if gravity:
+        F[:, _index(orders, 0)] = [system.gravity_load(w) for w in speeds] if system.films else system.gravity_load()
+    if rotating:
+        f = _rotating_force(system, speeds)
+        F[:, _index(orders, 1)], F[:, _index(orders, -1)] = 0.5 * f, 0.5 * f.conj()
     Q = harmonic_response(system, speeds, orders, F)[back.ravel()]
-    return Q[:, zero], 2.0 * Q[:, zero + 1]
+    if 0 in orders:
+        Q0 = Q[:, _index(orders, 0)]
+    for k in range(1, top + 1):
+        if k in orders:
+            V[:, k - 1] = 2.0 * Q[:, _index(orders, k)]
+    return Q0, V
 
 
 # ------------------------------------------------------------------ time stepping
@@ -1417,9 +1738,9 @@ class RotorSimulator:
             held = float(np.mean(w1)) if not steady else self.omega
             u0 = self.force(self.phase, self.omega, self._alpha, held)
             u = self.force(phi1, w1, alpha, held)
-            # An asymmetric shaft standing still has a fixed stiffness: stepped exactly, like a round one.
-            still = self.system.asymmetry and steady and self.omega == 0.0
-            if self.system.asymmetry and not still:
+            # A turning shaft standing still has a fixed stiffness: stepped exactly, like a round one.
+            still = self.system.periodic and steady and self.omega == 0.0
+            if self.system.periodic and not still:
                 z = self._split_steps(h, held, steady, w0, w1, alpha, u0, u, qs[k:k + n])
             else:
                 Phi, G0, G1 = self._discrete(h, held, steady, self.phase if still else None)
@@ -1438,14 +1759,14 @@ class RotorSimulator:
 
     def _split_steps(self, h: float, held: float, steady: bool, w0: np.ndarray, w1: np.ndarray,
                      alpha: np.ndarray, u0: np.ndarray, u: np.ndarray, out: np.ndarray) -> np.ndarray:
-        """Steps with an asymmetric shaft (Strang splitting); fills out (n, n_dof), returns the last state.
+        """Steps with an asymmetric or cracked shaft (Strang splitting); fills out (n, n_dof), returns the last state.
 
         Its stiffness turns with it, so no one matrix exponential steps it. Each step
         is half a step of everything else (the exact FOH update, as for a round
-        shaft), then the deviatoric stiffness at mid-step as a kick to the
-        velocities (exact for it alone: v -= h M^{-1} ΔK(φ) q), then the other
-        half step. Second order in h, and stable: ΔK is smaller than the shaft's
-        stiffness, whose fastest mode the step already resolves.
+        shaft, on the mean stiffness), then the turning part at mid-step as a kick
+        to the velocities (exact for it alone: v -= h M^{-1} ΔK(φ) q), then the
+        other half step. Second order in h, and stable: ΔK is smaller than the
+        shaft's stiffness, whose fastest mode the step already resolves.
         """
         system, n_dof = self.system, self.system.n_dof
         n = w1.size
@@ -1457,14 +1778,13 @@ class RotorSimulator:
         before = np.vstack([u0, u[:-1]])
         first = G0 @ before.T + G1 @ um.T
         second = G0 @ um.T + G1 @ u.T
-        theta = 2.0 * (phim + system.asymmetry_angle)
-        c, s = h * np.cos(theta), h * np.sin(theta)
-        kick = system._kick
+        ks, S = system._kick
+        angle = np.outer(phim, ks)
+        weights = h * np.hstack([np.cos(angle), np.sin(angle)])  # (n, 2m)
         z = self.state
         for j in range(n):
             z = Phi @ z + first[:, j]
-            k = kick @ z[:n_dof]
-            z[n_dof:] -= c[j] * k[:n_dof] + s[j] * k[n_dof:]
+            z[n_dof:] -= weights[j] @ (S @ z[:n_dof])
             z = Phi @ z + second[:, j]
             out[j] = z[:n_dof]
         return z

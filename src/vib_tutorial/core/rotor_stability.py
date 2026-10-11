@@ -105,7 +105,7 @@ def growth_rate(system: RotorSystem, omega: float) -> float:
     For an asymmetric shaft on isotropic supports, the rotating frame's eigenvalues
     (the growth rates do not change with the frame), so no modes need sorting.
     """
-    if system.asymmetry and system.isotropic_supports:
+    if system.periodic and system.rotating_frame:
         return float(np.linalg.eigvals(rotating_state_matrix(system, omega)).real.max())
     m = whirl_modes(system, omega)
     lam = -m.zeta * 2.0 * math.pi * m.freq_hz / np.sqrt(np.maximum(1.0 - m.zeta**2, 1e-12))
