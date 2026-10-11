@@ -1,4 +1,4 @@
-"""Single-plane balancing of the Jeffcott rotor by influence coefficients.
+"""Single- and two-plane balancing of the Jeffcott rotor by influence coefficients.
 
 As on a real machine: run at the balancing speed and measure the 1X vector at
 a probe (V0, "as found"); stop, add a known trial weight T on the disc, run
@@ -17,6 +17,19 @@ probe's track. It does not come from unbalance, so it is subtracted first:
 W = -(V0 - S) / α. A bow does respond to speed, though, so a bowed rotor
 balanced at one speed is left out of balance at others; and a weight in one
 plane cannot cancel a couple unbalance (a skewed disc) at every speed either.
+
+Two planes and two probes (two-plane balancing) work the same way with
+vectors: a trial run for each plane in turn gives a column of the influence
+matrix,
+
+    α[:, j] = (V_j - V0) / T_j,
+
+and the weights W = -α⁻¹ (V0 - S) cancel both readings. A disc's unbalance is
+a force and a couple, so two weights in planes on the disc can cancel both,
+and then the rotor is balanced at every speed. Planes elsewhere on a flexible
+shaft cancel the readings only at the balancing speed. Planes close together
+make α nearly singular: the weights grow large and small reading errors
+swing them (its condition number says how much).
 
 SteadyMeasurement drives a RotorSimulator to a speed, waits for the transient
 to die away and averages the 1X vectors over a number of revolutions.
@@ -59,6 +72,29 @@ def correction(as_found: complex, alpha: complex, slow_roll: complex = 0j) -> co
     if alpha == 0:
         raise ValueError("the trial weight changed nothing: no influence coefficient")
     return -(as_found - slow_roll) / alpha
+
+
+def influence_matrix(as_found: np.ndarray, trial_runs: np.ndarray, trials: np.ndarray) -> np.ndarray:
+    """α (probes x planes): column j is (V_j - V0) / T_j, from a trial run with weight T_j in plane j alone.
+
+    as_found (probes,), trial_runs (planes, probes), trials (planes,) complex.
+    """
+    as_found, trial_runs, trials = (np.asarray(a, dtype=complex) for a in (as_found, trial_runs, trials))
+    if not np.all(trials):
+        raise ValueError("the trial weights must not be zero")
+    return (trial_runs - as_found).T / trials
+
+
+def corrections(as_found: np.ndarray, alpha: np.ndarray, slow_roll: np.ndarray | complex = 0j) -> np.ndarray:
+    """W = -α⁻¹ (V0 - S): the weights (kg·m), one per plane, that cancel the readings less their runout.
+
+    With more probes than planes, the least-squares weights.
+    """
+    v = np.asarray(as_found, dtype=complex) - slow_roll
+    alpha = np.asarray(alpha, dtype=complex)
+    if np.linalg.matrix_rank(alpha) < alpha.shape[1]:
+        raise ValueError("the trial runs cannot tell the planes apart: no influence matrix")
+    return -np.linalg.lstsq(alpha, v, rcond=None)[0]
 
 
 class SteadyMeasurement(StagedRun):

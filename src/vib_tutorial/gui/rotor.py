@@ -30,6 +30,7 @@ from ..core.rotor import (
     MODE_LIMIT,
     STEEL,
     Bearing,
+    PlaneWeight,
     Campbell,
     RotorSimulator,
     RotorSystem,
@@ -75,6 +76,7 @@ ORBIT_REVS = 3  # revolutions in each orbit trail
 ORBIT_MAX_TIME = 1.0  # s, the longest orbit trail (at low speed)
 AXIAL = 4.0  # display length of the shaft in the 3D view
 SWING = 0.5  # display units: the largest whirl is magnified to this
+SHAFT_DOT = 0.1  # display units: how far off the shaft's centre line a weight on it is drawn
 GROUND = 1.1  # display units from the shaft's axis to the supports
 DAMPED = 0.3  # modes with more damping than this are drawn hollow and are not called critical
 DASH = QtCore.Qt.PenStyle.DashLine
@@ -253,7 +255,7 @@ class RotorView(pg.PlotWidget):
         self.disc = QtWidgets.QGraphicsPathItem()
         self.spoke = pg.PlotCurveItem()
         self.heavy = pg.ScatterPlotItem(size=9)
-        self.weight_dots = pg.ScatterPlotItem(size=7, symbol="s")  # balance weights on the disc
+        self.weight_dots = pg.ScatterPlotItem(size=7, symbol="s")  # balance weights, on the disc or the shaft
         self.mark = pg.PlotCurveItem()  # the keyphasor mark: a tick across the disc's rim
         self.show_heavy = True
         self.stations = pg.ScatterPlotItem(size=8)
@@ -415,9 +417,18 @@ class RotorView(pg.PlotWidget):
         else:
             self.spoke.setData([], [])
             self.heavy.setData([], [])
-        if s.weights:
-            self.weight_dots.setData(*self.project(np.array([on_disc(phase + math.atan2(w.imag, w.real), 0.92)
-                                                             for w in s.weights])))
+        dots = [on_disc(phase + cmath.phase(w), 0.92) for w in s.weights]
+        unit = n / np.linalg.norm(n)
+        for p in s.plane_weights:
+            if s.on_disc(p):  # on the disc, at its axial offset
+                dots.append(on_disc(phase + cmath.phase(p.weight), 0.92) + unit * (p.z - s.a) / self._metres)
+            else:  # on the shaft, just off its centre line
+                angle = phase + cmath.phase(p.weight)
+                centre = s.deflection(q, [p.z])[0] * g
+                dots.append([centre[0] + SHAFT_DOT * math.cos(angle), centre[1] + SHAFT_DOT * math.sin(angle),
+                             float(self._z(p.z))])
+        if dots:
+            self.weight_dots.setData(*self.project(np.array(dots)))
         else:
             self.weight_dots.setData([], [])
         self.mark.setData(*self.project(np.vstack([on_disc(phase, 0.88), on_disc(phase, 1.12)])))
@@ -830,7 +841,8 @@ class RotorPage(QtWidgets.QWidget):
         self.rubbed = False  # the whirl grew past RUB of the span and the simulation paused
         self._sag: tuple[np.ndarray, np.ndarray] | None = None  # see _set_sag
         self._weights: tuple[complex, ...] = ()  # balance weights on the disc (kg·m)
-        self._hidden: tuple[float, float] | None = None  # (unbalance, angle) kept out of the panels
+        self._plane_weights: tuple[PlaneWeight, ...] = ()  # weights in balancing planes
+        self._hidden: dict[str, float] | None = None  # RotorSystem fields kept out of the panels (SI)
         self.measurement: SteadyMeasurement | None = None  # a balancing measurement running, if any
         self._measured = None  # its callback, given the mean 1X vectors (4, 2)
         self._frames = 0
@@ -1369,10 +1381,10 @@ class RotorPage(QtWidgets.QWidget):
             id=self.id.value(),
             bearing_a=bearings[0],
             bearing_b=bearings[1],
-            unbalance=self.unbalance.value() / 1e6 if self._hidden is None else self._hidden[0],
-            unbalance_angle=(math.radians(self.unbalance_angle.value()) if self._hidden is None
-                             else self._hidden[1]),
+            unbalance=self.unbalance.value() / 1e6,
+            unbalance_angle=math.radians(self.unbalance_angle.value()),
             weights=self._weights,
+            plane_weights=self._plane_weights,
             gravity=GRAVITY if self.gravity.isChecked() else 0.0,
             bow=self.bow.value() / 1e6,
             bow_angle=math.radians(self.bow_angle.value()),
@@ -1382,7 +1394,7 @@ class RotorPage(QtWidgets.QWidget):
             density=self.density.value() if self.shaft_mass.isChecked() else 0.0,
             elements=self.elements.value(),
             lumped=self.mass_matrix.currentIndex() == 1,
-        )
+        ).with_(**(self._hidden or {}))
 
     def set_system(self, system: RotorSystem) -> None:
         """Show and use `system` (for scripts and tests)."""
@@ -1403,6 +1415,7 @@ class RotorPage(QtWidgets.QWidget):
         self.unbalance.setValue(system.unbalance * 1e6)
         self.unbalance_angle.setValue(math.degrees(system.unbalance_angle))
         self._weights = system.weights
+        self._plane_weights = system.plane_weights
         self.gravity.setChecked(system.gravity > 0.0)
         self.bow.setValue(system.bow * 1e6)
         self.bow_angle.setValue(math.degrees(system.bow_angle))
@@ -1447,15 +1460,30 @@ class RotorPage(QtWidgets.QWidget):
         self.preset_note.setText(self.presets[index].note if index < len(self.presets)
                                  else "Your own rotor: pick a preset to start again from one.")
 
-    def set_weights(self, weights: tuple[complex, ...]) -> None:
-        """Put these balance weights on the disc (kg·m each), in place of any there."""
+    def set_weights(self, weights: tuple[complex, ...], plane_weights: tuple[PlaneWeight, ...] = ()) -> None:
+        """Put these balance weights on the disc (kg·m each) and in these planes, in place of any there."""
         self._weights = tuple(weights)
+        self._plane_weights = tuple(plane_weights)
         self._on_params()
 
-    def hide_unbalance(self, unbalance: float, angle: float) -> None:
-        """Give the disc this unbalance (kg·m at `angle` rad) without showing it: a balancing exercise."""
-        self._hidden = (unbalance, angle)
-        for box in (self.unbalance, self.unbalance_angle):
+    def _hideable(self) -> dict[str, tuple[QtWidgets.QDoubleSpinBox, float]]:
+        """The boxes a balancing exercise can hide, by RotorSystem field, with the factor from SI to the box."""
+        deg = 180.0 / math.pi
+        return {"unbalance": (self.unbalance, 1e6), "unbalance_angle": (self.unbalance_angle, deg),
+                "skew": (self.skew, deg), "skew_angle": (self.skew_angle, deg)}
+
+    def hide_unbalance(self, unbalance: float, angle: float, skew: tuple[float, float] | None = None) -> None:
+        """Give the disc this unbalance (kg·m at `angle` rad) without showing it: a balancing exercise.
+
+        With `skew` (τ, its angle in rad), hide a couple unbalance too; otherwise the skew stays as set.
+        """
+        self._clear_hidden()
+        self._hidden = {"unbalance": unbalance, "unbalance_angle": angle}
+        if skew is not None:
+            self._hidden.update(skew=skew[0], skew_angle=skew[1])
+        boxes = self._hideable()
+        for name in self._hidden:
+            box = boxes[name][0]
             box.blockSignals(True)
             box.setSpecialValueText("hidden")
             box.setValue(box.minimum())
@@ -1465,23 +1493,26 @@ class RotorPage(QtWidgets.QWidget):
         self._on_params()
 
     def reveal_unbalance(self) -> None:
-        """Show the hidden unbalance in the panel again, and the heavy spot."""
+        """Show the hidden unbalance (and couple) in the panel again, and the heavy spot."""
         if self._hidden is None:
             return
-        u, angle = self._hidden
+        hidden, boxes = self._hidden, self._hideable()
         self._clear_hidden()
-        for box, value in ((self.unbalance, u * 1e6), (self.unbalance_angle, math.degrees(angle))):
+        for name, value in hidden.items():
+            box, scale = boxes[name]
             box.blockSignals(True)
-            box.setValue(value)
+            box.setValue(value * scale)
             box.blockSignals(False)
         self.set_heavy_shown(True)
         self._on_params()
 
     def _clear_hidden(self) -> None:
+        if self._hidden is not None:
+            for name in self._hidden:
+                box = self._hideable()[name][0]
+                box.setSpecialValueText("")
+                box.setEnabled(True)
         self._hidden = None
-        for box in (self.unbalance, self.unbalance_angle):
-            box.setSpecialValueText("")
-            box.setEnabled(True)
 
     def set_heavy_shown(self, shown: bool) -> None:
         self.view.show_heavy = shown
@@ -1600,6 +1631,7 @@ class RotorPage(QtWidgets.QWidget):
         self._steady_rpm = w * RPM
         self._steady_vectors = steady_vectors(self.sim.system, w)
         self._draw_tracking(full=True)
+        self.balancing.rotor_changed()
         self.balancing.refresh()
 
     def _refresh_matrices(self) -> None:
@@ -1608,7 +1640,7 @@ class RotorPage(QtWidgets.QWidget):
             return
         self._matrices_speed = rpm
         scroll = self.matrices.verticalScrollBar().value()
-        self.matrices.setHtml(matrices_html(self.sim.system, self.sim.omega, hidden=self._hidden is not None))
+        self.matrices.setHtml(matrices_html(self.sim.system, self.sim.omega, hidden=tuple(self._hidden or ())))
         self.matrices.verticalScrollBar().setValue(scroll)
 
     def apply_theme(self) -> None:

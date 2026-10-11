@@ -78,7 +78,9 @@ with the shaft and drive it once per revolution (1X):
       f_x = U (Ω² cos φ + Ω' sin φ),   f_y = U (Ω² sin φ - Ω' cos φ)
 
   on the disc for ψ = 0, or in general f_x + i f_y = U e^{iψ} (Ω² - iΩ') e^{iφ}.
-  Balance weights m_k r_k at angles θ_k add to U e^{iψ} the same way.
+  Balance weights m_k r_k at angles θ_k add to U e^{iψ} the same way. A weight
+  at an axial offset h from the disc's centre plane adds a moment w h too; one
+  on the shaft at z is a point force there (two-plane balancing).
 - the disc's skew τ (rad): its principal axis is tilted from the shaft's by τ,
   toward angle φ + γ. The disc's inertia acts on its own axis, the shaft's slope
   plus the skew, so the skew moves to the right side as a moment on the slopes,
@@ -111,6 +113,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 from functools import cached_property
+from typing import NamedTuple
 
 import numpy as np
 import scipy.linalg
@@ -147,6 +150,19 @@ class Bearing:
         return 0.5 * (self.cx + self.cy)
 
 
+class PlaneWeight(NamedTuple):
+    """A balance weight in a plane at axial position z (m from bearing A): m r e^{iθ} (kg·m) from the mark.
+
+    On the disc (`disc`), it sits on the rigid disc at an axial offset z - a from its
+    centre plane, so it adds w to the disc's unbalance and w (z - a) to its couple.
+    On the shaft, it is a point force on the shaft at z.
+    """
+
+    z: float
+    weight: complex
+    disc: bool = False
+
+
 @dataclass(frozen=True)
 class RotorSystem:
     """A Jeffcott rotor: shaft, disc, two bearings and the disc's unbalance. SI units."""
@@ -168,6 +184,7 @@ class RotorSystem:
     skew: float = 0.0  # rad, the disc's principal axis's tilt from the shaft's
     skew_angle: float = 0.0  # rad, of the skew's direction from the keyphasor mark
     weights: tuple[complex, ...] = ()  # balance weights on the disc, each m r e^{iθ} (kg·m) from the mark
+    plane_weights: tuple[PlaneWeight, ...] = ()  # weights in planes along the rotor (two-plane balancing)
     gravity: float = 0.0  # m/s², pulling in -y (9.81 for a horizontal rotor; 0 for a vertical one)
     density: float = 0.0  # kg/m³ of the shaft: 0 for the Jeffcott model's massless shaft (steel: STEEL)
     elements: int = 8  # beam elements along the shaft, shared between its stretches by length
@@ -192,15 +209,34 @@ class RotorSystem:
             raise ValueError("the shaft's density cannot be negative")
         if self.elements < 2:
             raise ValueError("the shaft needs at least two elements, one each side of the disc")
+        lo, hi = self.extent
+        if any(not p.disc and not lo <= p.z <= hi for p in self.plane_weights):
+            raise ValueError("balance weights go on the shaft, between its ends")
 
     def with_(self, **changes) -> RotorSystem:
         return replace(self, **changes)
 
+    def on_disc(self, p: PlaneWeight) -> bool:
+        """True if the plane weight p is on the disc: put there, or on the shaft at the disc's centre plane."""
+        return p.disc or abs(p.z - self.a) <= 1e-9 * self.length
+
     @property
     def mass_unbalance(self) -> complex:
-        """The disc's net mass unbalance (kg·m), the unbalance and the weights: |·| m e, its angle the heavy spot's."""
+        """The disc's net mass unbalance (kg·m), the unbalance and the weights: |·| m e, its angle the heavy spot's.
+
+        Plane weights on the disc count, whatever their axial offset.
+        """
         return self.unbalance * complex(math.cos(self.unbalance_angle), math.sin(self.unbalance_angle)) + sum(
-            self.weights, 0j)
+            self.weights, 0j) + sum((p.weight for p in self.plane_weights if self.on_disc(p)), 0j)
+
+    @property
+    def couple_unbalance(self) -> complex:
+        """The disc's net couple unbalance (kg·m²), turning with the shaft: the skew's and the plane weights'.
+
+        Its moment on the disc's slopes is this times (Ω² - iΩ') e^{iφ}.
+        """
+        return (self.id - self.ip) * self.skew * np.exp(1j * self.skew_angle) + sum(
+            (p.weight * (p.z - self.a) for p in self.plane_weights if self.on_disc(p)), 0j)
 
     # ------------------------------------------------------------- the shaft
     @property
@@ -389,8 +425,10 @@ class RotorSystem:
     def rotating_load(self, omega: float | np.ndarray, alpha: float | np.ndarray = 0.0) -> np.ndarray:
         """The 1X load on one plane's DOFs as f_x + i f_y = P e^{iφ}: P (..., 4 + r) complex.
 
-        The unbalance and the balance weights on the disc, the skew's moment on its
-        slopes and the bow's force K_shaft q_bow, at speed Ω and acceleration Ω' = alpha.
+        The unbalance and the balance weights on the disc, its couple (the skew's and
+        the weights' moment on its slopes), the weights on the shaft (each a point
+        force, shared over the DOFs as S(z)^T) and the bow's force K_shaft q_bow, at
+        speed Ω and acceleration Ω' = alpha.
         """
         drive = np.asarray(omega, dtype=float) ** 2 - 1j * np.asarray(alpha, dtype=float)
         per_drive, bow = self._load_parts
@@ -400,7 +438,10 @@ class RotorSystem:
     def _load_parts(self) -> tuple[np.ndarray, np.ndarray]:
         """(the load per unit Ω² - iΩ', the bow's constant load), each (4 + r,) complex."""
         per_drive = np.zeros(4 + self.modes_kept, dtype=complex)
-        per_drive[1:3] = self.mass_unbalance, (self.id - self.ip) * self.skew * np.exp(1j * self.skew_angle)
+        per_drive[1:3] = self.mass_unbalance, self.couple_unbalance
+        shaft = [p for p in self.plane_weights if not self.on_disc(p)]
+        if shaft:
+            per_drive += np.array([p.weight for p in shaft]) @ self.shape_matrix(np.array([p.z for p in shaft]))
         bow = self.shaft_stiffness() @ self.bow_shape() * self.bow * np.exp(1j * self.bow_angle)
         return per_drive, bow
 
