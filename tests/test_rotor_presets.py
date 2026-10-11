@@ -18,7 +18,7 @@ def criticals(name: str, forward: bool | None = None) -> list[int]:
 
 
 def test_every_preset_is_a_valid_rotor_with_its_target_in_range():
-    assert len(PRESETS) == 5
+    assert len(PRESETS) == 6
     for p in PRESETS.values():
         assert 0 < p.target_rpm < p.top_rpm and p.note
 
@@ -52,3 +52,11 @@ def test_fluid_film_bearings_whip_above_twice_the_natural_frequency():
     assert least_damped(p.system, p.target_rpm / RPM)[0] > 0  # it starts out stable
     zeta, f, _ = least_damped(p.system, 5000.0 / RPM)
     assert f == pytest.approx(26.3, abs=0.05) and 1 / (-zeta * 2 * math.pi * f) == pytest.approx(0.22, abs=0.01)
+
+
+def test_long_shaft_needs_its_mass():
+    s = PRESETS["Long shaft, with its mass"].system
+    assert s.shaft_mass == pytest.approx(2.47, abs=0.005) and s.shaft_mass > s.disc_mass
+    assert criticals("Long shaft, with its mass", forward=True) == [1589, 6582]
+    massless = campbell(s.with_(density=0.0), 10_000.0 / RPM, n_modes=8).criticals
+    assert [round(w * RPM) for w, r, z in massless if z < 0.3 and r > 0.1] == [2146]

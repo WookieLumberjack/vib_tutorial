@@ -508,12 +508,32 @@ def jeffcott_waterfall():
     save(w, "jeffcott_waterfall")
 
 
+def jeffcott_shaft_mass():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.load_preset("Long shaft, with its mass")
+    page._refresh_analysis()
+    page.ramp.setValue(1000.0)
+    page.set_target_rpm(6700.0)
+    while page.sim.omega < page.sim.target:
+        page.step(0.02)
+    for _ in range(25):
+        page.step(0.02)
+    print(page.readout.text())
+    save(w, "jeffcott_shaft_mass")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
-         jeffcott_bow, jeffcott_balancing, jeffcott_stability, jeffcott_overhung, jeffcott_waterfall]
+         jeffcott_bow, jeffcott_balancing, jeffcott_stability, jeffcott_overhung, jeffcott_waterfall,
+         jeffcott_shaft_mass]
 
 
 def main(names: list[str]) -> None:

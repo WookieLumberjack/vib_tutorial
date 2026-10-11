@@ -1863,3 +1863,51 @@ def test_rotor_waterfall(app):
     p.step(0.5)
     p.reset()
     assert not p.waterfall.blocks and "first 0.25 s block" in p.waterfall_note.text()
+
+
+def test_rotor_shaft_mass(app):
+    from vib_tutorial.core.rotor import RotorSystem
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    p.running = False
+    p._refresh_analysis()
+    assert not p.elements.isEnabled() and not p.campbell_plot.reference[0:1]
+    p.set_target_rpm(1500.0)
+    p.step(0.2)
+    # Ticked: the shaft has mass, the stations keep their motion and the massless model is drawn dashed.
+    p.shaft_mass.setChecked(True)
+    p._refresh_analysis()
+    s = p.sim.system
+    assert s.density == 7850.0 and s.n_dof > 8 and p.sim.q.size == s.n_dof
+    assert p.elements.isEnabled() and "Shaft 0.308 kg" in p.shaft_note.text()
+    assert any(line.isVisible() for line in p.campbell_plot.reference)
+    assert "With a massless shaft (the Jeffcott model, dashed): 1,584 rpm" in p.crit_label.text()
+    assert "1,458 rpm" in p.crit_label.text()
+    p.step(0.2)
+    p.tabs.setCurrentWidget(p.matrices)
+    p._refresh_matrices()
+    html = p.matrices.toHtml()
+    text = p.matrices.toPlainText()
+    assert "ξ" in html and "Craig–Bampton" in text and f"A is {2 * s.n_dof} × {2 * s.n_dof}" in text
+    assert f"modal coordinates ξ, {s.modes_kept} in each plane" in text
+    p.mass_matrix.setCurrentIndex(1)
+    assert p.sim.system.lumped
+    p.elements.setValue(4)
+    assert p.sim.system.nodes.size == 5
+    w.set_theme("Dark")
+    # The preset, and back to a massless shaft: whatever the mesh, the classic preset again.
+    p.load_preset("Long shaft, with its mass")
+    assert p.shaft_mass.isChecked() and p.elements.value() == 8 and p.mass_matrix.currentIndex() == 0
+    p.step(0.2)
+    p.load_preset("Classic Jeffcott rotor")
+    assert not p.shaft_mass.isChecked() and p.sim.q.size == 8
+    p.elements.setValue(12)
+    assert p.preset.currentText() == "Classic Jeffcott rotor"
+    p._refresh_analysis()
+    assert not any(line.isVisible() for line in p.campbell_plot.reference)
+    p.set_system(RotorSystem(density=2700.0, elements=6, lumped=True))
+    assert p.density.value() == 2700.0 and p.elements.value() == 6 and p.mass_matrix.currentIndex() == 1

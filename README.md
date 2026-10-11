@@ -484,16 +484,23 @@ exact modes:
 
 ### Jeffcott rotor
 
-The **Jeffcott rotor** page spins a disc on a flexible, massless shaft, between two bearings
+The **Jeffcott rotor** page spins a disc on a flexible shaft, between two bearings
 or overhung past one, each bearing on springs and dampers to ground, horizontally and vertically. The disc has a mass,
 polar and diametral moments of inertia, and a mass unbalance; the disc can also be skewed on
-the shaft and the shaft bent (bowed). The model has 8 DOFs: in each
-plane, both journals, the disc, and the shaft's slope at the disc. It is stepped in state
-space with the same exact first-order-hold update as the chain, as the speed ramps to a target.
+the shaft and the shaft bent (bowed). With the Jeffcott model's massless shaft the model has 8 DOFs: in each
+plane, both journals, the disc, and the shaft's slope at the disc. Give the shaft its mass and
+it becomes a beam finite element model, reduced to those 8 DOFs plus a few of the shaft's own
+modes. It is stepped in state space with the same exact first-order-hold update as the chain, as
+the speed ramps to a target.
 
 - **Presets**: the classic Jeffcott rotor, an off-centre disc, anisotropic supports, an
-  overhung rotor and fluid-film bearings that go into oil whip. Each loads a rotor with a speed
-  range to suit it and a note on what to look for.
+  overhung rotor, a long shaft whose own mass matters, and fluid-film bearings that go into oil
+  whip. Each loads a rotor with a speed range to suit it and a note on what to look for.
+- **Shaft mass**: tick it (and set the density) and the shaft gets its mass, its sections'
+  rotary inertia and their gyroscopic moment. It is then 2 to 60 Euler–Bernoulli beam elements
+  with consistent or lumped mass, reduced Craig–Bampton style to the stations and the shaft's
+  modes with the stations held, up to 1 kHz. The Campbell diagram draws the massless model's
+  branches dashed beside the real ones.
 - **3D view**: the whirling shaft, the disc with its heavy spot, and the supports, drawn
   in perspective on an ordinary 2D plot, with no OpenGL. Drag to turn it.
 - **Orbits** at bearing A, the disc, midspan and bearing B, seen from the B end, with
@@ -554,7 +561,7 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   diagram's branches. The block length trades frequency resolution against the smear of 1X while
   the speed ramps.
 - **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
-  the shaft's condensed beam stiffness, the state matrix A(Ω), and the modes at the current
+  the shaft's beam stiffness (condensed, or with mass reduced to the stations and the shaft's modes), the state matrix A(Ω), and the modes at the current
   speed. G is skew-symmetric: it sits beside C but does no work.
 - **Theory**: the classic case, heavy and high spot, the gyroscopic effect, the overhung
   rotor, forward and backward whirl, 2X and ½X excitations, anisotropic supports, run-ups through a critical speed (why a fast ramp
@@ -564,8 +571,9 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   single-plane balancing by influence coefficients,
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
   c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whirl and whip at λΩ = ω), waterfall and
-  cascade plots (a measured Campbell diagram; block length against ramp rate), and why the solution
-  uses state space.
+  cascade plots (a measured Campbell diagram; block length against ramp rate), the shaft's own mass
+  (beam elements, consistent against lumped mass, the reduction), and why the solution uses state
+  space.
 
 The default is the classic case: the disc at midspan on identical, isotropic supports, so its
 translation and tilt are uncoupled, and the first critical speed is the textbook
@@ -624,6 +632,16 @@ moves them. Tapped all the way up, the overhung rotor draws its own Campbell dia
 backward whirl falls and the forward one rises, and the 1X ridge grows where it crosses the
 forward branch. On a full spectrum the backward branch lies on the other side of zero, so 1X
 never meets it, which is why the backward crossing is not a critical speed.
+
+![Long shaft preset at 6700 rpm, just past its second critical speed: a 2 kg disc on a 1 m steel shaft of 2.47 kg bends in its second mode. On the Campbell diagram the critical speeds are 1589 and 6582 rpm, and the dashed branches of the same rotor with a massless shaft put the first at 2146 rpm and have no second](docs/images/jeffcott_shaft_mass.png)
+
+Jeffcott's shaft has no mass, which is fine while it is light beside the disc: the default
+rotor's steel shaft (0.31 kg under a 1 kg disc) only takes the critical speed from 1584 to 1458
+rpm, about what adding 17/35 of its mass to the disc predicts. But a shaft also has bending modes of its own. In the
+*Long shaft* preset it weighs more than the disc, and the massless model puts the first critical
+35% too high (2146 rpm, not 1589) and misses the second, at 6582 rpm, altogether. With consistent
+mass the second critical comes down from above as elements are added (7393, 6591 and 6582 rpm
+with 2, 4 and 8); lumped mass has no such bound (8187, 6733 and 6620).
 
 ## The math, briefly
 
@@ -755,8 +773,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/back_expansion.py`: recovery of the interior DOFs from the coupled solution (by T,
   from the boundary alone, and by re-solving each interior with the boundary motion imposed,
   stepped in the same exact update) and of the spring forces.
-- `core/rotor.py`: the Jeffcott rotor: shaft (beam elements, condensed), disc, bearings and the
-  gyroscopic matrix; whirl modes, the Campbell diagram and critical speeds, the steady 1X
+- `core/rotor.py`: the Jeffcott rotor: shaft (beam elements: massless and condensed to the
+  stations, or with mass and reduced to the stations and its fixed-interface modes), disc,
+  bearings and the gyroscopic matrix; whirl modes, the Campbell diagram and critical speeds, the steady 1X
   response to the unbalance, the disc's skew and the shaft's bow, and an exact FOH time
   stepper that follows a speed ramp.
 - `core/rotor_sweep.py`: run-up and coast-down: the steady-state 1X vectors at each station,
@@ -867,7 +886,7 @@ stab = lscf(est.freqs, est.H, band, max_order=30)              # poles at every 
 ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(stab)])
 [(r.mode, r.identified and r.identified.fn_hz, r.mac) for r in match_modes(ident.modes, res, 8.0)]
 
-from vib_tutorial.core.rotor import RPM, Bearing, RotorSimulator, RotorSystem, campbell, synchronous_response
+from vib_tutorial.core.rotor import RPM, STEEL, Bearing, RotorSimulator, RotorSystem, campbell, synchronous_response
 
 rotor = RotorSystem(position=0.3, bearing_a=Bearing(kx=2e4, ky=8e4))   # disc off centre, A anisotropic
 M, C, G, K = rotor.matrices()                                  # 8x8; M q'' + (C + ΩG) q' + (K + ΩH) q = f
@@ -876,6 +895,8 @@ Q = synchronous_response(rotor, np.array([150.0]))             # steady whirl at
 bent = rotor.with_(bow=10e-6, bow_angle=np.pi, skew=np.radians(0.1))  # bow against the heavy spot, disc skewed
 weighted = rotor.with_(weights=(2e-5 * np.exp(1j * np.pi),))  # a 20 g·mm balance weight at 180° from the mark
 rotor.with_(gravity=9.81).static_deflection()                  # sag under its own weight, (8,)
+heavy = rotor.with_(density=STEEL, elements=8)                 # the shaft's own mass: beam elements
+heavy.n_dof, heavy.fixed_interface_freqs                       # (12, ...): q = 8 stations + 2 shaft modes per plane
 spin = RotorSimulator(rotor)
 spin.target = 3000 / RPM                                       # ramps at spin.accel (rad/s²)
 r = spin.advance(0.25)                                         # r.t, r.q (steps, 8), r.omega, r.phase
