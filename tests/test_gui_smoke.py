@@ -1808,3 +1808,58 @@ def test_rotor_presets_speed_range_and_overhung_disc(app):
     assert p.sim.system.bearing_a.swirl == 0.5 == p.sim.system.bearing_b.swirl
     p._refresh_analysis()
     assert "swirl λ = 0.5" in p.stability_note.text() and "unstable above" in p.stability_note.text()
+
+
+def test_rotor_waterfall(app):
+    from vib_tutorial.core.rotor import RPM
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    p.running = False
+    p.load_preset("Overhung rotor")
+    p._refresh_analysis()
+    plot = p.waterfall_plot
+    p.tabs.setCurrentWidget(plot.parentWidget())
+    assert "No run-up" in p.waterfall_note.text()
+    # Repeated taps through a run-up: a cascade of spectra, one per half block, at rising speeds.
+    p.ramp.setValue(1000.0)
+    p.repeat_taps.setChecked(True)
+    p.set_target_rpm(2000.0)
+    while p.sim.omega < p.sim.target:
+        p.step(0.05)
+    blocks = p.waterfall.latest_ramp(up=True)
+    shown = [line for line in plot.lines if line.isVisible()]
+    assert len(blocks) >= 6 and len(shown) == len(blocks)
+    assert f"{len(blocks)} full spectra of the disc orbit" in p.waterfall_note.text()
+    assert "Tap the disc every" not in p.waterfall_note.text()  # already ticked
+    speeds = [b.omega * RPM for b in blocks]
+    assert speeds == sorted(speeds) and plot.plot.getAxis("left").labelText == "Spin speed"
+    x, y = plot.sync.getData()
+    assert x == pytest.approx(np.array(speeds) / 60.0) and y == pytest.approx(speeds)
+    assert plot.forward.getData()[0].size and plot.backward.getData()[0].size
+    # Unticked, the marks go; against time every block is drawn.
+    p.wf_marks.setChecked(False)
+    assert not plot.sync.getData()[0].size and not plot.forward.getData()[0].size
+    p.wf_against.setCurrentIndex(2)
+    assert plot.plot.getAxis("left").labelText == "Time"
+    assert sum(line.isVisible() for line in plot.lines) == len(p.waterfall.blocks)
+    p.wf_scale.setCurrentIndex(1)
+    w.set_theme("Dark")
+    # New blocks are drawn as they come; a new rotor, block length or Reset starts again.
+    n = len(p.waterfall.blocks)
+    for _ in range(10):
+        p.step(0.05)
+    assert len(p.waterfall.blocks) > n
+    assert sum(line.isVisible() for line in plot.lines) == len(p.waterfall.blocks)
+    p.wf_block.setValue(0.25)
+    assert not p.waterfall.blocks and p.waterfall.block == 0.25
+    p.step(0.5)
+    assert p.waterfall.blocks
+    p.disc_mass.setValue(2.0)
+    assert not p.waterfall.blocks and p.waterfall.system.disc_mass == 2.0
+    p.step(0.5)
+    p.reset()
+    assert not p.waterfall.blocks and "first 0.25 s block" in p.waterfall_note.text()

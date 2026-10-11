@@ -500,6 +500,29 @@ unbalance shows at +1X, and the instability as a growing line below it on the fo
 linear, so the whirl would grow for ever; in a machine it grows until something rubs or the bearing's
 nonlinearity holds it to a limit cycle. The page pauses when it reaches 2% of the span.</p>
 
+<h3>Waterfall and cascade plots</h3>
+<p>A spectrum analyser on a machine takes the spectrum of a block of signal, then of the next, and so
+on. The <i>Waterfall</i> tab does the same with the full spectrum of the orbit at a station: blocks of
+0.5 s by default, each starting halfway through the last. Stacked against time the spectra make a
+<b>waterfall</b> plot; against the speed during a run-up or coast-down, a <b>cascade</b>. The
+unbalance makes a ridge along +1X that moves with the speed and peaks at the critical. Whatever sets
+the rotor ringing (the passage through the critical, a tap, an instability) shows at the free whirl
+frequencies, which stay put, or move only as the gyroscopic effect moves them, while the 1X ridge
+sweeps past. That is how a natural frequency is told from a forced response on a running machine.</p>
+<p><b>A measured Campbell diagram.</b> Tap the disc every half second through a run-up and each tap
+rings both whirls of each mode at the speed it came at, so the peaks trace the Campbell diagram's
+branches. On the <i>Overhung rotor</i> preset, from rest to 2,500 rpm, the first mode's backward whirl
+falls from 14.5 to 5.7 Hz and its forward whirl rises to 25.5 Hz. The 1X ridge grows where it crosses
+the forward branch, at the critical speed (1284 rpm), and peaks just after it, as on the Bode plot. On a full spectrum the backward branch lies on the
+other side of zero, so the +1X ridge never meets it: the backward crossing on the Campbell diagram (664
+rpm) is not a critical for an isotropic rotor.</p>
+<p><b>Block length.</b> A block of T seconds resolves frequencies 1/T apart: 2 Hz for 0.5 s. A longer
+block resolves more finely, but while the speed ramps at α it changes by αT over the block, smearing
+the 1X ridge: 100 rpm (1.7 Hz) at 200 rpm/s, but 2500 rpm (42 Hz) at 5000 rpm/s, where the ridge is a
+smear. Analysers get round this by <i>order tracking</i>: sampling at fixed shaft angles, from the
+keyphasor, so 1X stays in one bin whatever the speed. The Bode plot's once-per-revolution 1X vector is
+that kind of measurement.</p>
+
 <h3>Why state space</h3>
 <p>Undamped modes and modal superposition need symmetric M, C and K, and real modes that do not change.
 Here ΩG is skew-symmetric and changes with the speed, and support damping is not proportional, so the
@@ -563,6 +586,11 @@ gone the critical drops to 870 rpm, the natural frequency at rest.</li>
 2500 rpm and tap the disc: the tap dies away. Set the target to 4000 rpm (past the onset, 3136 rpm,
 where ½X crosses the first mode) and tap again: the whirl grows at 26 Hz, 0.39× on the full spectrum, not
 at ½X. Double the support damping: the onset does not move.</li>
+<li>Load the <i>Overhung rotor</i> preset, set the ramp rate to 200 rpm/s and tick <i>Tap the disc
+every</i> 0.5 s, then set the target to 2,500 rpm and watch the <i>Waterfall</i> tab: the taps' peaks
+follow the dots of the forward and backward branches (backward from 14.5 down to 5.7 Hz), and the 1X ridge
+grows where it crosses the forward branch. Switch to <i>Time</i> and set a steady speed: the taps' peaks
+then stay at one frequency.</li>
 <li>Pause near the critical speed and turn the 3D view: the shaft bows in one plane, which turns with
 the spin, rather than flapping back and forth.</li>
 </ol>

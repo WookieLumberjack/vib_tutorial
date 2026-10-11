@@ -46,12 +46,14 @@ from ..core.rotor_sweep import (
 from ..core.rotor_balance import SteadyMeasurement
 from ..core.rotor_presets import rotor_presets
 from ..core.rotor_stability import Onset, full_spectrum, least_damped, stability_onset
+from ..core.rotor_waterfall import Waterfall
 from .cms_time import SampleBuffer
 from .panels import spin
 from .rotor_balance import BalancingPanel
 from .rotor_bode import SWEEP_COLORS, BodePlots, PolarPlot, SweepPlots, nice_marks
 from .rotor_notes import THEORY_HTML, matrices_html, whirl_name
 from .rotor_stability import MEASURES, FullSpectrum, StabilityMap
+from .rotor_waterfall import AGAINST, SCALES, WaterfallPlot, against_speed, baselines
 from .style import colors
 from .theming import add_legend, mute
 
@@ -83,6 +85,8 @@ GRAVITY = 9.81  # m/s²
 SAG_SPEEDS = 201  # speeds the static sag is worked out at, with internal damping, and interpolated
 SPECTRUM_FRAMES = 6  # the full spectrum is recomputed every this many frames
 MEASURE_SPEED = 2.0  # × real time, at least, while a balancing measurement runs
+WATERFALL_FRAMES = 15  # new spectra are drawn at most every this many frames (each repaint fills every line)
+WATERFALL_RANGE = 2.0  # the waterfall keeps frequencies up to this many times the top speed
 
 ORDER_TIPS = {
     2.0: "<p>Twice the speed. A shaft stiffer one way than the other (a keyway, a crack) bends twice per "
@@ -115,6 +119,16 @@ TAP_TIP = (
     "natural frequency: both the forward and the backward whirl of each mode. With the disc off "
     "centre, at speed, the gyroscopic effect pulls their frequencies apart and the orbit becomes a "
     "rosette (watch the Campbell diagram at the current speed).</p>"
+)
+REPEAT_TAP_TIP = (
+    "<p>Tap the disc again and again as it runs, as in an impact test at speed. On the <i>Waterfall</i> "
+    "tab each tap rings the free whirl frequencies at the speed it came at, so over a run-up the peaks "
+    "trace the Campbell diagram's branches.</p>"
+)
+BLOCK_TIP = (
+    "<p>How long each spectrum's block of signal is. The frequency resolution is 1 / block: 0.5 s "
+    "resolves 2 Hz. But while the speed ramps, it changes over a block, smearing the 1X peak: at "
+    "500 rpm/s, by 250 rpm (4 Hz) over 0.5 s. Each block overlaps the last by half.</p>"
 )
 VIEW_TIP = (
     "<p>The shaft's centre line, the disc and the bearings' springs and dampers, with the whirl "
@@ -768,6 +782,9 @@ class RotorPage(QtWidgets.QWidget):
         self.measurement: SteadyMeasurement | None = None  # a balancing measurement running, if any
         self._measured = None  # its callback, given the mean 1X vectors (4, 2)
         self._frames = 0
+        self._next_tap = 0.0  # simulated time of the next repeated tap
+        self.waterfall: Waterfall | None = None  # spectra block by block, made by _new_waterfall
+        self._waterfall_drawn = False  # the waterfall tab shows the latest blocks
 
         # --- parameters
         left = QtWidgets.QWidget()
@@ -902,6 +919,51 @@ class RotorPage(QtWidgets.QWidget):
         st.addWidget(self.stability_note)
         st.addWidget(self.spectrum, 2)
         st.addWidget(self.spectrum_note)
+        self.waterfall_plot = WaterfallPlot()
+        self.wf_station = QtWidgets.QComboBox()
+        self.wf_station.addItems(STATIONS)
+        self.wf_station.setCurrentIndex(1)
+        self.wf_against = QtWidgets.QComboBox()
+        self.wf_against.addItems(AGAINST)
+        self.wf_against.setToolTip(
+            "<p>Against speed (a <i>cascade</i>): the latest run-up's or coast-down's spectra, each at its "
+            "speed. Against time (a <i>waterfall</i>): every spectrum kept, steady running and taps "
+            "included.</p>")
+        self.wf_scale = QtWidgets.QComboBox()
+        self.wf_scale.addItems(SCALES)
+        self.wf_scale.setToolTip(
+            "<p>Log: each line's height is its amplitude in decades above a floor 1000 times (60 dB) "
+            "below the tallest peak, so small peaks show beside the 1X one. Linear: heights in proportion "
+            "to the amplitude, as most cascades are drawn.</p>")
+        self.wf_block = spin(0.1, 2.0, 0.5, 2, " s")
+        self.wf_block.setSingleStep(0.1)
+        self.wf_block.setToolTip(BLOCK_TIP)
+        self.wf_block.valueChanged.connect(lambda _: self._new_waterfall())
+        self.wf_marks = QtWidgets.QCheckBox("1X and free whirl")
+        self.wf_marks.setChecked(True)
+        self.wf_marks.setToolTip("Mark 1X and the free whirl frequencies (from the Campbell diagram) under the lines")
+        for c in (self.wf_station, self.wf_against, self.wf_scale):
+            c.currentIndexChanged.connect(lambda _: self._draw_waterfall())
+        self.wf_marks.toggled.connect(lambda _: self._draw_waterfall())
+        self.wf_clear = QtWidgets.QPushButton("Clear")
+        self.wf_clear.setToolTip("Drop every spectrum taken so far")
+        self.wf_clear.clicked.connect(self._new_waterfall)
+        self.waterfall_note = QtWidgets.QLabel()
+        self.waterfall_note.setWordWrap(True)
+        mute(self.waterfall_note)
+        waterfall_tab = QtWidgets.QWidget()
+        wt = QtWidgets.QVBoxLayout(waterfall_tab)
+        for widgets in ((QtWidgets.QLabel("Orbit at:"), self.wf_station, QtWidgets.QLabel("Against:"),
+                         self.wf_against),
+                        (QtWidgets.QLabel("Amplitude:"), self.wf_scale, QtWidgets.QLabel("Block:"), self.wf_block,
+                         self.wf_marks, self.wf_clear)):
+            row = QtWidgets.QHBoxLayout()
+            for w_ in widgets:
+                row.addWidget(w_)
+            row.addStretch(1)
+            wt.addLayout(row)
+        wt.addWidget(self.waterfall_plot, 1)
+        wt.addWidget(self.waterfall_note)
         self.balancing = BalancingPanel(self)
         self.matrices = QtWidgets.QTextBrowser()
         self.theory = QtWidgets.QTextBrowser()
@@ -911,10 +973,12 @@ class RotorPage(QtWidgets.QWidget):
         self.tabs.addTab(bode_tab, "Bode plot")
         self.tabs.addTab(polar_tab, "Polar plot")
         self.tabs.addTab(stability_tab, "Stability")
+        self.tabs.addTab(waterfall_tab, "Waterfall")
         self.tabs.addTab(self.balancing, "Balancing")
         self.tabs.addTab(self.matrices, "Equations && matrices")
         self.tabs.addTab(self.theory, "Theory")
         self.tabs.currentChanged.connect(lambda _: self._refresh_matrices())
+        self.tabs.currentChanged.connect(lambda _: self._draw_waterfall(only_new=True))
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)
@@ -998,6 +1062,18 @@ class RotorPage(QtWidgets.QWidget):
         for b in (self.run_button, self.reset_button, self.tap_button):
             buttons.addWidget(b)
         form.addRow(buttons)
+        self.repeat_taps = QtWidgets.QCheckBox("Tap the disc every")
+        self.repeat_taps.setToolTip(REPEAT_TAP_TIP)
+        self.repeat_taps.toggled.connect(self._on_repeat_taps)
+        self.tap_every = spin(0.1, 10.0, 0.5, 1, " s")
+        self.tap_every.setSingleStep(0.1)
+        self.tap_every.setToolTip(REPEAT_TAP_TIP)
+        taps = QtWidgets.QHBoxLayout()
+        taps.addWidget(self.repeat_taps)
+        taps.addWidget(self.tap_every)
+        taps.addWidget(QtWidgets.QLabel("of simulated time"))
+        taps.addStretch(1)
+        form.addRow(taps)
         return box
 
     def _sweep_box(self) -> QtWidgets.QGroupBox:
@@ -1341,6 +1417,7 @@ class RotorPage(QtWidgets.QWidget):
         self.orbits.set_midspan_shown(abs(system.position - 0.5) > 1e-9)
         self._stride = max(1, round(STORE_DT / self.sim.step_size()))
         self._set_sag(system)
+        self._new_waterfall()  # its spectra and free whirl frequencies were of the old rotor
         ks = 48.0 * system.ei / system.length**3
         if system.overhung:
             formula = f" = 3EI/(c²(L + c)), overhung by c = {system.overhang * 1e3:.4g} mm"
@@ -1439,6 +1516,7 @@ class RotorPage(QtWidgets.QWidget):
         self.campbell_plot.apply_theme()
         self.stability_map.apply_theme()
         self.spectrum.apply_theme()
+        self.waterfall_plot.apply_theme()
         self.bode.apply_theme()
         self.polar.apply_theme()
         self.sweep_plots.apply_theme()
@@ -1462,6 +1540,7 @@ class RotorPage(QtWidgets.QWidget):
         for w in (self.target_rpm, self.sweep_from, self.sweep_to):
             w.setMaximum(rpm)  # a target above it comes down (and the speed with it)
         self._set_sag(self.sim.system)
+        self._new_waterfall()
         self._analysis_timer.start()
 
     def _on_orders(self) -> None:
@@ -1500,12 +1579,18 @@ class RotorPage(QtWidgets.QWidget):
         self.sim.reset()
         self.rubbed = False
         self.history.clear()
+        self._new_waterfall()
         self._target_t = 0.0
         self._carry = 0
+        self._next_tap = 0.0
         self._draw()
 
     def tap(self) -> None:
         self.sim.tap(0.0, -TAP_IMPULSE)
+
+    def _on_repeat_taps(self, on: bool) -> None:
+        if on:
+            self._next_tap = self.sim.t  # the first one now
 
     # ------------------------------------------------------------- balancing measurements
     def start_measurement(self, omega: float, measured) -> None:
@@ -1755,6 +1840,9 @@ class RotorPage(QtWidgets.QWidget):
     def step(self, duration: float) -> None:
         """Advance by `duration` s of simulated time and redraw."""
         self._target_t = min(self._target_t + duration, self.sim.t + 0.1 + duration)
+        if self.repeat_taps.isChecked() and self.measurement is None and self.sim.t >= self._next_tap:
+            self.tap()
+            self._next_tap = self.sim.t + self.tap_every.value()
         if self.run_up is not None:
             r = self._advance_sweep(self._target_t - self.sim.t)
         elif self.measurement is not None:
@@ -1767,7 +1855,11 @@ class RotorPage(QtWidgets.QWidget):
             pick = np.arange(first, r.t.size, self._stride)
             self._carry = (r.t.size - 1 - pick[-1]) if pick.size else self._carry + r.t.size
             if pick.size:
-                self.history.extend(r.t[pick], self._columns(r.q[pick], r.phase[pick], r.omega[pick]))
+                cols = self._columns(r.q[pick], r.phase[pick], r.omega[pick])
+                self.history.extend(r.t[pick], cols)
+                vib = self._vibration(cols)
+                if self.waterfall.feed(r.t[pick], vib[:, 0::2] + 1j * vib[:, 1::2], cols[:, OMEGA]):
+                    self._waterfall_drawn = False
         if self.running and np.abs(self.sim.q[[XA, XD, XB, YA, YD, YB]]).max() > RUB * self.sim.system.length:
             self.stop_sweep()
             self.cancel_measurement()
@@ -1820,6 +1912,8 @@ class RotorPage(QtWidgets.QWidget):
         if self.tabs.currentWidget() is self.spectrum.parentWidget() and (
                 self._frames % SPECTRUM_FRAMES == 0 or not self.running):
             self._draw_spectrum()
+        if self._frames % WATERFALL_FRAMES == 0 or not self.running:
+            self._draw_waterfall(only_new=True)
 
         # Readout.
         rpm = sim.omega * RPM
@@ -1908,6 +2002,49 @@ class RotorPage(QtWidgets.QWidget):
         self.spectrum_note.setText(
             f"Full spectrum of the {STATIONS[st].lower()} orbit over the last {self.window.value():g} s "
             "(the strip chart's station and window): forward whirl on the right, backward on the left.")
+
+    # ------------------------------------------------------------- waterfall
+    def _new_waterfall(self) -> None:
+        """Start the spectra afresh: for a new rotor, speed range or block length, or on Clear."""
+        f_max = max(WATERFALL_RANGE * self.top_rpm / 60.0, 50.0)
+        self.waterfall = Waterfall(self.wf_block.value(), f_max, self.sim.system)
+        self._waterfall_drawn = False
+        self._draw_waterfall()
+
+    def _draw_waterfall(self, only_new: bool = False) -> None:
+        """Draw the waterfall if its tab is showing (with `only_new`, only if blocks came in since)."""
+        if self.tabs.currentWidget() is not self.waterfall_plot.parentWidget():
+            return
+        if only_new and self._waterfall_drawn:
+            return
+        self._waterfall_drawn = True
+        wf = self.waterfall
+        mode = self.wf_against.currentIndex()
+        blocks = wf.latest_ramp(up=mode == 0) if against_speed(mode) else wf.blocks
+        ys, label = baselines(blocks, mode)
+        st = self.wf_station.currentIndex()
+        log = self.wf_scale.currentIndex() == 0
+        tallest = self.waterfall_plot.set_blocks(wf.freqs, blocks, ys, st, log, self.wf_marks.isChecked(), label)
+        where = f"the {STATIONS[st].lower()} orbit"
+        if tallest is None:
+            if against_speed(mode):
+                text = (f"No {'run-up' if mode == 0 else 'coast-down'} since the spectra were cleared: change "
+                        "the target speed, or run up and coast down, and the spectra are drawn at each speed. "
+                        "Spectra taken at a steady speed are shown against time.")
+            else:
+                text = f"The first {wf.block:g} s block is being taken."
+            self.waterfall_note.setText(text)
+            return
+        b = tallest.block
+        at = f"{b.omega * RPM:,.0f} rpm" if against_speed(mode) else f"{b.t:.1f} s ({b.omega * RPM:,.0f} rpm)"
+        order = f" ({tallest.freq / (b.omega / (2 * math.pi)):+.2f}×)" if b.omega > 0 else ""
+        self.waterfall_note.setText(
+            f"{len(blocks)} full spectra of {where}, each of a {wf.block:g} s block ({1 / wf.block:.2g} Hz "
+            f"resolution), overlapping by half. Tallest peak {_fmt_len(tallest.amp)} at "
+            f"{tallest.freq:+.1f} Hz{order}, at {at}"
+            + (": heights are in decades above 1/1000 of it (60 dB)." if log else ".")
+            + ("" if self.repeat_taps.isChecked() else
+               " Tap the disc, or tick <i>Tap the disc every</i>, to ring the free whirl."))
 
 
 def lightly_damped(result: Campbell) -> list[tuple[float, float]]:

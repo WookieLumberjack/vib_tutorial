@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .rotor import RotorSystem, whirl_modes
+from .rotor import RotorSystem, WhirlModes, whirl_modes
 
 UNSTABLE = -1e-9  # a damping ratio below this is growing, not round-off
 
@@ -95,8 +95,31 @@ def full_spectrum(t: np.ndarray, xy: np.ndarray, points: int = 4096) -> tuple[np
     n = min(points, t.size)
     even = np.linspace(t[0], t[-1], n)
     z = np.interp(even, t, xy[:, 0]) + 1j * np.interp(even, t, xy[:, 1])
-    z -= z.mean()
-    window = np.hanning(n)
-    spectrum = np.fft.fftshift(np.fft.fft(z * window)) / window.sum()
-    freqs = np.fft.fftshift(np.fft.fftfreq(n, d=even[1] - even[0]))
-    return freqs, np.abs(spectrum)
+    return whirl_spectrum(z, even[1] - even[0])
+
+
+def whirl_spectrum(z: np.ndarray, dt: float) -> tuple[np.ndarray, np.ndarray]:
+    """Full spectrum of whirls z = x + iy (n, ...) sampled evenly dt apart, along the first axis.
+
+    (frequency in Hz (n,), amplitude in m (n, ...)), scaled as full_spectrum's. The
+    mean is taken out first, so a static offset leaves no line at 0 Hz.
+    """
+    n = z.shape[0]
+    window = np.hanning(n).reshape((n,) + (1,) * (z.ndim - 1))
+    spectrum = np.fft.fft((z - z.mean(axis=0)) * window, axis=0) / window.sum()
+    return np.fft.fftshift(np.fft.fftfreq(n, d=dt)), np.abs(np.fft.fftshift(spectrum, axes=0))
+
+
+def whirl_lines(modes: WhirlModes, damped_limit: float) -> np.ndarray:
+    """Where the lightly damped modes show on a full spectrum (Hz): +f forward, −f backward.
+
+    A straight-line whirl (whirl ratio within ±0.1) shows on both sides.
+    """
+    lines = []
+    for f, z, w in zip(modes.freq_hz, modes.zeta, modes.whirl):
+        if z <= damped_limit:
+            if w >= -0.1:
+                lines.append(f)
+            if w <= 0.1:
+                lines.append(-f)
+    return np.array(lines)
