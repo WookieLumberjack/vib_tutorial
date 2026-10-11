@@ -15,6 +15,7 @@ widgets directly (some private attributes too, such as MainWindow._tick), so a
 UI refactor may need a matching change here.
 """
 
+import math
 import os
 import sys
 import tempfile
@@ -28,6 +29,7 @@ from PySide6.QtTest import QTest
 
 from vib_tutorial import gui
 from vib_tutorial.core import ForceKind
+from vib_tutorial.core.rotor import RotorSystem
 from vib_tutorial.gui.main_window import MainWindow
 
 OUT = Path(__file__).resolve().parent.parent / "docs" / "images"
@@ -406,6 +408,26 @@ def jeffcott_run_up():
     save(w, "jeffcott_run_up")
 
 
+def jeffcott_bow():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.set_system(RotorSystem(bow=10e-6, bow_angle=math.pi))
+    page._refresh_analysis()
+    page.sweep_from.setValue(400.0)
+    page.sweep_to.setValue(2400.0)
+    page.ramp.setValue(500.0)
+    page.start_sweep()
+    while page.run_up is not None:
+        page.step(0.02)
+    page.tabs.setCurrentWidget(page.polar.parentWidget())
+    page._draw()
+    save(w, "jeffcott_bow")
+
+
 def jeffcott_stability():
     w = window()
     page = w.rotor_page
@@ -432,7 +454,7 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
-         jeffcott_stability]
+         jeffcott_bow, jeffcott_stability]
 
 
 def main(names: list[str]) -> None:

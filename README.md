@@ -486,7 +486,8 @@ exact modes:
 
 The **Jeffcott rotor** page spins a disc on a flexible, massless shaft between two bearings,
 each on springs and dampers to ground, horizontally and vertically. The disc has a mass,
-polar and diametral moments of inertia, and a mass unbalance. The model has 8 DOFs: in each
+polar and diametral moments of inertia, and a mass unbalance; the disc can also be skewed on
+the shaft and the shaft bent (bowed). The model has 8 DOFs: in each
 plane, both journals, the disc, and the shaft's slope at the disc. It is stepped in state
 space with the same exact first-order-hold update as the chain, as the speed ramps to a target.
 
@@ -507,6 +508,12 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   either bearing, the disc or midspan, read by an x or a y probe or as the orbit's major axis,
   with the tracked sweeps over it and a marker at the current speed. On the polar plot the
   steady-state vector traces its circle through each critical speed.
+- **Bent shaft and skewed disc**: two more sources that turn with the shaft. The bow, a set
+  bend δ<sub>b</sub> at the disc at an angle to the heavy spot, drives the rotor with a force
+  kδ<sub>b</sub> that does not grow with speed: the probes read it at slow roll, the polar curve
+  starts from it, and well above the critical the disc settles on the bearings' axis. Against
+  the unbalance it adds or cancels, depending on its angle. The skew τ is a couple unbalance,
+  a moment (I<sub>d</sub> − I<sub>p</sub>)τΩ² on the disc's tilt.
 - **Campbell diagram**: the damped natural frequencies against speed, coloured by whirl
   direction, with the 1X line and the critical speeds, and the onset of instability with the
   growing modes crossed. Drag the speed line to set the target.
@@ -521,7 +528,8 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   speed. G is skew-symmetric: it sits beside C but does no work.
 - **Theory**: the classic case, heavy and high spot, the gyroscopic effect, forward and
   backward whirl, anisotropic supports, run-ups through a critical speed (why a fast ramp
-  peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²),
+  peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²), the bent
+  shaft (slow-roll runout, why it is subtracted before balancing) and the couple unbalance,
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
   c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whip), and why the solution
   uses state space.
@@ -540,6 +548,13 @@ The faster the ramp, the lower the peak, and the further past the critical speed
 it on a run-up, before it on a coast-down. Whether a ramp counts as slow depends on
 α/ω<sub>c</sub>² against ζ². Once past the critical, the free vibration left over at the natural
 frequency beats with the 1X response.
+
+![Polar plot of the disc's 1X response with a 10 µm shaft bow set against the 20 g·mm unbalance (at 180°): the steady-state curve starts from the bow, -10 µm at slow roll, shrinks to 1.3 µm at 1116 rpm, where the two cancel, then loops through the 1596 rpm critical (110 µm), with a 500 rpm/s run-up and coast-down over it](docs/images/jeffcott_bow.png)
+
+A bent shaft drives the rotor with a force that does not grow with speed. Turning slowly, the
+probes read the bow itself, so the polar curve starts from the bow, not from the origin. Here
+the bow points opposite the heavy spot: its response falls as the unbalance's grows, and they
+cancel at one speed. That is why the slow-roll vector is subtracted before balancing.
 
 ![Jeffcott rotor's stability map and full spectrum with internal damping 20 N·s/m: the forward mode's damping crosses zero at 3910 rpm, and at 5000 rpm a tap grows into a forward whirl at 26.9 Hz, 0.32× the speed](docs/images/jeffcott_stability.png)
 
@@ -682,8 +697,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
   from the boundary alone, and by re-solving each interior with the boundary motion imposed,
   stepped in the same exact update) and of the spring forces.
 - `core/rotor.py`: the Jeffcott rotor: shaft (beam elements, condensed), disc, bearings and the
-  gyroscopic matrix; whirl modes, the Campbell diagram and critical speeds, the steady
-  unbalance response, and an exact FOH time stepper that follows a speed ramp.
+  gyroscopic matrix; whirl modes, the Campbell diagram and critical speeds, the steady 1X
+  response to the unbalance, the disc's skew and the shaft's bow, and an exact FOH time
+  stepper that follows a speed ramp.
 - `core/rotor_sweep.py`: run-up and coast-down: the steady-state 1X vectors at each station,
   once-per-revolution tracking of the 1X vector and peak (`RevolutionTracker`), and
   `RunUpCoastDown`, which drives the stepper through a sweep and records each leg.
@@ -784,12 +800,13 @@ stab = lscf(est.freqs, est.H, band, max_order=30)              # poles at every 
 ident = lsfd(est.freqs, est.H, band, [stab.pole(o, i) for o, i in auto_select(stab)])
 [(r.mode, r.identified and r.identified.fn_hz, r.mac) for r in match_modes(ident.modes, res, 8.0)]
 
-from vib_tutorial.core.rotor import RPM, Bearing, RotorSimulator, RotorSystem, campbell, unbalance_response
+from vib_tutorial.core.rotor import RPM, Bearing, RotorSimulator, RotorSystem, campbell, synchronous_response
 
 rotor = RotorSystem(position=0.3, bearing_a=Bearing(kx=2e4, ky=8e4))   # disc off centre, A anisotropic
 M, C, G, K = rotor.matrices()                                  # 8x8; M q'' + (C + ΩG) q' + (K + ΩH) q = f
 [(w * RPM, whirl) for w, whirl, zeta in campbell(rotor, 1000.0).criticals]  # rpm, +1 forward
-Q = unbalance_response(rotor, np.array([150.0]))               # steady whirl at 150 rad/s, complex (1, 8)
+Q = synchronous_response(rotor, np.array([150.0]))             # steady whirl at 150 rad/s, complex (1, 8)
+bent = rotor.with_(bow=10e-6, bow_angle=np.pi, skew=np.radians(0.1))  # bow against the heavy spot, disc skewed
 spin = RotorSimulator(rotor)
 spin.target = 3000 / RPM                                       # ramps at spin.accel (rad/s²)
 r = spin.advance(0.25)                                         # r.t, r.q (steps, 8), r.omega, r.phase

@@ -86,6 +86,8 @@ def matrices_html(system: RotorSystem, omega: float) -> str:
             f"<td align='right'>{w:+.2f}</td><td>{whirl_name(w)}</td></tr>"
         )
     rpm = omega * RPM
+    fb = ks @ s.bow_shape() * s.bow
+    bow_journals = f"{fmt(-fb[0], 1.0)} N at A and {fmt(-fb[3], 1.0)} N at B"
     return f"""
 <h3>Equations of motion at {rpm:,.0f} rpm (Ω = {omega:.4g} rad/s)</h3>
 <p style='font-size:large' align='center'>M q̈ + (C + Ω G) q̇ + (K + Ω H) q = f(t)</p>
@@ -131,8 +133,8 @@ Damping falls off as the speed rises, and past the onset the whirl grows.</p>
 {_mat(omega * H, "Ω H")}
 
 <h4>State space</h4>
-<p>With z = [q, q̇] the equations become z' = A(Ω) z + B u, u = [f<sub>x</sub>, f<sub>y</sub>] on the
-disc:</p>
+<p>With z = [q, q̇] the equations become z' = A(Ω) z + B u, u = f the force (or moment) on each
+DOF, B = [0 ; M<sup>−1</sup>]:</p>
 <p align='center'>A(Ω) = [ 0 &nbsp; I ; −M<sup>−1</sup>(K + ΩH) &nbsp; −M<sup>−1</sup>(C + ΩG) ]</p>
 <p>A is 16 × 16 and not symmetric, and its eigenvalues λ = −ζω<sub>n</sub> ± iω<sub>d</sub> come in
 conjugate pairs. The modes at this speed, lowest first:</p>
@@ -146,12 +148,20 @@ circular backward whirl, 0 for a straight line; in between, an ellipse. The stat
 their masses (and the slopes by I<sub>d</sub>). A negative ζ is a mode that grows: the rotor is unstable
 at this speed.</small></p>
 
-<h4>The unbalance force</h4>
+<h4>The 1X forces</h4>
 <p>The unbalance U = m e = {s.unbalance * 1e6:.4g} g·mm turns with the shaft at angle φ (φ' = Ω).
 Keeping the disc's centre of mass on its path takes</p>
 <p align='center'>f<sub>x</sub> = U(Ω² cos φ + Ω' sin φ), &nbsp; f<sub>y</sub> = U(Ω² sin φ − Ω' cos φ)</p>
-<p>on the disc's x<sub>D</sub> and y<sub>D</sub>: here UΩ² = {fmt(s.unbalance * omega**2, 1.0)} N
-turning once per revolution. Ω' is the ramp's angular acceleration, while the speed changes.</p>
+<p>on the disc's x<sub>D</sub> and y<sub>D</sub>, or f<sub>x</sub> + i f<sub>y</sub> = U(Ω² − iΩ')e<sup>iφ</sup>:
+here UΩ² = {fmt(s.unbalance * omega**2, 1.0)} N turning once per revolution. Ω' is the ramp's angular
+acceleration, while the speed changes.</p>
+<p>The disc's skew τ = {math.degrees(s.skew):.4g}° (toward {math.degrees(s.skew_angle):.0f}° from the heavy
+spot) gives the same form on its slopes, M<sub>x</sub> + i M<sub>y</sub> =
+(I<sub>d</sub> − I<sub>p</sub>)τ(Ω² − iΩ')e<sup>i(φ+γ)</sup>: here
+{fmt(abs(s.id - s.ip) * s.skew * omega**2, 1.0)} N·m. The shaft's bow δ<sub>b</sub> =
+{s.bow * 1e6:.4g} µm (toward {math.degrees(s.bow_angle):.0f}°) gives K<sub>shaft</sub>q<sub>bow</sub>
+turning with the shaft whatever the speed: {fmt(s.disc_stiffness * s.bow, 1.0)} N on the disc, and the
+bearings' share of it back on the journals, {bow_journals}.</p>
 """
 
 
@@ -272,6 +282,43 @@ later work on passage through resonance builds on it.</li>
 <p>The summary under the Bode plot gives each sweep's peak against the steady-state one, and how many
 rpm away from it the peak came.</p>
 
+<h3>Other 1X sources: a bent shaft and a skewed disc</h3>
+<p>Unbalance is not the only thing that turns with the shaft. Anything fixed to the rotor and off its
+axis drives it once per revolution, and two more are common.</p>
+<p><b>A bent shaft (initial bow).</b> A shaft can keep a bend: from a thermal bow after a hot
+shutdown, sagging while it stood, or a bent repair. Say it is δ<sub>b</sub> at the disc, in the
+shape a load at the disc would give. Its elastic force is K<sub>shaft</sub>(q − q<sub>bow</sub>), so
+the bow acts as a force K<sub>shaft</sub>q<sub>bow</sub> = kδ<sub>b</sub> turning with the shaft. Unlike
+the unbalance's meΩ², it does not grow with speed. For the classic Jeffcott rotor,</p>
+<p align='center'>(k − mΩ² + icΩ) X = meΩ² + kδ<sub>b</sub>e<sup>iβ</sup></p>
+<p>with β the bow's angle ahead of the heavy spot. So:</p>
+<ul>
+<li><b>At low speed the probes read the bow itself.</b> The shaft just carries its bend round: the
+<i>slow-roll runout</i>. The bow's forces on the disc and the journals balance, so the bearings carry
+nothing. The 1X response starts at δ<sub>b</sub>, not at zero, and on the polar plot the curve starts
+at the bow vector, not at the origin.</li>
+<li><b>Well above the critical the disc's whirl dies away.</b> The disc stays on the bearings' axis and
+the shaft bends round it to cancel the bow. Contrast the unbalance, whose response tends to e.</li>
+<li><b>With an unbalance, the angle between them decides.</b> In phase they add (with the defaults and
+δ<sub>b</sub> = 20 µm, the peak doubles to 435 µm). Opposite (β = 180°), the bow's response falls with
+speed while the unbalance's grows, and they cancel at one speed, where meΩ² = kδ<sub>b</sub> in the
+classic case. Choose δ<sub>b</sub> = e opposite and the disc's centre of mass sits exactly on the
+bearings' axis: nothing whirls at any speed, and the probe reads a steady 20 µm, the bow.</li>
+</ul>
+<p>That is why the <b>slow-roll vector is subtracted</b> from the 1X readings before balancing: it is not
+caused by unbalance, and no weight removes it. A balance weight cancels a force that grows as Ω²; the
+bow's force does not, so a bowed rotor balanced at one speed is out of balance at the others.</p>
+<p><b>A skewed disc (couple unbalance).</b> A disc mounted out of square has its principal axis tilted
+by τ from the shaft's. Its inertia acts on its own axis, so spinning it takes a moment
+(I<sub>d</sub> − I<sub>p</sub>)τΩ² that turns with the shaft, the same form as the unbalance force with
+U replaced by (I<sub>d</sub> − I<sub>p</sub>)τ. A thin disc (I<sub>p</sub> &gt; I<sub>d</sub>) is pushed
+toward square to the spin axis: as Ω → ∞ the shaft bends at the disc by −τ, and the disc spins flat. A
+long rotor (I<sub>d</sub> &gt; I<sub>p</sub>) is pushed the other way, and its forward conical mode can
+then meet the 1X line. At midspan on identical bearings the skew only tilts the disc; move the disc
+off centre and the tilt and the translation couple, so the skew moves the disc too. A <i>static</i>
+unbalance (the mass off the axis) can be corrected by one weight in one plane; a <i>couple</i>
+unbalance needs two weights in two planes, equal and opposite.</p>
+
 <h3>Stability: cross-coupling and internal damping</h3>
 <p>Everything so far is forced vibration: the unbalance drives the rotor, and however hard it shakes at
 a critical speed, every free whirl dies away. Two effects can instead make a free whirl grow by itself.
@@ -356,6 +403,14 @@ the page pauses it. Lower the target to 3,000 rpm and Reset: below the onset the
 <li>Set c<sub>i</sub> back to 0 and give both bearings k<sub>xy</sub> = 15,000 N/m: the forward mode's
 ζ drops to 0.004 at every speed and the backward one's rises to 0.075. Above 16,400 N/m the rotor is
 unstable even at rest. More support damping raises the threshold.</li>
+<li>Set the unbalance to 0 and the shaft bow to 20 µm. Turning slowly the disc's orbit is 20 µm
+round, the bow; it peaks at 218 µm at the critical and falls to 8 µm at 3000 rpm (towards zero, not
+towards e). Run up and coast down and look at the polar plot: it starts at the bow vector.</li>
+<li>Put the 20 g·mm unbalance back and set the bow's angle to 180°: the disc's orbit stays at 20 µm at
+every speed. Now set the bow to 10 µm: the orbit dips to about 1 µm at 1116 rpm, where the bow and the
+unbalance cancel, and still peaks at 110 µm at the critical.</li>
+<li>Set the unbalance to 0 and skew the disc by 0.1°. At midspan only the disc tilts (watch it wobble in
+the 3D view); move it to a/L = 0.3 and the disc whirls too, peaking at 14 µm at 1752 rpm.</li>
 <li>Pause near the critical speed and turn the 3D view: the shaft bows in one plane, which turns with
 the spin, rather than flapping back and forth.</li>
 </ol>
@@ -381,5 +436,7 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>c<sub>i</sub>, η</td><td>internal (rotating) damping of the shaft, as a damper at the disc; η = c<sub>i</sub>/k<sub>disc</sub></td><td>N·s/m, s</td></tr>
 <tr><td>H</td><td>circulatory matrix: the internal damping's skew stiffness per unit speed</td><td>N·s/m</td></tr>
 <tr><td>δ</td><td>log decrement, 2πζ/√(1 − ζ²)</td><td>—</td></tr>
+<tr><td>δ<sub>b</sub>, β</td><td>shaft bow at the disc, and its angle ahead of the heavy spot</td><td>m (µm), rad</td></tr>
+<tr><td>τ, γ</td><td>disc skew (its axis's tilt from the shaft's), and its angle ahead of the heavy spot</td><td>rad (°)</td></tr>
 </table>
 """

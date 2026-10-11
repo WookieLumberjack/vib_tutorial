@@ -1,10 +1,10 @@
 """Bode and polar plots for the Jeffcott rotor page: the steady-state 1X response and tracked sweeps.
 
-Both plots draw the steady-state unbalance response at one station, in one
-direction, against speed, with a marker at the current speed, and over it the
-1X vectors tracked once per revolution during run-ups and coast-downs. A sweep
-pair (its run-up and its coast-down) shares a colour: the run-up is drawn
-solid, the coast-down dashed. The page's summary table under the plot is
+Both plots draw the steady-state 1X response (to the unbalance, skew and bow)
+at one station, in one direction, against speed, with a marker at the current
+speed, and over it the 1X vectors tracked once per revolution during run-ups
+and coast-downs. A sweep pair (its run-up and its coast-down) shares a colour:
+the run-up is drawn solid, the coast-down dashed. The page's summary table under the plot is
 their key, so the legend names only the steady state.
 """
 
