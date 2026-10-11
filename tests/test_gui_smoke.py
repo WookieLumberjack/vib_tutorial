@@ -2061,3 +2061,54 @@ def test_rotor_fluid_film_bearing(app):
     panel.length.setValue(20.0)
     assert "L/D = 2" in panel.note.text()
     w.set_theme("Dark")
+
+
+def test_rotor_on_oil_film_bearings(app):
+    from vib_tutorial.core.fluid_bearing import JournalBearing
+    from vib_tutorial.core.rotor import RPM
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.rotor import CUSTOM
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    p.running = False
+    panel = p.bearing_panel
+    # The preset runs on the tab's bearing, each journal under its share of the weight.
+    p.load_preset("Journal bearings (oil whip)")
+    p._refresh_analysis()
+    s = p.sim.system
+    assert s.films and p.film.isChecked() and p.preset.currentText() == "Journal bearings (oil whip)"
+    row = p.bearing_rows[0]
+    assert row[4].isEnabled() and not any(row[c].isEnabled() for c in (0, 1, 2, 3, 5, 6))
+    assert panel.loads == s.bearing_loads and not panel.load.isEnabled() and panel.which.isVisibleTo(panel)
+    assert panel.load.value() == pytest.approx(abs(s.bearing_loads[0]), abs=0.01)
+    assert panel.onset is not None and round(panel.onset.omega * RPM) == 3576
+    p.tabs.setCurrentWidget(panel)
+    p._draw()
+    assert "goes unstable at <b>3,576 rpm</b>" in panel.readout.text()
+    assert "oil-film bearings" in p._stability_note()
+    p.tabs.setCurrentWidget(p.matrices)
+    assert "The oil films" in p.matrices.toHtml()
+    # Changing the bearing on the tab changes the rotor's (and makes it the user's own rotor).
+    panel.clearance.setValue(20.0)
+    assert p.sim.system.bearing_a.film.clearance == pytest.approx(20e-6)
+    assert p.preset.currentText() == CUSTOM
+    panel.set_bearing(JournalBearing())
+    assert p.preset.currentText() == "Journal bearings (oil whip)"
+    # Past the onset the whirl grows until a journal reaches its clearance, and the page pauses.
+    p.running = True
+    p.ramp.setValue(5000.0)
+    p.set_target_rpm(5000.0)
+    for _ in range(400):
+        p.step(0.1)
+        if not p.running:
+            break
+    assert p.rubbed and p.touched is not None and p.touched[1] == pytest.approx(15e-6)
+    assert "reached the wall of its bearing" in p.readout.text()
+    # Unticked, the rotor is back on its springs and the tab has its own load again.
+    p.film.setChecked(False)
+    assert not p.sim.system.films and panel.loads is None and panel.load.isEnabled()
+    assert all(row[c].isEnabled() for c in (0, 2, 4, 5, 6))  # (k_y and c_y follow k_x and c_x: isotropic)
+    w.set_theme("Dark")

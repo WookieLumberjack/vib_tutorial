@@ -46,6 +46,7 @@ from ..core.rotor_sweep import (
     probe,
     steady_vectors,
 )
+from ..core.fluid_bearing import JournalBearing
 from ..core.rotor_balance import SteadyMeasurement
 from ..core.rotor_presets import rotor_presets
 from ..core.rotor_stability import AsymmetryChart, Onset, full_spectrum, least_damped, stability_onset
@@ -79,6 +80,7 @@ AXIAL = 4.0  # display length of the shaft in the 3D view
 SWING = 0.5  # display units: the largest whirl is magnified to this
 SHAFT_DOT = 0.1  # display units: how far off the shaft's centre line a weight on it is drawn
 GROUND = 1.1  # display units from the shaft's axis to the supports
+HOUSING = 0.16  # display units: an oil-film bearing's housing, drawn round the bearing's axis
 DAMPED = 0.3  # modes with more damping than this are drawn hollow and are not called critical
 DASH = QtCore.Qt.PenStyle.DashLine
 DOT = QtCore.Qt.PenStyle.DotLine
@@ -223,6 +225,17 @@ SAG_TIP = (
     "bearing: the orbits sit below the centre. Untick to draw only the vibration about where gravity "
     "holds the rotor, as an AC-coupled probe does. The tracking, the spectrum and the phase are always "
     "of the vibration.</p>"
+)
+FILM_TIP = (
+    "<p>Run both journals in plain journal bearings, oil films on rigid housings, in place of the springs "
+    "and dampers: the bearing set on the <i>Fluid-film bearing</i> tab, each carrying its share of the "
+    "rotor's weight (none on a vertical rotor). Their stiffness and damping change with the speed as the "
+    "film lifts the journal, and their cross-coupling, the oil swirling at half the speed, makes oil whirl "
+    "and whip from the bearing itself rather than from λ.</p><p>Laid horizontal, the journals sit off "
+    "centre where the film holds them, and rise along the bearing's locus as the speed rises: tick "
+    "<i>Static sag</i> to see them move. Only the journal's mass is left to set.</p><p>Upright, unloaded, "
+    "a plain bearing has no direct stiffness, only the swirl's cross-coupling: a vertical rotor in such "
+    "bearings whirls at any speed.</p>"
 )
 SWIRL_TIP = (
     "<p>Fluid swirl ratio λ of a fluid-film bearing: the oil in the clearance is dragged round at λ times the "
@@ -456,10 +469,17 @@ class RotorView(pg.PlotWidget):
         else:
             self.stiff_axis.setData([], [])
 
-        # Supports: a spring and a damper to ground below (y) and to the side wall (x) at each bearing.
+        # Supports: a spring and a damper to ground below (y) and to the side wall (x) at each bearing;
+        # or an oil film's housing round the bearing's axis, on a pedestal.
         parts = []
-        for station in (0, 3):
+        ring = np.linspace(0.0, 2.0 * math.pi, 49)
+        for station, bearing in ((0, s.bearing_a), (3, s.bearing_b)):
             j = here[station]
+            if bearing.film is not None:
+                zb = np.full_like(ring, j[2])
+                parts.append(np.column_stack([HOUSING * np.cos(ring), HOUSING * np.sin(ring), zb]))
+                parts.append(np.array([[0.0, -HOUSING, j[2]], [0.0, -GROUND, j[2]]]))
+                continue
             ground_y = np.array([0.0, -GROUND, j[2]])
             ground_x = np.array([-GROUND, 0.0, j[2]])
             for end in (ground_y, ground_x):
@@ -872,6 +892,7 @@ class RotorPage(QtWidgets.QWidget):
         self.asym_chart: AsymmetryChart | None = None  # the stability tab's asymmetry chart, as far as it got
         self.onset: Onset | None = None  # where the rotor goes unstable, if it does up to top_rpm
         self.rubbed = False  # the whirl grew past RUB of the span and the simulation paused
+        self.touched: tuple[str, float] | None = None  # or a journal reached its film's clearance: which, how far
         self._sag: tuple[np.ndarray, np.ndarray] | None = None  # see _set_sag
         self._weights: tuple[complex, ...] = ()  # balance weights on the disc (kg·m)
         self._plane_weights: tuple[PlaneWeight, ...] = ()  # weights in balancing planes
@@ -1068,6 +1089,7 @@ class RotorPage(QtWidgets.QWidget):
         self.balancing = BalancingPanel(self)
         self.bearing_panel = BearingPanel()
         self.bearing_panel.set_top_rpm(self.top_rpm)
+        self.bearing_panel.changed.connect(self._on_film)
         self.matrices = QtWidgets.QTextBrowser()
         self.theory = QtWidgets.QTextBrowser()
         self.theory.setHtml(THEORY_HTML)
@@ -1399,16 +1421,19 @@ class RotorPage(QtWidgets.QWidget):
             "<p>Untick to give the two bearings different supports. Like an off-centre disc, unequal "
             "supports couple the disc's translation and tilt, so the gyroscopic moment shows.</p>"
         )
-        for c in (self.isotropic, self.same_bearings):
+        self.film = QtWidgets.QCheckBox("Oil-film journal bearings (set on the Fluid-film bearing tab)")
+        self.film.setToolTip(FILM_TIP)
+        for c in (self.isotropic, self.same_bearings, self.film):
             c.toggled.connect(self._on_params)
         grid.addWidget(self.isotropic, 3, 0, 1, 8)
         grid.addWidget(self.same_bearings, 4, 0, 1, 8)
+        grid.addWidget(self.film, 5, 0, 1, 8)
         return box
 
     # ------------------------------------------------------------- parameters
     def system(self) -> RotorSystem:
         """The rotor described by the panels, after applying the isotropic and same-as-A ties."""
-        iso, same = self.isotropic.isChecked(), self.same_bearings.isChecked()
+        iso, same, film = self.isotropic.isChecked(), self.same_bearings.isChecked(), self.film.isChecked()
         for r, row in enumerate(self.bearing_rows):
             src = self.bearing_rows[0] if same and r == 1 else row
             for c, w in enumerate(row):
@@ -1419,8 +1444,12 @@ class RotorPage(QtWidgets.QWidget):
                     w.blockSignals(True)
                     w.setValue(value)
                     w.blockSignals(False)
-                w.setEnabled(not (same and r == 1) and not (iso and c in (1, 3)))
-        bearings = [Bearing(*(w.value() for w in row)) for row in self.bearing_rows]
+                # A film holds the journal in place of the springs: only its mass is left to set.
+                w.setEnabled(not (same and r == 1) and not (iso and c in (1, 3)) and not (film and c != 4))
+        for w in (self.isotropic, self.same_bearings):
+            w.setEnabled(not film)
+        oil = self.bearing_panel.bearing(rotor=False) if film else None
+        bearings = [Bearing(*(w.value() for w in row), film=oil) for row in self.bearing_rows]
         for w in (self.density, self.elements, self.mass_matrix):
             w.setEnabled(self.shaft_mass.isChecked())
         return RotorSystem(
@@ -1455,8 +1484,8 @@ class RotorPage(QtWidgets.QWidget):
         boxes = (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip, self.id,
                  self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle,
                  self.asymmetry, self.asymmetry_angle, self.internal_damping,
-                 self.gravity, self.isotropic, self.same_bearings, self.shaft_mass, self.density, self.elements,
-                 self.mass_matrix, *(w for row in self.bearing_rows for w in row))
+                 self.gravity, self.isotropic, self.same_bearings, self.film, self.shaft_mass, self.density,
+                 self.elements, self.mass_matrix, *(w for row in self.bearing_rows for w in row))
         for w in boxes:
             w.blockSignals(True)
         self.length.setValue(system.length)
@@ -1490,6 +1519,9 @@ class RotorPage(QtWidgets.QWidget):
         for row, b in zip(self.bearing_rows, (A, B)):
             for w, v in zip(row, (b.kx, b.ky, b.cx, b.cy, b.mass, b.kxy, b.swirl)):
                 w.setValue(v)
+        self.film.setChecked(A.film is not None)
+        if A.film is not None:
+            self.bearing_panel.set_bearing(A.film, notify=False)
         for w in boxes:
             w.blockSignals(False)
         self._on_params()
@@ -1585,6 +1617,7 @@ class RotorPage(QtWidgets.QWidget):
             self.clear_sweeps()  # their steady-state curve is about to change
         self.cancel_measurement()
         self.sim.set_system(system)
+        self.bearing_panel.set_rotor(system.bearing_loads if system.films else None)
         self._show_preset(system)
         self.view.set_system(system)
         self.orbits.set_midspan_shown(abs(system.position - 0.5) > 1e-9)
@@ -1632,6 +1665,7 @@ class RotorPage(QtWidgets.QWidget):
         # With the shaft's mass: the same rotor's Jeffcott model, for comparison.
         massless = campbell(system.with_(density=0.0), top / RPM, n_modes=8) if system.density else None
         self.onset = stability_onset(system, top / RPM)
+        self.bearing_panel.set_onset(self.onset if system.films else None)
         iso = _isotropic(system)
         self.campbell_plot.set_result(self.campbell, top, iso, self.onset)
         self.campbell_plot.set_reference(massless)
@@ -1640,13 +1674,15 @@ class RotorPage(QtWidgets.QWidget):
         crits = critical_speeds(self.campbell, iso)
         self.time.set_criticals([w * RPM for w, _ in crits])
         lines = [f"{w * RPM:,.0f} rpm ({w / (2 * math.pi):.4g} Hz), {whirl_name(r)} whirl" for w, r in crits]
-        jeff = system.jeffcott_speed() * RPM
+        # On oil films, far stiffer than most shafts, the textbook estimate takes the bearings as rigid.
+        jeff = (math.sqrt(system.disc_stiffness / system.disc_mass) if system.films else system.jeffcott_speed()) * RPM
         self.crit_label.setText(
             "<b>Critical speeds</b> (where a whirl frequency equals the spin speed, up to "
             f"{top:,.0f} rpm):<br>" + ("<br>".join(lines) if lines else "none")
             + ("<br><small>The backward whirl crossings are not critical: an isotropic rotor's unbalance "
                "drives only forward whirl.</small>" if iso else "")
-            + f"<br><small>Textbook Jeffcott estimate (massless journals, no tilt): {jeff:,.0f} rpm</small>"
+            + f"<br><small>Textbook Jeffcott estimate (massless journals, no tilt"
+            + (", rigid bearings" if system.films else "") + f"): {jeff:,.0f} rpm</small>"
             + ("<br><small>An asymmetric shaft has two critical speeds for each mode: those of a round shaft as "
                "stiff as each of its axes.</small>" if system.asymmetry else "")
             + (f"<br><small>With a massless shaft (the Jeffcott model, dashed): "
@@ -1684,10 +1720,11 @@ class RotorPage(QtWidgets.QWidget):
 
     def _stability_note(self) -> str:
         s = self.sim.system
-        coupled = [f"k<sub>xy</sub> = {b.kxy:,.0f} N/m at {n}" for n, b in (("A", s.bearing_a), ("B", s.bearing_b))
-                   if b.kxy]
-        coupled += [f"swirl λ = {b.swirl:g} at {n}" for n, b in (("A", s.bearing_a), ("B", s.bearing_b))
-                    if b.swirl * b.damping]
+        bearings = (("A", s.bearing_a), ("B", s.bearing_b))
+        coupled = [f"k<sub>xy</sub> = {b.kxy:,.0f} N/m at {n}" for n, b in bearings if b.kxy and b.film is None]
+        coupled += [f"swirl λ = {b.swirl:g} at {n}" for n, b in bearings if b.swirling]
+        if s.films:
+            coupled.append("oil-film bearings (their oil swirling at half the speed)")
         if s.internal_damping:
             coupled.append(f"internal damping c<sub>i</sub> = {s.internal_damping:g} N·s/m")
         if s.asymmetry:
@@ -1750,6 +1787,10 @@ class RotorPage(QtWidgets.QWidget):
         self._draw_tracking(full=True)
         self.balancing.rotor_changed()
         self.balancing.refresh()
+
+    def _on_film(self) -> None:
+        if self.film.isChecked():
+            self._on_params()  # the rotor's bearings are the tab's
 
     def _show_bearing_speed(self) -> None:
         if self.tabs.currentWidget() is self.bearing_panel:
@@ -2137,13 +2178,24 @@ class RotorPage(QtWidgets.QWidget):
                 vib = self._vibration(cols)
                 if self.waterfall.feed(r.t[pick], vib[:, 0::2] + 1j * vib[:, 1::2], cols[:, OMEGA]):
                     self._waterfall_drawn = False
-        if self.running and np.abs(self.sim.q[[XA, XD, XB, YA, YD, YB]]).max() > RUB * self.sim.system.length:
+        touched = self._journal_touched()
+        if self.running and (touched or np.abs(self.sim.q[[XA, XD, XB, YA, YD, YB]]).max()
+                             > RUB * self.sim.system.length):
             self.stop_sweep()
             self.cancel_measurement()
             self._on_run()  # pause
             self.rubbed = True
+            self.touched = touched
         self._draw()
         self._refresh_matrices()
+
+    def _journal_touched(self) -> tuple[str, float] | None:
+        """The journal ("A" or "B") that has moved its oil film's whole clearance off centre, and the clearance."""
+        q, s = self.sim.q, self.sim.system
+        for name, (jx, jy), b in (("A", (XA, YA), s.bearing_a), ("B", (XB, YB), s.bearing_b)):
+            if b.film is not None and math.hypot(q[jx], q[jy]) >= b.film.clearance:
+                return name, b.film.clearance
+        return None
 
     def _columns(self, q: np.ndarray, phase: np.ndarray, omega: np.ndarray) -> np.ndarray:
         s = self.sim.system
@@ -2226,10 +2278,15 @@ class RotorPage(QtWidgets.QWidget):
                 parts.append(f"<span style='color:{colors.force}'>unstable: a whirl at {f:.3g} Hz "
                              f"({2 * math.pi * f / w:.2f}×) grows ×e every {1 / grow:.2g} s</span>")
         if self.rubbed:
+            where = (f"journal {self.touched[0]} reached the wall of its bearing, a clearance of "
+                     f"{_fmt_len(self.touched[1])} off centre. "
+                     "A real oil film stiffens sharply there and holds the whirl to a limit cycle; the model is "
+                     "linear (about where the journal rests), so it would let it grow for ever. "
+                     if self.touched else
+                     f"the whirl passed {_fmt_len(RUB * sim.system.length)} ({RUB:.0%} of the span), where a real "
+                     "rotor would rub its seals or wreck its bearings. The model is linear, so it would grow for ever. ")
             parts.append(
-                f"<span style='color:{colors.force}'><b>Paused:</b> the whirl passed "
-                f"{_fmt_len(RUB * sim.system.length)} ({RUB:.0%} of the span), where a real rotor would rub its "
-                "seals or wreck its bearings. The model is linear, so it would grow for ever. "
+                f"<span style='color:{colors.force}'><b>Paused:</b> {where}"
                 + ("Set the target outside the unstable range" if self.onset is not None and math.isfinite(self.onset.end)
                    else "Lower the target below the onset") + " and Reset.</span>")
         self.readout.setText(" · ".join(parts))
@@ -2341,7 +2398,7 @@ def critical_speeds(result: Campbell, isotropic: bool) -> list[tuple[float, floa
 
 
 def _isotropic(system: RotorSystem) -> bool:
-    return all(b.kx == b.ky and b.cx == b.cy for b in (system.bearing_a, system.bearing_b))
+    return system.isotropic_supports
 
 
 def _grouped(crits: list[tuple[float, float]]) -> list[tuple[float, list[str]]]:
@@ -2383,8 +2440,12 @@ class PositionBox(QtWidgets.QDoubleSpinBox):
 def _same_rotor(a: RotorSystem, b: RotorSystem) -> bool:
     """True if the two rotors are the same up to round-off (the panels' values pass through decimals)."""
     def close(u, v) -> bool:
-        if isinstance(u, Bearing):
-            return all(close(getattr(u, f.name), getattr(v, f.name)) for f in fields(Bearing))
+        if u is None or v is None:
+            return u is v
+        if isinstance(u, (Bearing, JournalBearing)):
+            # A film's own load is not used on the rotor: each bearing carries its share of the weight.
+            return type(u) is type(v) and all(close(getattr(u, f.name), getattr(v, f.name)) for f in fields(u)
+                                              if not (isinstance(u, JournalBearing) and f.name == "load"))
         if isinstance(u, tuple):
             return len(u) == len(v) and all(close(x, y) for x, y in zip(u, v))
         return cmath.isclose(u, v, rel_tol=1e-9, abs_tol=1e-15)

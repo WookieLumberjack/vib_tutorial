@@ -75,6 +75,43 @@ def _labels(system: RotorSystem) -> tuple[list[str], list[str]]:
             GROUPS + ["i"] * len(r) + ["b"] * len(r))
 
 
+def _coupling(s: RotorSystem) -> str:
+    """Each bearing's constant k_xy, or that its coupling is an oil film's."""
+    return " and ".join("the oil film's (below) at " + n if b.film is not None else f"{fmt(b.kxy, 1.0)} N/m at {n}"
+                        for n, b in (("A", s.bearing_a), ("B", s.bearing_b)))
+
+
+def _films_html(s: RotorSystem, omega: float) -> str:
+    """The oil films' paragraph: their loads, equilibria and coefficients at speed Ω (empty without films)."""
+    if not s.films:
+        return ""
+    parts = []
+    for name, b, w, st in zip("AB", (s.bearing_a, s.bearing_b), s.bearing_loads, s.bearing_states(omega)):
+        if st is None:
+            continue
+        k, c = st.k, st.c
+        parts.append(
+            f"at {name}, under {fmt(w, 1.0)} N, ε = {st.eccentricity:.3f} at {math.degrees(st.attitude):.1f}° from the "
+            f"load line: k<sub>xx</sub>, k<sub>xy</sub>, k<sub>yx</sub>, k<sub>yy</sub> = {fmt(k[0, 0], 1.0)}, "
+            f"{fmt(k[0, 1], 1.0)}, {fmt(k[1, 0], 1.0)}, {fmt(k[1, 1], 1.0)} N/m and c<sub>xx</sub>, "
+            f"c<sub>xy</sub> = c<sub>yx</sub>, c<sub>yy</sub> = {fmt(c[0, 0], 1.0)}, {fmt(c[0, 1], 1.0)}, "
+            f"{fmt(c[1, 1], 1.0)} N·s/m")
+    held = max(abs(omega), min(b.film.with_load(abs(w)).slowest() for b, w in
+                               zip((s.bearing_a, s.bearing_b), s.bearing_loads) if b.film is not None))
+    slow = (f" Below {held * RPM:,.0f} rpm the journal is nearly on its bottom, and the film is taken as it is "
+            "there (ε = 0.9)." if held > abs(omega) else "")
+    return (
+        "<h4>The oil films</h4><p>The journals run in plain journal bearings (short-bearing theory; see the "
+        "<i>Fluid-film bearing</i> tab) in place of the springs and dampers. Each is linearized about where its "
+        "journal settles under its share of the weight, f = W − K<sub>f</sub>(q − q<sub>J</sub>) − "
+        "C<sub>f</sub>q̇: K<sub>f</sub> and C<sub>f</sub> are in K and C below, and the constant "
+        "p = W + K<sub>f</sub>q<sub>J</sub> joins f, so the rotor rests with its journals at q<sub>J</sub>. "
+        "Both change with the speed. K<sub>f</sub> is not symmetric, and its skew part is the oil's swirl at "
+        "half the speed, k<sub>xy</sub> − k<sub>yx</sub> = ½Ω(c<sub>xx</sub> + c<sub>yy</sub>). At this speed "
+        + "; ".join(parts) + "." + slow + "</p>"
+    )
+
+
 def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = ()) -> str:
     """The equations of motion, every matrix with the current numbers, and the modes at speed Ω.
 
@@ -85,6 +122,10 @@ def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = (
     H = system.circulatory()
     s = system
     labels, groups = _labels(s)
+    films = _films_html(s, omega)
+    if s.films:
+        Kf, Cf, _ = s._film_terms(omega)
+        K, C = K + Kf, C + Cf
 
     def _mat(A: np.ndarray, title: str) -> str:
         return _matrix(A, labels, groups, title)
@@ -197,7 +238,8 @@ def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = (
             f"(here {fmt(s.disc_mass * s.gravity, 1.0)} N on the disc)"
             + (f", and the shaft's own weight, {fmt(s.shaft_mass * s.gravity, 1.0)} N, spread over the stations "
                f"and its modes" if s.density else "") + f". They hold the rotor at the static "
-            f"deflection q<sub>s</sub> = (K + ΩH)<sup>−1</sup>f<sub>g</sub>, here the disc at "
+            + ("deflection q<sub>s</sub> = (K + ΩH)<sup>−1</sup>(f<sub>g</sub> + p), p the films' load (above), "
+               if s.films else "deflection q<sub>s</sub> = (K + ΩH)<sup>−1</sup>f<sub>g</sub>, ") + f"here the disc at "
             f"({qs[XD] * 1e6:.4g}, {qs[YD] * 1e6:.4g}) µm, about which it vibrates as without gravity.</p>"
         )
     else:
@@ -245,10 +287,11 @@ plane, then in the vertical y–z plane{modal}. Units: m and rad; forces in N, m
 <h4>Mass M and stiffness K</h4>
 <p>{mass_text} K is the shaft's bending stiffness plus each support spring on its
 journal. Only the bearings' cross-coupled stiffness k<sub>xy</sub> joins the two planes, as
-K[x, y] = k<sub>xy</sub> and K[y, x] = −k<sub>xy</sub> at each journal (here
-{fmt(s.bearing_a.kxy, 1.0)} N/m at A and {fmt(s.bearing_b.kxy, 1.0)} N/m at B). That part is
+K[x, y] = k<sub>xy</sub> and K[y, x] = k<sub>yx</sub> (−k<sub>xy</sub> unless set otherwise) at each
+journal (here {_coupling(s)}). That part is
 skew-symmetric, so K is symmetric only without it; with isotropic supports and no cross-coupling K has
 two identical blocks.{swirl}</p>
+{films}
 {_mat(M, "M")}<br>{_mat(K, "K")}
 
 <h4>The shaft (one plane)</h4>
@@ -600,7 +643,7 @@ fluid sticking to the turning journal and to the still bearing), and the cross-c
 k<sub>xy</sub> = λcΩ for a bearing of damping c. The energy balance above then reads λcΩ against cω:
 the forward whirl at ω grows once <b>λΩ &gt; ω</b>, the oil's swirl outrunning the whirl, whatever the
 damping. With λ = 0.5 the rotor goes unstable at <b>twice its first natural frequency</b>. Set λ in the
-bearing table, or load the <i>Fluid-film bearings</i> preset: the onset is 3136 rpm, twice the forward
+bearing table, or load the <i>Oil swirl λ = ½</i> preset: the onset is 3136 rpm, twice the forward
 whirl's 26.1 Hz, and just there the whirl is at exactly ½X. Faster, it stays locked at the natural
 frequency (26.3 Hz, 0.32×, at 5000 rpm, growing by e every 0.22 s): <i>oil whip</i>, the ratio to the
 speed falling as the speed rises. Raising the damping does not help, since it raises the cross-coupling
@@ -671,8 +714,25 @@ which is one reason a lightly loaded bearing is the one that whirls. A flexible 
 sooner, near twice its first critical speed, which is the oil whip of the <i>Stability</i> section.</p>
 <p>The tab draws the locus, with the page's speed range solid and the speed now as a dot, and the
 coefficients against the speed, or made dimensionless against S on log scales (dashed where negative),
-as on a bearing designer's chart. For now the rotor's supports are still the bearing table's springs and
-dampers; putting the film on the rotor, its coefficients changing with speed, is the next step.</p>
+as on a bearing designer's chart.</p>
+<p><b>On the rotor.</b> Tick <i>Oil-film journal bearings</i> under the bearing supports and both journals
+run in the tab's bearing, on rigid housings, in place of the springs and dampers. Each carries its share of
+the rotor's weight (on a midspan disc, half of it and its own journal's; on an overhung one the far bearing
+is pulled up instead), so the two may sit at different points of the locus. The film is linearized about
+where its journal settles, f = W − K<sub>f</sub>(q − q<sub>J</sub>) − C<sub>f</sub>q̇: K<sub>f</sub>(Ω)
+and C<sub>f</sub>(Ω) join the rotor's stiffness and damping, and the constant W + K<sub>f</sub>q<sub>J</sub>
+joins its loads, so the rotor rests with its journals on the locus and, with <i>Static sag</i> ticked, the
+bearings' orbits rise along it as the speed rises. Below the speed where ε = 0.9 the journal is nearly on
+its bottom (mixed lubrication), and the film is taken as it is there. The <i>Journal bearings</i> preset
+is the default rotor laid horizontal on the default bearing. The film, 1 MN/m or so, is far stiffer than
+the shaft (38 kN/m at the disc), so the critical speed is the rigid-bearing one, 1845 rpm, and the film
+damps it little: the journals hardly move. Past twice that, 3576 rpm, the forward whirl grows at 30.5 Hz
+(0.51×): oil whip from the bearing itself, not from a chosen λ, and locked at 30.7 Hz at 5000 rpm (0.37×),
+growing by e every 0.85 s. Long before it reaches the size of the disc's whirl it fills the 15 µm
+clearance, where a real film stiffens sharply and holds it to a limit cycle; the linear model cannot, so
+the page pauses there. A vertical rotor's bearings carry no load, and an unloaded plain bearing has no
+direct stiffness, only the swirl's cross-coupling: on them the rotor whirls at any speed, which is why
+vertical machines use tilting-pad or preloaded bearings.</p>
 
 <h3>The asymmetric shaft: a two-pole rotor</h3>
 <p>The rotor of a two-pole generator has slots for its winding cut along two sides, so it is stiffer
@@ -838,10 +898,16 @@ spins up and stays still.</li>
 backward branches fan out from 14.5 Hz. Run up and coast down from 600 to 2000 rpm: one critical, at
 1284 rpm. Then set the disc's polar inertia I<sub>p</sub> to a tiny value: with the gyroscopic moment
 gone the critical drops to 870 rpm, the natural frequency at rest.</li>
-<li>Load the <i>Fluid-film bearings</i> preset (λ = 0.5) and tick ½X on the Campbell diagram. Run at
+<li>Load the <i>Oil swirl λ = ½</i> preset and tick ½X on the Campbell diagram. Run at
 2500 rpm and tap the disc: the tap dies away. Set the target to 4000 rpm (past the onset, 3136 rpm,
 where ½X crosses the first mode) and tap again: the whirl grows at 26 Hz, 0.39× on the full spectrum, not
 at ½X. Double the support damping: the onset does not move.</li>
+<li>Load the <i>Journal bearings</i> preset, tick <i>Static sag</i> and run up to 3000 rpm: the bearings'
+orbits climb from where the journals rest, (4.8, −12.6) µm, toward the centre along the locus on the
+<i>Fluid-film bearing</i> tab. Then set the target to 5000 rpm and tap the disc: the whirl grows at 30.7 Hz
+until a journal reaches its clearance. Then make the clearance 30 µm and the oil 10 mPa·s (hotter): the
+journals sink lower (ε = 0.71 at 3000 rpm, against 0.25), the bearings more heavily loaded, and the onset
+rises from 3576 to 4358 rpm. A heavily loaded plain bearing resists whirl.</li>
 <li>Load the <i>Overhung rotor</i> preset, set the ramp rate to 200 rpm/s and tick <i>Tap the disc
 every</i> 0.5 s, then set the target to 2,500 rpm and watch the <i>Waterfall</i> tab: the taps' peaks
 follow the dots of the forward and backward branches (backward from 14.5 down to 5.7 Hz), and the 1X ridge
@@ -882,7 +948,7 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>ζ</td><td>damping ratio of a mode, −Re λ / |λ|</td><td>—</td></tr>
 <tr><td>α</td><td>angular acceleration of a ramp, Ω'</td><td>rad/s² (rpm/s)</td></tr>
 <tr><td>V</td><td>1X vector: amplitude |V|, phase lag −arg V</td><td>m</td></tr>
-<tr><td>k<sub>xy</sub></td><td>a bearing's cross-coupled stiffness (k<sub>yx</sub> = −k<sub>xy</sub>)</td><td>N/m</td></tr>
+<tr><td>k<sub>xy</sub>, k<sub>yx</sub>; c<sub>xy</sub>, c<sub>yx</sub></td><td>a bearing's cross-coupled stiffness (k<sub>yx</sub> = −k<sub>xy</sub> unless given) and damping: f<sub>x</sub> = −k<sub>xy</sub>y − c<sub>xy</sub>ẏ</td><td>N/m; N·s/m</td></tr>
 <tr><td>λ</td><td>a fluid-film bearing's swirl ratio: k<sub>xy</sub> grows by λcΩ, c the mean of c<sub>x</sub> and c<sub>y</sub></td><td>—</td></tr>
 <tr><td>D, L, c, μ, W</td><td>on the <i>Fluid-film bearing</i> tab: journal diameter, bearing length, radial clearance, oil viscosity, load</td><td>m, m, m (µm), Pa·s, N</td></tr>
 <tr><td>ε, S</td><td>the journal's eccentricity (its offset over c); the Sommerfeld number (μNLD/W)(R/c)², N in rev/s</td><td>—</td></tr>

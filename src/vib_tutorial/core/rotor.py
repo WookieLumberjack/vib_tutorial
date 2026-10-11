@@ -18,7 +18,14 @@ elements (A to the disc and the disc to B, or for an overhung disc the span and
 the overhang).
 
 Each journal has a mass and is held to ground by a spring and a damper in x and
-in y, which may differ (anisotropic supports) and may differ between A and B.
+in y, which may differ (anisotropic supports) and may differ between A and B,
+with cross terms (k_xy, k_yx, c_xy, c_yx) too. Or it runs in a plain journal
+bearing, an oil film on a rigid housing (core/fluid_bearing.py): its stiffness
+and damping then come from the film, under the bearing's share of the weight,
+and change with the speed. The film is linearized about where its journal
+settles, so with gravity it also adds a constant load that holds the journal
+there (`_film_terms`): the rotor rests with its journals on the film's locus.
+So in general the stiffness and the damping are K(Ω) and C(Ω), not only K + ΩH.
 The disc has mass m, polar moment of inertia Ip (about the spin axis) and
 diametral moment Id (about a diameter).
 
@@ -131,6 +138,7 @@ from typing import NamedTuple
 import numpy as np
 import scipy.linalg
 
+from .fluid_bearing import BearingState, JournalBearing
 from .simulator import MAX_STEP, MAX_STEPS_PER_ADVANCE, STEPS_PER_PERIOD, foh_discretize
 
 N_DOF = 8  # the stations' DOFs, the first of q (a shaft with mass adds its modal coordinates after them)
@@ -149,20 +157,48 @@ MIN_GAP = 1e-3  # of the span: the closest the disc may come to a bearing
 
 @dataclass(frozen=True)
 class Bearing:
-    """A bearing journal on its support: springs and dampers to ground in x and y."""
+    """A bearing journal on its support: springs and dampers to ground in x and y, or an oil film.
+
+    The support pushes back on the journal with f = -K [x, y] - C [x', y'], K =
+    [[kx, k_xy], [k_yx, ky]] and C = [[cx, c_xy], [c_yx, cy]]. With a `film` the
+    journal runs in a plain journal bearing on a rigid housing instead: K and C
+    are then the film's, at the speed and under the bearing's share of the
+    rotor's weight (the film's own `load` is not used), and the springs, dampers
+    and swirl are left out.
+    """
 
     kx: float = 5e4  # N/m
     ky: float = 5e4  # N/m
     cx: float = 100.0  # N·s/m
     cy: float = 100.0  # N·s/m
     mass: float = 0.1  # kg, the journal and whatever moves with it
-    kxy: float = 0.0  # N/m, cross-coupled stiffness: f_x = -k_xy y, f_y = +k_xy x (k_yx = -k_xy)
+    kxy: float = 0.0  # N/m, cross-coupled stiffness: f_x = -k_xy y
     swirl: float = 0.0  # fluid swirl ratio λ: the cross-coupling grows with speed by λ c Ω (see damping)
+    kyx: float | None = None  # N/m: f_y = -k_yx x; None for -k_xy (a pure skew coupling, as a seal's)
+    cxy: float = 0.0  # N·s/m: f_x = -c_xy y'
+    cyx: float = 0.0  # N·s/m: f_y = -c_yx x'
+    film: JournalBearing | None = None  # an oil film in place of the springs and dampers
 
     @property
     def damping(self) -> float:
         """c (N·s/m), the mean of c_x and c_y: the fluid's drag-round takes k_xy up by λ c Ω."""
         return 0.5 * (self.cx + self.cy)
+
+    @property
+    def k_yx(self) -> float:
+        return -self.kxy if self.kyx is None else self.kyx
+
+    @property
+    def swirling(self) -> bool:
+        """True if the springs' cross-coupling grows with the speed (λ c ≠ 0, and no film)."""
+        return self.film is None and bool(self.swirl * self.damping)
+
+    def springs(self) -> tuple[np.ndarray, np.ndarray]:
+        """(K, C), each 2 x 2: the springs and dampers at rest (none with a film)."""
+        if self.film is not None:
+            return np.zeros((2, 2)), np.zeros((2, 2))
+        return (np.array([[self.kx, self.kxy], [self.k_yx, self.ky]]),
+                np.array([[self.cx, self.cxy], [self.cyx, self.cy]]))
 
 
 class PlaneWeight(NamedTuple):
@@ -471,12 +507,17 @@ class RotorSystem:
         P = np.asarray(P)
         return self.merge(P.real, P.imag)
 
-    def gravity_load(self) -> np.ndarray:
-        """f_g (n_dof,): the weights of the journals, the disc and the shaft, in -y (N)."""
+    def gravity_load(self, omega: float = 0.0) -> np.ndarray:
+        """f_g (n_dof,): the weights of the journals, the disc and the shaft, in -y (N).
+
+        With oil films, also the constant load p(Ω) that holds each journal where its
+        film settles it (see _film_terms), so it depends on the speed.
+        """
         # The stations moving together, the slope at the disc held, is a rigid shift (modal coordinates 0).
         shift = np.zeros(4 + self.modes_kept)
         shift[[0, 1, 3]] = 1.0
-        return self.merge(np.zeros_like(shift), -self.gravity * self.plane_mass() @ shift)
+        f = self.merge(np.zeros_like(shift), -self.gravity * self.plane_mass() @ shift)
+        return f + self._film_terms(omega)[2] if self.films and self.gravity else f
 
     def static_deflection(self, omega: float | np.ndarray = 0.0) -> np.ndarray:
         """q_s = (K + ΩH)^{-1} f_g: where gravity holds the rotor, (n_dof,) or (len(omega), n_dof).
@@ -492,11 +533,15 @@ class RotorSystem:
             return np.zeros(omega.shape + (n,))
         if self.asymmetry:
             return gravity_response(self, omega.ravel())[0].real.reshape(omega.shape + (n,))
-        f = self.gravity_load()
         if not self.speed_dependent or omega.ndim == 0:
-            q = np.linalg.solve(self.stiffness(float(omega) if omega.ndim == 0 else 0.0), f)
+            w = float(omega) if omega.ndim == 0 else 0.0
+            q = np.linalg.solve(self.stiffness(w), self.gravity_load(w))
             return q if omega.ndim == 0 else np.broadcast_to(q, omega.shape + (n,)).copy()
-        K, H = self.matrices()[3], self._circulatory
+        if self.films:
+            flat = omega.ravel()
+            out = np.array([np.linalg.solve(self.stiffness(w), self.gravity_load(w)) for w in flat])
+            return out.reshape(omega.shape + (n,))
+        K, H, f = self.matrices()[3], self._circulatory, self.gravity_load()
         return np.linalg.solve(K + omega[..., None, None] * H, np.broadcast_to(f, omega.shape + (n,))[..., None])[..., 0]
 
     @property
@@ -512,7 +557,7 @@ class RotorSystem:
         """
         if not self.gravity or not self.asymmetry:
             return self.static_deflection(0.0)
-        return np.linalg.solve(self.stiffness_at(0.0, phase), self.gravity_load())
+        return np.linalg.solve(self.stiffness_at(0.0, phase), self.gravity_load(0.0))
 
     def bow_displacement(self, phase: float) -> np.ndarray:
         """q_bow (n_dof,): the bow at shaft angle φ, as displacements in fixed coordinates."""
@@ -554,7 +599,9 @@ class RotorSystem:
 
         The equations of motion are M q'' + (C + Ω G) q' + (K + Ω H) q = f, H from
         circulatory(). K holds the bearings' cross-coupled stiffness (so it is not
-        symmetric unless k_xy = 0) and C the shaft's internal damping.
+        symmetric unless k_xy = 0) and C the shaft's internal damping. An oil film's
+        stiffness and damping are not in them: they change with the speed, so use
+        stiffness(Ω) and damping(Ω) wherever the speed is known.
         """
         return tuple(m.copy() for m in self._matrices)
 
@@ -565,11 +612,11 @@ class RotorSystem:
         mp = self.plane_mass()
         M = self._blocks(mp, mp)
         K = self._blocks(ks, ks)
-        K[[XA, XB, YA, YB], [XA, XB, YA, YB]] += [A.kx, B.kx, A.ky, B.ky]
-        for j, bearing in ((XA, A), (XB, B)):
-            K[j, j + 4], K[j + 4, j] = bearing.kxy, -bearing.kxy
         C = self._blocks(self.loss_time * ks, self.loss_time * ks)
-        C[[XA, XB, YA, YB], [XA, XB, YA, YB]] += [A.cx, B.cx, A.cy, B.cy]
+        for j, bearing in ((XA, A), (XB, B)):
+            k, c = bearing.springs()
+            K[np.ix_([j, j + 4], [j, j + 4])] += k
+            C[np.ix_([j, j + 4], [j, j + 4])] += c
         # Id θx'' + Ω Ip θy' = moment in x-z;  Id θy'' - Ω Ip θx' = moment in y-z. The shaft's own
         # sections do the same, with twice their diametral rotary inertia.
         gp = 2.0 * self._reduced[3]
@@ -593,24 +640,91 @@ class RotorSystem:
         zero = np.zeros_like(eta_ks)
         H = self._blocks(zero, zero, eta_ks, -eta_ks)
         for j, bearing in ((XA, self.bearing_a), (XB, self.bearing_b)):
-            H[j, j + 4] += bearing.swirl * bearing.damping
-            H[j + 4, j] -= bearing.swirl * bearing.damping
+            if bearing.swirling:
+                H[j, j + 4] += bearing.swirl * bearing.damping
+                H[j + 4, j] -= bearing.swirl * bearing.damping
         return H
 
     @property
+    def films(self) -> bool:
+        """True if either bearing is an oil film."""
+        return self.bearing_a.film is not None or self.bearing_b.film is not None
+
+    @property
     def speed_dependent(self) -> bool:
-        """True if the stiffness changes with the speed: internal damping or a swirling bearing."""
-        return bool(self.internal_damping or self.bearing_a.swirl * self.bearing_a.damping
-                    or self.bearing_b.swirl * self.bearing_b.damping)
+        """True if the stiffness changes with the speed: internal damping, a swirling bearing or an oil film."""
+        return bool(self.internal_damping or self.bearing_a.swirling or self.bearing_b.swirling or self.films)
 
     def cross_coupling(self, omega: float) -> tuple[float, float]:
-        """Each bearing's cross-coupled stiffness k_xy at speed Ω (N/m), A then B: k_xy + λ c Ω."""
-        return tuple(b.kxy + b.swirl * b.damping * omega for b in (self.bearing_a, self.bearing_b))
+        """Each bearing's cross-coupled stiffness k_xy at speed Ω (N/m), A then B: k_xy + λ c Ω, or the film's."""
+        states = self.bearing_states(omega)
+        return tuple(float(st.k[0, 1]) if st is not None else b.kxy + b.swirling * b.swirl * b.damping * omega
+                     for b, st in zip((self.bearing_a, self.bearing_b), states))
+
+    @cached_property
+    def bearing_loads(self) -> tuple[float, float]:
+        """Each bearing's share of the rotor's weight (N), A then B: the support's upward push on its journal.
+
+        With the journals held, the shaft carries the disc's and its own weight to
+        them, and each journal's weight is its own. Negative where the support has
+        to pull the journal down (the far bearing of an overhung rotor).
+        """
+        if not self.gravity:
+            return 0.0, 0.0
+        ks = self.shaft_stiffness()
+        f = -self.gravity * self.plane_mass() @ np.r_[1.0, 1.0, 0.0, 1.0, np.zeros(self.modes_kept)]
+        j = [0, 3]
+        r = [i for i in range(ks.shape[0]) if i not in j]
+        held = np.linalg.solve(ks[np.ix_(r, r)], f[r])
+        push = ks[np.ix_(j, r)] @ held - f[j]
+        return float(push[0]), float(push[1])
+
+    def bearing_states(self, omega: float) -> tuple[BearingState | None, BearingState | None]:
+        """Each oil film's state at speed Ω under its share of the weight, A then B (None: springs)."""
+        cache = self.__dict__.setdefault("_film_states", {})
+        key = abs(float(omega))
+        if key not in cache:
+            if len(cache) > 64:
+                cache.clear()
+            cache[key] = tuple(None if b.film is None else b.film.with_load(abs(w)).on_rotor(key)
+                               for b, w in zip((self.bearing_a, self.bearing_b), self.bearing_loads))
+        return cache[key]
+
+    def _film_terms(self, omega: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """(K_f, C_f, p): the films' stiffness and damping at speed Ω, and the load that holds them there.
+
+        A film is linearized about where its journal settles, q_J at its eccentricity
+        and attitude, not about the bearing's centre: f = W - K_f (q - q_J) - C_f q',
+        W its share of the weight held up. So it adds K_f to the stiffness and the
+        constant p = W + K_f q_J to the load (with gravity, beside f_g): the rotor
+        then rests with its journals on the film's locus.
+        """
+        n = self.n_dof
+        Kf, Cf, p = np.zeros((n, n)), np.zeros((n, n)), np.zeros(n)
+        for j, b, w, st in zip((XA, XB), (self.bearing_a, self.bearing_b), self.bearing_loads,
+                               self.bearing_states(omega)):
+            if st is None:
+                continue
+            d = [j, j + 4]
+            Kf[np.ix_(d, d)] = st.k
+            Cf[np.ix_(d, d)] = st.c
+            # An upward pull mirrors the journal through the centre; the coefficients stay the same.
+            q_j = math.copysign(b.film.clearance, w) * np.array(st.position())
+            p[d] = np.array([0.0, w]) + st.k @ q_j
+        return Kf, Cf, p
 
     def stiffness(self, omega: float) -> np.ndarray:
-        """K + Ω H: the whole stiffness at speed Ω (with an asymmetric shaft, its mean over a revolution)."""
+        """K + Ω H + the films': the whole stiffness at speed Ω (with an asymmetric shaft, its mean)."""
         K = self._matrices[3]
-        return K + omega * self._circulatory if self.speed_dependent else K.copy()
+        if not self.speed_dependent:
+            return K.copy()
+        K = K + omega * self._circulatory
+        return K + self._film_terms(omega)[0] if self.films else K
+
+    def damping(self, omega: float) -> np.ndarray:
+        """C + the films': the damping at speed Ω (without the gyroscopic Ω G)."""
+        C = self._matrices[1]
+        return C + self._film_terms(omega)[1] if self.films else C.copy()
 
     @property
     def deviatoric(self) -> tuple[np.ndarray, np.ndarray]:
@@ -655,12 +769,16 @@ class RotorSystem:
 
     @property
     def isotropic_supports(self) -> bool:
-        """True if both bearings have the same stiffness and damping in x as in y.
+        """True if both bearings have the same stiffness and damping in x as in y, and turn alike.
+
+        Their cross terms then have to be a pure turn (k_yx = -k_xy, no c_xy), and
+        no film (whose stiffness depends on the load's direction).
 
         Then an asymmetric shaft is time-invariant in coordinates turning with it,
         so a few harmonics give its response and modes exactly.
         """
-        return all(b.kx == b.ky and b.cx == b.cy for b in (self.bearing_a, self.bearing_b))
+        return all(b.film is None and b.kx == b.ky and b.cx == b.cy and b.cxy == b.cyx == 0.0
+                   and b.k_yx == -b.kxy for b in (self.bearing_a, self.bearing_b))
 
     def axis_system(self, stiff: bool) -> RotorSystem:
         """The same rotor with a round shaft as stiff as this one's stiff (or soft) axis: EI(1 ± Δ).
@@ -680,13 +798,13 @@ class RotorSystem:
 
     def state_matrix(self, omega: float) -> np.ndarray:
         """A(Ω) (2n x 2n) for z = [q, q']: z' = A z + B u."""
-        _, C, G, _ = self._matrices
+        G = self._matrices[2]
         Minv = self.mass_inverse
         n = self.n_dof
         A = np.zeros((2 * n, 2 * n))
         A[:n, n:] = np.eye(n)
         A[n:, :n] = -Minv @ self.stiffness(omega)
-        A[n:, n:] = -Minv @ (C + omega * G)
+        A[n:, n:] = -Minv @ (self.damping(omega) + omega * G)
         return A
 
     def input_matrix(self) -> np.ndarray:
@@ -859,7 +977,8 @@ def rotating_state_matrix(system: RotorSystem, omega: float) -> np.ndarray:
     them, the shaft's deviatoric part is held at φ = 0, and
         M r'' + (C + ΩG + 2ΩMJ) r' + (K + ΩH + ΔK(0) - Ω²M + ΩCJ + Ω²GJ) r = R^T f.
     """
-    M, C, G, _ = system._matrices
+    M, _, G, _ = system._matrices
+    C = system.damping(omega)
     n = system.n_dof
     J = _turn(system)
     Kr = system.stiffness_at(omega, 0.0) - omega**2 * M + omega * C @ J + omega**2 * G @ J
@@ -1029,7 +1148,7 @@ def synchronous_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
     With an asymmetric shaft the response to a 1X load has 3X, 5X, ... in it too,
     unless the supports are isotropic (harmonic_response); this is its 1X part.
     """
-    M, C, G, _ = system.matrices()
+    M, _, G, _ = system.matrices()
     omegas = np.atleast_1d(np.asarray(omegas, dtype=float))
     out = np.empty((omegas.size, system.n_dof), dtype=complex)
     load = system.rotating_load(omegas)
@@ -1042,7 +1161,7 @@ def synchronous_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
         F[:, one], F[:, one - 1] = 0.5 * f, 0.5 * f.conj()
         return 2.0 * harmonic_response(system, omegas, orders, F)[:, one]
     for i, w in enumerate(omegas):
-        out[i] = np.linalg.solve(system.stiffness(w) - w * w * M + 1j * w * (C + w * G), f[i])
+        out[i] = np.linalg.solve(system.stiffness(w) - w * w * M + 1j * w * (system.damping(w) + w * G), f[i])
     return out
 
 
@@ -1065,7 +1184,7 @@ def harmonic_response(system: RotorSystem, omega: float | np.ndarray, orders: np
     orders (m,) are the harmonics k, each 2 more than the last; loads (..., m, n_dof)
     the F_k (F_{-k} = conj(F_k) for a real load). Returns the Q_k, (m, n_dof) for one
     speed or (len(omega), m, n_dof) for several (loads then one set for all, or one
-    per speed). Row k reads (K + ΩH - k²Ω²M + ikΩ(C + ΩG)) Q_k + E₊ Q_{k-2} + E₋
+    per speed). Row k reads (K(Ω) - k²Ω²M + ikΩ(C(Ω) + ΩG)) Q_k + E₊ Q_{k-2} + E₋
     Q_{k+2} = F_k, the deviatoric stiffness being E₊ e^{2iφ} + E₋ e^{-2iφ};
     harmonics past the ends are taken as zero.
     """
@@ -1079,11 +1198,16 @@ def harmonic_response(system: RotorSystem, omega: float | np.ndarray, orders: np
     chunk = max(1, 2_000_000 // (m * n) ** 2)  # speeds solved at once, to bound the memory
     for c in range(0, w.size, chunk):
         wc = w[c:c + chunk, None, None]
+        if system.films:  # the films' stiffness and damping are not linear in Ω
+            Kw = np.array([system.stiffness(x) for x in w[c:c + chunk]])
+            Cw = np.array([system.damping(x) for x in w[c:c + chunk]])
+        else:
+            Kw, Cw = K + wc * H, C
         A = np.zeros((wc.shape[0], m * n, m * n), dtype=complex)
         for i, k in enumerate(orders):
             s = k * wc
             d = slice(i * n, (i + 1) * n)
-            A[:, d, d] = K + wc * H - s * s * M + 1j * s * (C + wc * G)
+            A[:, d, d] = Kw - s * s * M + 1j * s * (Cw + wc * G)
             if i > 0:
                 A[:, d, (i - 1) * n:i * n] = Ep
             if i < m - 1:
@@ -1110,10 +1234,10 @@ def gravity_response(system: RotorSystem, omegas: np.ndarray) -> tuple[np.ndarra
         return system.static_deflection(omegas).astype(complex), np.zeros((omegas.size, n), dtype=complex)
     orders = harmonic_orders(system, odd=False)
     zero = int(np.searchsorted(orders, 0))
-    F = np.zeros((orders.size, n), dtype=complex)
-    F[zero] = system.gravity_load()
     # Each speed once: a steady run asks for the same one again and again.
     speeds, back = np.unique(omegas, return_inverse=True)
+    F = np.zeros((speeds.size, orders.size, n), dtype=complex)
+    F[:, zero] = [system.gravity_load(w) for w in speeds] if system.films else system.gravity_load()
     Q = harmonic_response(system, speeds, orders, F)[back.ravel()]
     return Q[:, zero], 2.0 * Q[:, zero + 1]
 
@@ -1144,7 +1268,9 @@ class RotorSimulator:
         self.accel = 500.0 / RPM  # ramp rate (rad/s²)
         self._alpha = 0.0  # Ω' over the last step
         self._cache: dict[tuple[float, float], tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-        self._f_still = self._highest_freq_still()
+        self._gravity_at: tuple[float, np.ndarray] = (math.nan, np.empty(0))  # gravity's load, and its speed
+        self._f_at: dict[float, float] = {}  # with oil films: the highest frequency at each top speed asked
+        self._f_still = self._highest_freq(0.0)
 
     # ------------------------------------------------------------- setup
     def set_system(self, system: RotorSystem) -> None:
@@ -1160,7 +1286,9 @@ class RotorSimulator:
             self.state = state
         self.system = system
         self._cache.clear()
-        self._f_still = self._highest_freq_still()
+        self._gravity_at = (math.nan, np.empty(0))
+        self._f_at.clear()
+        self._f_still = self._highest_freq(0.0)
 
     def _rest(self) -> np.ndarray:
         """The state at rest: the shaft in its bowed shape (which loads nothing), sagging under gravity."""
@@ -1187,29 +1315,45 @@ class RotorSimulator:
 
     def energy(self) -> tuple[float, float]:
         """(kinetic, potential) energy of the vibration (J); the spin's own energy left out."""
-        M, _, _, K = self.system.matrices()
+        M = self.system.matrices()[0]
         # Measured from the equilibrium: the shaft's strain from its bow (zero at the journals, where
         # the supports act), the springs' from where gravity holds them (gravity's own potential energy
         # cancels the rest). Only K's symmetric part stores energy: the cross-coupling does work instead.
-        # An asymmetric shaft's strain energy is on its stiffness at this angle, about its mean sag.
-        K = K + self.system.stiffness_at(0.0, self.phase) - self.system.stiffness(0.0)
+        # An asymmetric shaft's strain energy is on its stiffness at this angle, about its mean sag. An oil
+        # film's is on its stiffness at this speed (its skew part drops out of q K q).
+        K = self.system.stiffness_at(self.omega, self.phase)
         q = self.q - self.system.bow_displacement(self.phase) - self.system.static_deflection(self.omega)
         return 0.5 * float(self.qdot @ M @ self.qdot), 0.5 * float(q @ K @ q)
 
     # ------------------------------------------------------------- stepping
-    def _highest_freq_still(self) -> float:
-        lam = np.linalg.eigvals(self.system.state_matrix(0.0))
-        return float(np.abs(lam).max()) / (2.0 * math.pi)
+    def _highest_freq(self, omega: float) -> float:
+        """The fastest root at speed Ω (Hz), |λ|/2π; with oil films, the fastest oscillation, |Im λ|/2π.
+
+        A film damps its journal so hard that its roots decay at once without
+        oscillating, far faster than anything else: the exact update needs no
+        short step for them, only for what oscillates.
+        """
+        lam = np.linalg.eigvals(self.system.state_matrix(omega))
+        return float((np.abs(lam.imag) if self.system.films else np.abs(lam)).max()) / (2.0 * math.pi)
 
     def step_size(self) -> float:
         """h resolving the fastest mode at any speed up to the target, and the spin.
 
         A forward mode's frequency rises with speed by at most (Ip/Id) Ω (the shaft's
-        own sections: 2Ω). Rounded down to a power of two so the discretization is reused.
+        own sections: 2Ω). An oil film's stiffness changes with the speed, so with
+        films the modes at the top speed are looked at too. Rounded down to a power
+        of two so the discretization is reused.
         """
-        spin = max(abs(self.omega), abs(self.target)) / (2.0 * math.pi)
+        top = max(abs(self.omega), abs(self.target))
+        spin = top / (2.0 * math.pi)
         gyro = max(self.system.ip / self.system.id, 2.0 if self.system.density else 0.0)
         fmax = max(self._f_still + spin * gyro, spin)
+        if self.system.films:
+            if top not in self._f_at:
+                if len(self._f_at) > 64:
+                    self._f_at.clear()
+                self._f_at[top] = self._highest_freq(top)
+            fmax = max(fmax, self._f_at[top])
         h = MAX_STEP if fmax <= 0 else min(MAX_STEP, 1.0 / (STEPS_PER_PERIOD * fmax))
         return 2.0 ** math.floor(math.log2(h))
 
@@ -1230,10 +1374,20 @@ class RotorSimulator:
             self._cache[key] = out
         return out
 
-    def force(self, phase: np.ndarray, omega: np.ndarray, alpha: np.ndarray) -> np.ndarray:
-        """The load f (..., n_dof) on q: the 1X unbalance, skew moment and bow force, and gravity."""
+    def force(self, phase: np.ndarray, omega: np.ndarray, alpha: np.ndarray, held: float = 0.0) -> np.ndarray:
+        """The load f (..., n_dof) on q: the 1X unbalance, skew moment and bow force, and gravity.
+
+        Gravity's load with oil films is taken at the speed `held`, as A(Ω) is.
+        """
         p = self.system.rotating_load(omega, alpha) * np.exp(1j * np.asarray(phase))[..., None]
-        return self.system.plane_load(p) + self.system.gravity_load()
+        return self.system.plane_load(p) + self._gravity(held)
+
+    def _gravity(self, omega: float) -> np.ndarray:
+        if not self.system.films:
+            omega = 0.0
+        if self._gravity_at[0] != omega:
+            self._gravity_at = (omega, self.system.gravity_load(omega))
+        return self._gravity_at[1]
 
     def _speeds(self, h: float, n: int) -> np.ndarray:
         """Ω at the end of each of the next n steps, ramping toward the target at self.accel."""
@@ -1259,10 +1413,10 @@ class RotorSimulator:
             w0 = np.concatenate([[self.omega], w1[:-1]])
             alpha = (w1 - w0) / h
             phi1 = self.phase + np.cumsum(0.5 * h * (w0 + w1))  # exact for Ω linear over each step
-            u0 = self.force(self.phase, self.omega, self._alpha)
-            u = self.force(phi1, w1, alpha)
             # A is held at the chunk's mean speed (exactly the speed when it is steady).
             held = float(np.mean(w1)) if not steady else self.omega
+            u0 = self.force(self.phase, self.omega, self._alpha, held)
+            u = self.force(phi1, w1, alpha, held)
             # An asymmetric shaft standing still has a fixed stiffness: stepped exactly, like a round one.
             still = self.system.asymmetry and steady and self.omega == 0.0
             if self.system.asymmetry and not still:
@@ -1299,7 +1453,7 @@ class RotorSimulator:
         wm = 0.5 * (w0 + w1)
         phi0 = np.concatenate([[self.phase], self.phase + np.cumsum(0.5 * h * (w0 + w1))[:-1]])
         phim = phi0 + 0.25 * h * (w0 + wm)  # exact for Ω linear over the step
-        um = self.force(phim, wm, alpha)
+        um = self.force(phim, wm, alpha, held)
         before = np.vstack([u0, u[:-1]])
         first = G0 @ before.T + G1 @ um.T
         second = G0 @ um.T + G1 @ u.T

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .fluid_bearing import JournalBearing
 from .rotor import STEEL, Bearing, RotorSystem
 
 # The overhung rotor: a 3 kg disc of radius 150 mm (I_p = m R²/2, I_d = m R²/4), 100 mm past
@@ -19,6 +20,8 @@ OVERHUNG_BEARING = Bearing(kx=2e5, ky=2e5, cx=400.0, cy=400.0)
 LONG_MASS = 2.0  # kg
 LONG_RADIUS = 0.08  # m
 LONG_BEARING = Bearing(kx=1e6, ky=1e6, cx=200.0, cy=200.0, mass=0.5)
+# Journal bearings: the Fluid-film bearing tab's default, D = 10 mm, L = 5 mm, c = 15 µm, 30 mPa·s oil.
+JOURNAL_BEARING = Bearing(film=JournalBearing())
 
 
 @dataclass(frozen=True)
@@ -78,11 +81,19 @@ def rotor_presets() -> list[RotorPreset]:
             "it is unstable.",
         ),
         RotorPreset(
-            "Fluid-film bearings (oil whip)",
+            "Oil swirl λ = ½ (oil whip)",
             RotorSystem(bearing_a=Bearing(swirl=0.5), bearing_b=Bearing(swirl=0.5)),
             10_000.0, 2500.0,
             "The oil swirls round at half the shaft's speed, so the cross-coupling grows as cΩ/2. Past "
             "twice the first natural frequency, 3136 rpm, the forward whirl grows: oil whip, locked at "
             "26 Hz whatever the speed.",
+        ),
+        RotorPreset(
+            "Journal bearings (oil whip)",
+            RotorSystem(bearing_a=JOURNAL_BEARING, bearing_b=JOURNAL_BEARING, gravity=9.81),
+            10_000.0, 2500.0,
+            "Horizontal, in plain journal bearings: the oil film is stiff, so the critical is the rigid-"
+            "bearing one, 1845 rpm, and the journals rise along the bearing's locus as the speed rises. Past "
+            "twice that, 3576 rpm, the film's own cross-coupling drives oil whip at 30.5 Hz.",
         ),
     ]
