@@ -27,7 +27,7 @@ SWEEP_COLORS = (1, 3, 5, 2, 4, 6, 7, 0)  # indices into colors.mode, one per swe
 
 BODE_TIP = (
     "<p>Top: the 1X amplitude at the chosen station and direction against speed; bottom: its phase lag, "
-    "the degrees the shaft turns from the keyphasor (the heavy spot passing +x) to the probe's positive "
+    "the degrees the shaft turns from the keyphasor (the mark on the shaft passing +x) to the probe's positive "
     "peak. The thick line is the steady state, each speed held until the response settles; the red line "
     "and dot are the speed now.</p><p>The thin lines are run-ups (solid) and coast-downs (dashed), "
     "tracked once per revolution like a tracking filter on a real machine. The dots, if shown, are the "
@@ -120,7 +120,7 @@ class PolarPlot(pg.PlotWidget):
         p = self.getPlotItem()
         p.setAspectLocked(True)
         p.setMenuEnabled(False)
-        p.setLabel("bottom", "In phase with the heavy spot", units="m")
+        p.setLabel("bottom", "In phase with the keyphasor", units="m")
         p.setLabel("left", "Quadrature (down: lagging 90°)", units="m")
         p.showGrid(x=True, y=True, alpha=0.15)
         self.axes = [pg.InfiniteLine(pos=0, angle=a) for a in (0, 90)]

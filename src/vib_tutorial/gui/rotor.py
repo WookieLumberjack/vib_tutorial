@@ -41,9 +41,11 @@ from ..core.rotor_sweep import (
     probe,
     steady_vectors,
 )
+from ..core.rotor_balance import SteadyMeasurement
 from ..core.rotor_stability import Onset, full_spectrum, least_damped, stability_onset
 from .cms_time import SampleBuffer
 from .panels import spin
+from .rotor_balance import BalancingPanel
 from .rotor_bode import SWEEP_COLORS, BodePlots, PolarPlot, SweepPlots, nice_marks
 from .rotor_notes import THEORY_HTML, matrices_html, whirl_name
 from .rotor_stability import MEASURES, FullSpectrum, StabilityMap
@@ -70,6 +72,7 @@ DOT = QtCore.Qt.PenStyle.DotLine
 STEADY_POINTS = 2000  # speeds on the steady-state curve, plus as many again around the criticals
 RUB = 0.02  # of the span: a whirl this large pauses the simulation (a real rotor would rub)
 SPECTRUM_FRAMES = 6  # the full spectrum is recomputed every this many frames
+MEASURE_SPEED = 2.0  # × real time, at least, while a balancing measurement runs
 
 SPEED_TIP = (
     "<p>The speed the rotor ramps toward, at the ramp rate. Drag the red line on the Campbell diagram "
@@ -96,7 +99,9 @@ TAP_TIP = (
 VIEW_TIP = (
     "<p>The shaft's centre line, the disc and the bearings' springs and dampers, with the whirl "
     "magnified (the scale is in the top corner). Drag to turn the view; double-click to reset it.</p>"
-    "<p>The red dot on the disc is the heavy spot, where its unbalance is: it turns with the shaft. "
+    "<p>The red dot on the disc is the heavy spot, where its unbalance is: it turns with the shaft. The "
+    "tick across the rim is the keyphasor mark that angles are measured from, and squares are balance "
+    "weights. "
     "The thin lines are the orbits of the four stations (bearings, disc, midspan).</p>"
 )
 INTERNAL_TIP = (
@@ -117,7 +122,7 @@ KXY_TIP = (
 )
 BOW_TIP = (
     "<p>A shaft bent for good (by a thermal bow, a sag left after standing, or a bent repair), by δ at "
-    "the disc, toward an angle measured from the heavy spot in the direction of spin. It turns with the "
+    "the disc, toward an angle measured from the keyphasor mark in the direction of spin. It turns with the "
     "shaft, so it drives the rotor once per revolution like an unbalance, but with a force k δ that does "
     "not grow with speed.</p><p>Turning slowly, the probes read the bow itself (the <i>slow-roll "
     "runout</i>), and the polar plot starts from it rather than from the origin. Well above the critical "
@@ -126,7 +131,7 @@ BOW_TIP = (
 )
 SKEW_TIP = (
     "<p>The disc mounted out of square: its own axis tilted by τ from the shaft's, toward an angle "
-    "measured from the heavy spot in the direction of spin. Spinning, the tilted disc's inertia makes a "
+    "measured from the keyphasor mark in the direction of spin. Spinning, the tilted disc's inertia makes a "
     "moment (I<sub>d</sub> − I<sub>p</sub>) τ Ω² that turns with the shaft: a <i>couple unbalance</i>. "
     "It drives the disc's tilt directly, and pushes a thin disc (I<sub>p</sub> &gt; I<sub>d</sub>) toward "
     "square to the spin axis, bending the shaft at the disc by −τ at high speed.</p><p>At midspan on "
@@ -137,8 +142,8 @@ ORBIT_TIP = (
     "the B end toward A: x to the right, y up, and the shaft spinning counterclockwise (x toward y). "
     "Each plot has its own scale unless <i>Same scale</i> is ticked.</p>"
     "<p>The small hollow circles are once-per-revolution marks (a keyphasor): where the centre was "
-    "each time the heavy spot passed +x. On the disc's orbit the red line points at the heavy spot "
-    "now; the angle from the high spot (where the disc is) to the heavy spot is the phase lag, "
+    "each time the mark on the shaft passed +x (the heavy spot is at the mark unless you move it). On "
+    "the disc's orbit the red line points at the heavy spot now; the angle from the high spot (where the disc is) to the heavy spot is the phase lag, "
     "0° well below the critical speed, 90° at it and 180° well above.</p>"
 )
 
@@ -172,12 +177,15 @@ class RotorView(pg.PlotWidget):
         self.disc = QtWidgets.QGraphicsPathItem()
         self.spoke = pg.PlotCurveItem()
         self.heavy = pg.ScatterPlotItem(size=9)
+        self.weight_dots = pg.ScatterPlotItem(size=7, symbol="s")  # balance weights on the disc
+        self.mark = pg.PlotCurveItem()  # the keyphasor mark: a tick across the disc's rim
+        self.show_heavy = True
         self.stations = pg.ScatterPlotItem(size=8)
         self.triad = pg.PlotCurveItem(connect="pairs")
         self.triad_labels = [pg.TextItem(t, anchor=(0.5, 0.5)) for t in ("x", "y", "z")]
         self.end_labels = [pg.TextItem(t, anchor=(0.5, 0.0)) for t in ("A", "B")]
         for item in (self.frame, self.axis, self.supports, *self.trails, self.shaft, self.disc,
-                     self.spoke, self.heavy, self.stations, self.triad, *self.triad_labels, *self.end_labels):
+                     self.spoke, self.heavy, self.weight_dots, self.mark, self.stations, self.triad, *self.triad_labels, *self.end_labels):
             plot.addItem(item)
         self.scale_label = pg.TextItem(anchor=(1.0, 0.0))
         plot.addItem(self.scale_label)
@@ -255,6 +263,9 @@ class RotorView(pg.PlotWidget):
         self.spoke.setPen(pg.mkPen(colors.force, width=2))
         self.heavy.setBrush(pg.mkBrush(colors.force))
         self.heavy.setPen(pg.mkPen(colors.background, width=1))
+        self.weight_dots.setBrush(pg.mkBrush(colors.strong))
+        self.weight_dots.setPen(pg.mkPen(colors.background, width=1))
+        self.mark.setPen(pg.mkPen(colors.strong, width=2))
         self.stations.setPen(pg.mkPen(colors.background, width=1))
         self.triad.setPen(pg.mkPen(colors.muted, width=1))
         for label in (*self.triad_labels, *self.end_labels, self.scale_label):
@@ -262,7 +273,7 @@ class RotorView(pg.PlotWidget):
 
     # ------------------------------------------------------------- drawing
     def update_state(self, q: np.ndarray, phase: float, trails: list[np.ndarray], peak: float) -> None:
-        """Draw displacements q (8,), the heavy spot at angle `phase`, and each station's recent (x, y)."""
+        """Draw displacements q (8,) with the keyphasor mark at angle `phase`, and each station's recent (x, y)."""
         s = self.system
         # The disc's own axis: the shaft's slope there plus the skew. Its rim's wobble counts as motion.
         axis = np.array([q[2], q[6]]) + s.skew * np.array([math.cos(phase + s.skew_angle),
@@ -308,10 +319,24 @@ class RotorView(pg.PlotWidget):
         path = QtGui.QPainterPath()
         path.addPolygon(QtGui.QPolygonF([QtCore.QPointF(float(a), float(b)) for a, b in zip(rx, ry)]))
         self.disc.setPath(path)
-        spot = c + 0.8 * self.disc_radius * (math.cos(phase) * u + math.sin(phase) * v)
-        self.spoke.setData(*self.project(np.vstack([c, spot])))
-        hx, hy = self.project(spot[None, :])
-        self.heavy.setData(hx, hy)
+
+        def on_disc(angle: float, r: float) -> np.ndarray:
+            return c + r * self.disc_radius * (math.cos(angle) * u + math.sin(angle) * v)
+
+        net = s.mass_unbalance
+        if self.show_heavy and net:
+            spot = on_disc(phase + math.atan2(net.imag, net.real), 0.8)
+            self.spoke.setData(*self.project(np.vstack([c, spot])))
+            self.heavy.setData(*self.project(spot[None, :]))
+        else:
+            self.spoke.setData([], [])
+            self.heavy.setData([], [])
+        if s.weights:
+            self.weight_dots.setData(*self.project(np.array([on_disc(phase + math.atan2(w.imag, w.real), 0.92)
+                                                             for w in s.weights])))
+        else:
+            self.weight_dots.setData([], [])
+        self.mark.setData(*self.project(np.vstack([on_disc(phase, 0.88), on_disc(phase, 1.12)])))
 
         # Supports: a spring and a damper to ground below (y) and to the side wall (x) at each bearing.
         parts = []
@@ -652,7 +677,7 @@ class RotorPage(QtWidgets.QWidget):
         self.running = True
         self._stride = 1
         self._carry = 0  # steps since the last stored sample
-        self._matrices_speed = -1.0  # rpm the matrices were drawn at
+        self._matrices_speed = -math.inf  # rpm the matrices were drawn at
         self.run_up: RunUpCoastDown | None = None  # the sweep running, if any
         self.sweeps: list[TrackedSweep] = []  # every leg on the plots, the running one's too
         self._sweep_pairs = 0  # sweeps started since the plots were cleared (each pair's colour)
@@ -660,6 +685,10 @@ class RotorPage(QtWidgets.QWidget):
         self._steady_vectors = np.empty((0, len(STATIONS), 2), dtype=complex)  # and 1X vectors there
         self.onset: Onset | None = None  # where the rotor goes unstable, if it does up to MAX_RPM
         self.rubbed = False  # the whirl grew past RUB of the span and the simulation paused
+        self._weights: tuple[complex, ...] = ()  # balance weights on the disc (kg·m)
+        self._hidden: tuple[float, float] | None = None  # (unbalance, angle) kept out of the panels
+        self.measurement: SteadyMeasurement | None = None  # a balancing measurement running, if any
+        self._measured = None  # its callback, given the mean 1X vectors (4, 2)
         self._frames = 0
 
         # --- parameters
@@ -768,6 +797,7 @@ class RotorPage(QtWidgets.QWidget):
         st.addWidget(self.stability_note)
         st.addWidget(self.spectrum, 2)
         st.addWidget(self.spectrum_note)
+        self.balancing = BalancingPanel(self)
         self.matrices = QtWidgets.QTextBrowser()
         self.theory = QtWidgets.QTextBrowser()
         self.theory.setHtml(THEORY_HTML)
@@ -776,6 +806,7 @@ class RotorPage(QtWidgets.QWidget):
         self.tabs.addTab(bode_tab, "Bode plot")
         self.tabs.addTab(polar_tab, "Polar plot")
         self.tabs.addTab(stability_tab, "Stability")
+        self.tabs.addTab(self.balancing, "Balancing")
         self.tabs.addTab(self.matrices, "Equations && matrices")
         self.tabs.addTab(self.theory, "Theory")
         self.tabs.currentChanged.connect(lambda _: self._refresh_matrices())
@@ -881,9 +912,9 @@ class RotorPage(QtWidgets.QWidget):
         self.probe_direction.addItems(DIRECTION_NAMES)
         self.probe_direction.setToolTip(
             "<p>What the Bode and polar plots show: a probe reading x or y, or the orbit's major axis. "
-            "The phase lag is the angle the shaft turns from the keyphasor (the heavy spot passing +x) "
+            "The phase lag is the angle the shaft turns from the keyphasor (the mark on the shaft passing +x) "
             "to the probe's positive peak, so on a circular orbit the y probe reads 90° more than the x "
-            "probe. For the orbit, it is the angle from the heavy spot back to the high spot.</p>"
+            "probe. For the orbit, it is the angle from the mark back to the high spot.</p>"
         )
         for c in (self.probe_station, self.probe_direction):
             c.currentIndexChanged.connect(self._on_probe)
@@ -942,12 +973,17 @@ class RotorPage(QtWidgets.QWidget):
         form.addRow("Disc mass m:", self.disc_mass)
         form.addRow("Polar inertia Ip:", self.ip)
         form.addRow("Diametral inertia Id:", self.id)
-        form.addRow("Unbalance m·e:", self.unbalance)
+        self.unbalance_angle = spin(-180.0, 180.0, math.degrees(s.unbalance_angle), 0, "°")
+        self.unbalance_angle.setToolTip(
+            "<p>Where the heavy spot is: its angle from the keyphasor mark on the shaft, in the direction "
+            "of spin. The probes' phase is measured from the mark, as on a real machine.</p>"
+        )
         self.bow = spin(0.0, 5000.0, s.bow * 1e6, 1, " µm")
         self.bow_angle = spin(-180.0, 180.0, math.degrees(s.bow_angle), 0, "°")
         self.skew = spin(0.0, 10.0, math.degrees(s.skew), 3, "°")
         self.skew_angle = spin(-180.0, 180.0, math.degrees(s.skew_angle), 0, "°")
-        for size, angle, tip, label in ((self.bow, self.bow_angle, BOW_TIP, "Shaft bow δ<sub>b</sub>:"),
+        for size, angle, tip, label in ((self.unbalance, self.unbalance_angle, None, "Unbalance m·e:"),
+                                        (self.bow, self.bow_angle, BOW_TIP, "Shaft bow δ<sub>b</sub>:"),
                                         (self.skew, self.skew_angle, SKEW_TIP, "Disc skew τ:")):
             angle.setWrapping(True)
             angle.setStepType(QtWidgets.QAbstractSpinBox.StepType.DefaultStepType)
@@ -956,7 +992,7 @@ class RotorPage(QtWidgets.QWidget):
             row.addWidget(size, 3)
             row.addWidget(QtWidgets.QLabel("at"))
             row.addWidget(angle, 2)
-            for w in (size, angle):
+            for w in (size, angle) if tip else ():
                 w.setToolTip(tip)
             form.addRow(label, row)
         self.internal_damping = spin(0.0, 1e5, s.internal_damping, 1, " N·s/m")
@@ -967,7 +1003,7 @@ class RotorPage(QtWidgets.QWidget):
         mute(self.shaft_note)
         form.addRow(self.shaft_note)
         for box_ in (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip,
-                     self.id, self.unbalance, self.bow, self.bow_angle, self.skew, self.skew_angle,
+                     self.id, self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle,
                      self.internal_damping):
             box_.valueChanged.connect(self._on_params)
         return box
@@ -1042,7 +1078,10 @@ class RotorPage(QtWidgets.QWidget):
             id=self.id.value(),
             bearing_a=bearings[0],
             bearing_b=bearings[1],
-            unbalance=self.unbalance.value() / 1e6,
+            unbalance=self.unbalance.value() / 1e6 if self._hidden is None else self._hidden[0],
+            unbalance_angle=(math.radians(self.unbalance_angle.value()) if self._hidden is None
+                             else self._hidden[1]),
+            weights=self._weights,
             bow=self.bow.value() / 1e6,
             bow_angle=math.radians(self.bow_angle.value()),
             skew=math.radians(self.skew.value()),
@@ -1053,7 +1092,7 @@ class RotorPage(QtWidgets.QWidget):
     def set_system(self, system: RotorSystem) -> None:
         """Show and use `system` (for scripts and tests)."""
         boxes = (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip, self.id,
-                 self.unbalance, self.bow, self.bow_angle, self.skew, self.skew_angle, self.internal_damping,
+                 self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle, self.internal_damping,
                  self.isotropic, self.same_bearings, *(w for row in self.bearing_rows for w in row))
         for w in boxes:
             w.blockSignals(True)
@@ -1064,7 +1103,10 @@ class RotorPage(QtWidgets.QWidget):
         self.disc_mass.setValue(system.disc_mass)
         self.ip.setValue(system.ip)
         self.id.setValue(system.id)
+        self._clear_hidden()
         self.unbalance.setValue(system.unbalance * 1e6)
+        self.unbalance_angle.setValue(math.degrees(system.unbalance_angle))
+        self._weights = system.weights
         self.bow.setValue(system.bow * 1e6)
         self.bow_angle.setValue(math.degrees(system.bow_angle))
         self.skew.setValue(math.degrees(system.skew))
@@ -1080,10 +1122,55 @@ class RotorPage(QtWidgets.QWidget):
             w.blockSignals(False)
         self._on_params()
 
+    def set_weights(self, weights: tuple[complex, ...]) -> None:
+        """Put these balance weights on the disc (kg·m each), in place of any there."""
+        self._weights = tuple(weights)
+        self._on_params()
+
+    def hide_unbalance(self, unbalance: float, angle: float) -> None:
+        """Give the disc this unbalance (kg·m at `angle` rad) without showing it: a balancing exercise."""
+        self._hidden = (unbalance, angle)
+        for box in (self.unbalance, self.unbalance_angle):
+            box.blockSignals(True)
+            box.setSpecialValueText("hidden")
+            box.setValue(box.minimum())
+            box.setEnabled(False)
+            box.blockSignals(False)
+        self.set_heavy_shown(False)
+        self._on_params()
+
+    def reveal_unbalance(self) -> None:
+        """Show the hidden unbalance in the panel again, and the heavy spot."""
+        if self._hidden is None:
+            return
+        u, angle = self._hidden
+        self._clear_hidden()
+        for box, value in ((self.unbalance, u * 1e6), (self.unbalance_angle, math.degrees(angle))):
+            box.blockSignals(True)
+            box.setValue(value)
+            box.blockSignals(False)
+        self.set_heavy_shown(True)
+        self._on_params()
+
+    def _clear_hidden(self) -> None:
+        self._hidden = None
+        for box in (self.unbalance, self.unbalance_angle):
+            box.setSpecialValueText("")
+            box.setEnabled(True)
+
+    def set_heavy_shown(self, shown: bool) -> None:
+        self.view.show_heavy = shown
+        self.balancing.show_heavy.blockSignals(True)
+        self.balancing.show_heavy.setChecked(shown)
+        self.balancing.show_heavy.blockSignals(False)
+        self._draw()
+
     def _on_params(self) -> None:
+        self._matrices_speed = -math.inf  # redraw the matrices: the numbers changed
         system = self.system()
         if self.sweeps or self.run_up is not None:
             self.clear_sweeps()  # their steady-state curve is about to change
+        self.cancel_measurement()
         self.sim.set_system(system)
         self.view.set_system(system)
         self.orbits.set_midspan_shown(abs(system.position - 0.5) > 1e-9)
@@ -1125,7 +1212,7 @@ class RotorPage(QtWidgets.QWidget):
             "frequency. An isotropic rotor's unbalance drives only its forward whirl."
             + (" Crosses mark growing modes (ζ < 0), above the onset of instability (dashed)." if self.onset else "")
         )
-        self._matrices_speed = -1.0
+        self._matrices_speed = -math.inf
         self._refresh_matrices()
         self._refresh_steady()
 
@@ -1160,6 +1247,7 @@ class RotorPage(QtWidgets.QWidget):
         self._steady_rpm = w * RPM
         self._steady_vectors = steady_vectors(self.sim.system, w)
         self._draw_tracking(full=True)
+        self.balancing.refresh()
 
     def _refresh_matrices(self) -> None:
         rpm = self.sim.omega * RPM
@@ -1167,7 +1255,7 @@ class RotorPage(QtWidgets.QWidget):
             return
         self._matrices_speed = rpm
         scroll = self.matrices.verticalScrollBar().value()
-        self.matrices.setHtml(matrices_html(self.sim.system, self.sim.omega))
+        self.matrices.setHtml(matrices_html(self.sim.system, self.sim.omega, hidden=self._hidden is not None))
         self.matrices.verticalScrollBar().setValue(scroll)
 
     def apply_theme(self) -> None:
@@ -1180,11 +1268,12 @@ class RotorPage(QtWidgets.QWidget):
         self.bode.apply_theme()
         self.polar.apply_theme()
         self.sweep_plots.apply_theme()
+        self.balancing.apply_theme()
         self._draw_tracking(full=True)
         scroll = self.theory.verticalScrollBar().value()
         self.theory.setHtml(THEORY_HTML)
         self.theory.verticalScrollBar().setValue(scroll)
-        self._matrices_speed = -1.0
+        self._matrices_speed = -math.inf
         self._refresh_matrices()
         self._draw()
 
@@ -1194,6 +1283,7 @@ class RotorPage(QtWidgets.QWidget):
 
     def _on_target(self, rpm: float) -> None:
         self.stop_sweep(hold_speed=False)  # the user took over the speed
+        self.cancel_measurement()
         self.sim.target = rpm / RPM
         self.speed_slider.blockSignals(True)
         self.speed_slider.setValue(round(rpm))
@@ -1217,6 +1307,7 @@ class RotorPage(QtWidgets.QWidget):
 
     def reset(self) -> None:
         self.stop_sweep()
+        self.cancel_measurement()
         self.sim.reset()
         self.rubbed = False
         self.history.clear()
@@ -1226,6 +1317,46 @@ class RotorPage(QtWidgets.QWidget):
 
     def tap(self) -> None:
         self.sim.tap(0.0, -TAP_IMPULSE)
+
+    # ------------------------------------------------------------- balancing measurements
+    def start_measurement(self, omega: float, measured) -> None:
+        """Run at `omega` rad/s, settle and average the 1X vectors; then call measured(vectors (4, 2))."""
+        self.stop_sweep(hold_speed=False)
+        self.cancel_measurement()
+        if not self.running:
+            self._on_run()
+        self.measurement = SteadyMeasurement(self.sim, omega)
+        self._measured = measured
+        self._sync_target()
+        self._start_timer()
+
+    def cancel_measurement(self) -> None:
+        if self.measurement is None:
+            return
+        self.measurement = self._measured = None
+        self.balancing.measurement_ended()
+
+    def _advance_measurement(self, duration: float):
+        m = self.measurement
+        r = m.advance(duration)
+        if m.sim.target * RPM != self.target_rpm.value():
+            self._sync_target()
+        if m.done:
+            measured, self.measurement, self._measured = self._measured, None, None
+            measured(m.result)
+            self.balancing.measurement_ended()
+        return r
+
+    def measurement_status(self) -> str:
+        m = self.measurement
+        if m is None:
+            return ""
+        rpm = m.omega * RPM
+        if m.stage == "approach":
+            return f"Going to {rpm:,.0f} rpm…"
+        if m.stage == "settle":
+            return f"Settling at {rpm:,.0f} rpm ({max(m._settle_end - self.sim.t, 0.0):.1f} s)…"
+        return f"Measuring at {rpm:,.0f} rpm: {min(m.tracked, m.revs)} of {m.revs} revolutions"
 
     # ------------------------------------------------------------- run-up and coast-down
     def _on_sweep_button(self) -> None:
@@ -1241,6 +1372,7 @@ class RotorPage(QtWidgets.QWidget):
             self.sweep_status.setText("Pick two different speeds.")
             return
         self.stop_sweep()
+        self.cancel_measurement()
         if not self.hold_sweeps.isChecked():
             self.clear_sweeps()
         self.run_up = RunUpCoastDown(self.sim, start, turn)
@@ -1426,7 +1558,8 @@ class RotorPage(QtWidgets.QWidget):
         now = self._clock.elapsed() / 1000.0
         dt = min(now - self._last, 0.1)
         self._last = now
-        self.step(dt * float(self.sim_speed.currentData()))
+        speed = float(self.sim_speed.currentData())
+        self.step(dt * (max(speed, MEASURE_SPEED) if self.measurement is not None else speed))
         if self.isVisible() and self.running:
             self._timer.start()
 
@@ -1435,6 +1568,8 @@ class RotorPage(QtWidgets.QWidget):
         self._target_t = min(self._target_t + duration, self.sim.t + 0.1 + duration)
         if self.run_up is not None:
             r = self._advance_sweep(self._target_t - self.sim.t)
+        elif self.measurement is not None:
+            r = self._advance_measurement(self._target_t - self.sim.t)
         else:
             r = self.sim.advance(self._target_t - self.sim.t)
         if r.t.size:
@@ -1446,6 +1581,7 @@ class RotorPage(QtWidgets.QWidget):
                 self.history.extend(r.t[pick], self._columns(r.q[pick], r.phase[pick], r.omega[pick]))
         if self.running and np.abs(self.sim.q[[XA, XD, XB, YA, YD, YB]]).max() > RUB * self.sim.system.length:
             self.stop_sweep()
+            self.cancel_measurement()
             self._on_run()  # pause
             self.rubbed = True
         self._draw()
@@ -1472,7 +1608,8 @@ class RotorPage(QtWidgets.QWidget):
         self.view.update_state(sim.q, sim.phase, trails, peak)
         steady = sim.omega == sim.target and w > 0
         r_disc = math.hypot(here[2], here[3])
-        self.orbits.update_orbits(trails, keys, sim.phase if w > 0 else None)
+        heavy = self._heavy_angle()
+        self.orbits.update_orbits(trails, keys, heavy if w > 0 else None)
 
         t, hist = self.history.window(self.window.value())
         st = self.station.currentIndex()
@@ -1480,6 +1617,7 @@ class RotorPage(QtWidgets.QWidget):
         self.campbell_plot.set_speed(sim.omega * RPM)
         self.stability_map.set_speed(sim.omega * RPM)
         self._draw_tracking()
+        self.balancing.update_status()
         self._frames += 1
         if self.tabs.currentWidget() is self.spectrum.parentWidget() and (
                 self._frames % SPECTRUM_FRAMES == 0 or not self.running):
@@ -1502,8 +1640,9 @@ class RotorPage(QtWidgets.QWidget):
                 text += ", whirling " + ("forward" if swept > 0 else "backward")
             parts.append(text)
         growing = self.onset is not None and sim.omega >= self.onset.omega and least_damped(sim.system, w)[0] < 0
-        if steady and not growing and r_disc > 1e-3 * max(sim.system.unbalance / sim.system.disc_mass, MIN_PEAK):
-            lag = math.degrees(sim.phase - math.atan2(here[3], here[2])) % 360.0
+        if (heavy is not None and steady and not growing
+                and r_disc > 1e-3 * max(abs(sim.system.mass_unbalance) / sim.system.disc_mass, MIN_PEAK)):
+            lag = math.degrees(heavy - math.atan2(here[3], here[2])) % 360.0
             parts.append(f"heavy spot leads the high spot by {lag:.0f}°")
         if growing:
             zeta, f, _ = least_damped(sim.system, w)
@@ -1518,6 +1657,13 @@ class RotorPage(QtWidgets.QWidget):
                 "seals or wreck its bearings. The model is linear, so it would grow for ever. Lower the target "
                 "below the onset and Reset.</span>")
         self.readout.setText(" · ".join(parts))
+
+    def _heavy_angle(self) -> float | None:
+        """The heavy spot's angle now (rad), or None if it is hidden or there is no unbalance."""
+        net = self.sim.system.mass_unbalance
+        if not self.view.show_heavy or not net:
+            return None
+        return self.sim.phase + math.atan2(net.imag, net.real)
 
     def _draw_spectrum(self) -> None:
         """The full spectrum at the strip chart's station over the strip chart's window."""

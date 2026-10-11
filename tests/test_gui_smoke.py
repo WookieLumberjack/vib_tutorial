@@ -1645,6 +1645,43 @@ def test_rotor_page(app):
     assert abs(p._steady_vectors[0, 1, 0]) == pytest.approx(30e-6, rel=1e-2)  # the slow-roll runout
     w.set_theme("Light")
 
+    # Balancing: a hidden unbalance, found in four measured steps and cancelled by one weight.
+    p.set_system(RotorSystem())
+    b = p.balancing
+    b._rng = np.random.default_rng(3)
+    b.new_mystery()
+    hidden_u = p.sim.system.mass_unbalance
+    assert p.unbalance.text() == "hidden" and not p.unbalance.isEnabled() and not p.view.show_heavy
+    p.tabs.setCurrentWidget(p.matrices)
+    p._refresh_matrices()
+    assert "hidden" in p.matrices.toPlainText() and f"{abs(hidden_u) * 1e6:.4g} g·mm" not in p.matrices.toPlainText()
+    p.tabs.setCurrentWidget(b)
+    p.ramp.setValue(5000.0)
+    for i, button in enumerate(b.step_buttons):
+        assert button.isEnabled()
+        button.click()
+        assert p.measurement is not None and not button.isEnabled()
+        for _ in range(400):
+            p.step(0.05)
+            if p.measurement is None:
+                break
+        assert p.measurement is None
+    assert len(p.sim.system.weights) == 1  # the trial is off, the correction on
+    assert p.sim.system.mass_unbalance == pytest.approx(0.0, abs=0.02 * abs(hidden_u))
+    assert abs(b.reading("verify")) < 0.02 * abs(b.reading("found"))
+    assert "Correction" in b.results.text() and "Check" in b.results.text()
+    b.station.setCurrentIndex(1)  # the readings are kept at every station: switch the probe after
+    assert abs(b.reading("verify")) < 0.02 * abs(b.reading("found"))
+    p.reveal_unbalance()
+    assert p.unbalance.isEnabled() and p.unbalance.value() == pytest.approx(abs(hidden_u) * 1e6, abs=0.05)
+    assert p.view.show_heavy and b.show_heavy.isChecked()
+    b.remove_weights()
+    assert p.sim.system.weights == () and b.reading("found") is None
+    # Taking over the speed cancels a measurement.
+    b.step_buttons[1].click()
+    p.set_target_rpm(700.0)
+    assert p.measurement is None and b.step_buttons[1].isEnabled()
+
     # Stability: internal damping makes it unstable above an onset speed, marked on the Campbell
     # diagram and the stability map; past it a tap grows at the natural frequency until it pauses.
     p.set_system(RotorSystem())

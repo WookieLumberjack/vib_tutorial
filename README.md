@@ -514,6 +514,14 @@ space with the same exact first-order-hold update as the chain, as the speed ram
   starts from it, and well above the critical the disc settles on the bearings' axis. Against
   the unbalance it adds or cancels, depending on its angle. The skew τ is a couple unbalance,
   a moment (I<sub>d</sub> − I<sub>p</sub>)τΩ² on the disc's tilt.
+- **Single-plane balancing**: the field procedure by influence coefficients. Read the slow
+  roll, the 1X vector as found, then with a trial weight, and the page works out the
+  correction weight (grams at a radius and an angle from the keyphasor mark), puts it on and
+  checks it. Each reading is a measurement on the running simulation: ramp, settle, average
+  ten revolutions. *Mystery unbalance* hides the heavy spot to find. The response before and
+  after against speed shows what one weight can and cannot do: subtract the slow roll and a
+  bowed rotor is balanced at every speed, leaving only its runout; balance the raw reading and
+  it is out of balance away from the balancing speed; a skewed disc's couple needs two planes.
 - **Campbell diagram**: the damped natural frequencies against speed, coloured by whirl
   direction, with the 1X line and the critical speeds, and the onset of instability with the
   growing modes crossed. Drag the speed line to set the target.
@@ -529,7 +537,8 @@ space with the same exact first-order-hold update as the chain, as the speed ram
 - **Theory**: the classic case, heavy and high spot, the gyroscopic effect, forward and
   backward whirl, anisotropic supports, run-ups through a critical speed (why a fast ramp
   peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²), the bent
-  shaft (slow-roll runout, why it is subtracted before balancing) and the couple unbalance,
+  shaft (slow-roll runout, why it is subtracted before balancing), the couple unbalance,
+  single-plane balancing by influence coefficients,
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
   c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whip), and why the solution
   uses state space.
@@ -555,6 +564,13 @@ A bent shaft drives the rotor with a force that does not grow with speed. Turnin
 probes read the bow itself, so the polar curve starts from the bow, not from the origin. Here
 the bow points opposite the heavy spot: its response falls as the unbalance's grows, and they
 cancel at one speed. That is why the slow-roll vector is subtracted before balancing.
+
+![Balancing tab: a rotor with a 20 µm shaft bow at 90° and the 20 g·mm unbalance, balanced at 1200 rpm with a probe at the disc and the slow roll subtracted. The trial weight gives the influence coefficient 1.33 µm per g·mm, the correction is 1.41 g at 20 mm and 225°, and afterwards the disc reads its 20 µm runout at every speed, where as found it peaked at 293 µm at the critical](docs/images/jeffcott_balancing.png)
+
+Balancing a bowed rotor shows why the slow roll is subtracted first. Relative to its bent shape,
+a bowed shaft sees an unbalance m·δ<sub>b</sub>, so one weight removes every force the bow makes,
+at every speed. What remains is the runout itself, which no weight removes and which makes no
+force.
 
 ![Jeffcott rotor's stability map and full spectrum with internal damping 20 N·s/m: the forward mode's damping crosses zero at 3910 rpm, and at 5000 rpm a tap grows into a forward whirl at 26.9 Hz, 0.32× the speed](docs/images/jeffcott_stability.png)
 
@@ -703,6 +719,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/rotor_sweep.py`: run-up and coast-down: the steady-state 1X vectors at each station,
   once-per-revolution tracking of the 1X vector and peak (`RevolutionTracker`), and
   `RunUpCoastDown`, which drives the stepper through a sweep and records each leg.
+- `core/rotor_balance.py`: single-plane balancing: influence coefficient, correction weight,
+  and `SteadyMeasurement`, which runs the stepper at a speed, lets it settle and averages the
+  1X vector over some revolutions.
 - `core/rotor_stability.py`: the least damped mode, the onset speed of instability (swept,
   then bisected), the log decrement, and the full spectrum of an orbit.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
@@ -807,6 +826,7 @@ M, C, G, K = rotor.matrices()                                  # 8x8; M q'' + (C
 [(w * RPM, whirl) for w, whirl, zeta in campbell(rotor, 1000.0).criticals]  # rpm, +1 forward
 Q = synchronous_response(rotor, np.array([150.0]))             # steady whirl at 150 rad/s, complex (1, 8)
 bent = rotor.with_(bow=10e-6, bow_angle=np.pi, skew=np.radians(0.1))  # bow against the heavy spot, disc skewed
+weighted = rotor.with_(weights=(2e-5 * np.exp(1j * np.pi),))  # a 20 g·mm balance weight at 180° from the mark
 spin = RotorSimulator(rotor)
 spin.target = 3000 / RPM                                       # ramps at spin.accel (rad/s²)
 r = spin.advance(0.25)                                         # r.t, r.q (steps, 8), r.omega, r.phase
@@ -824,6 +844,14 @@ from vib_tutorial.core.rotor_stability import full_spectrum, stability_onset
 unstable = RotorSystem(internal_damping=20.0, bearing_a=Bearing(kxy=5e3))  # H = unstable.circulatory()
 onset = stability_onset(unstable, 1000.0)                      # Onset(omega, freq_hz, whirl) or None
 f, amp = full_spectrum(r.t, r.q[:, [1, 5]])                    # disc orbit: +f forward, −f backward
+
+from vib_tutorial.core.rotor_balance import SteadyMeasurement, correction, influence, weight
+
+v0 = probe(SteadyMeasurement(spin, 1200 / RPM).run()[1], "x")  # disc, x probe: settled 1X reading
+trial = weight(0.5e-3, 0.02, 0.0)                              # 0.5 g at 20 mm, at the mark (kg·m)
+spin.set_system(rotor.with_(weights=(trial,)))
+v1 = probe(SteadyMeasurement(spin, 1200 / RPM).run()[1], "x")
+W = correction(v0, influence(v0, v1, trial))                   # the weight that cancels v0 (kg·m)
 ```
 
 ## Ideas for extension
