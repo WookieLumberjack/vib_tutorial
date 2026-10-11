@@ -8,13 +8,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .rotor import Bearing, RotorSystem
+from .rotor import STEEL, Bearing, RotorSystem
 
 # The overhung rotor: a 3 kg disc of radius 150 mm (I_p = m R²/2, I_d = m R²/4), 100 mm past
 # bearing B, on stiffer supports so that the shaft, not the supports, does the bending.
 OVERHUNG_MASS = 3.0  # kg
 OVERHUNG_RADIUS = 0.15  # m
 OVERHUNG_BEARING = Bearing(kx=2e5, ky=2e5, cx=400.0, cy=400.0)
+# The long shaft: a 2 kg disc of radius 80 mm on a 1 m steel shaft of 20 mm (2.47 kg), on stiff supports.
+LONG_MASS = 2.0  # kg
+LONG_RADIUS = 0.08  # m
+LONG_BEARING = Bearing(kx=1e6, ky=1e6, cx=200.0, cy=200.0, mass=0.5)
 
 
 @dataclass(frozen=True)
@@ -28,6 +32,7 @@ class RotorPreset:
 
 def rotor_presets() -> list[RotorPreset]:
     m, r = OVERHUNG_MASS, OVERHUNG_RADIUS
+    m2, r2 = LONG_MASS, LONG_RADIUS
     return [
         RotorPreset(
             "Classic Jeffcott rotor", RotorSystem(), 10_000.0, 1000.0,
@@ -54,6 +59,15 @@ def rotor_presets() -> list[RotorPreset]:
             "A large disc 100 mm past bearing B tilts as much as it moves, so the gyroscopic moment "
             "dominates: the first mode, 870 rpm at rest, meets 1X backward at 664 rpm and forward at "
             "1284 rpm, the only one the unbalance drives.",
+        ),
+        RotorPreset(
+            "Long shaft, with its mass",
+            RotorSystem(length=1.0, diameter=0.02, position=0.3, disc_mass=m2, ip=m2 * r2 * r2 / 2,
+                        id=m2 * r2 * r2 / 4, bearing_a=LONG_BEARING, bearing_b=LONG_BEARING, density=STEEL),
+            10_000.0, 2500.0,
+            "A 2 kg disc on a 1 m shaft that weighs more than it does (2.47 kg). With the shaft's mass the "
+            "critical speeds are 1589 and 6582 rpm. The Jeffcott model, its shaft massless (dashed on the "
+            "Campbell diagram), puts the first at 2146 rpm and misses the second, the shaft's own bending.",
         ),
         RotorPreset(
             "Fluid-film bearings (oil whip)",

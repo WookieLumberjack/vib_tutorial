@@ -6,7 +6,7 @@ import math
 
 import numpy as np
 
-from ..core.rotor import DOF_NAMES, RPM, XD, YD, RotorSystem, whirl_modes
+from ..core.rotor import DOF_NAMES, MODE_LIMIT, RPM, XD, YD, RotorSystem, whirl_modes
 from .cms_notes import fmt
 from .style import colors
 
@@ -50,22 +50,27 @@ def _num(v: float, scale: float) -> str:
 def _matrix(A: np.ndarray, labels: list[str], groups: list[str], title: str) -> str:
     """An HTML table of A with labelled rows and columns, its cells tinted by block (see _legend)."""
     scale = float(np.abs(A).max()) if A.size else 1.0
-    head = "".join(f"<th>{c}</th>" for c in labels)
-    out = [f"<table border='1' cellspacing='0' cellpadding='3'><tr><th>{title}</th>{head}</tr>"]
+    # Unwrapped: a wide matrix (a shaft with mass) scrolls sideways rather than breaking its numbers.
+    nowrap = "white-space:nowrap"
+    head = "".join(f"<th style='{nowrap}'>{c}</th>" for c in labels)
+    out = [f"<table border='1' cellspacing='0' cellpadding='3'><tr><th style='{nowrap}'>{title}</th>{head}</tr>"]
     for r, (label, rg) in enumerate(zip(labels, groups)):
         cells = []
         for c, cg in enumerate(groups):
             text = _num(A[r, c], scale)
-            color = f" style='color:{colors.grey}'" if text == "0" else ""
+            style = nowrap + (f"; color:{colors.grey}" if text == "0" else "")
             tint = colors.block_tints[tuple(sorted((rg, cg)))]
-            cells.append(f"<td align='right' bgcolor='{tint}'{color}>{text}</td>")
-        out.append(f"<tr><th>{label}</th>{''.join(cells)}</tr>")
+            cells.append(f"<td align='right' style='{style}' bgcolor='{tint}'>{text}</td>")
+        out.append(f"<tr><th style='{nowrap}'>{label}</th>{''.join(cells)}</tr>")
     out.append("</table>")
     return "".join(out)
 
 
-def _mat(A: np.ndarray, title: str) -> str:
-    return _matrix(A, LABELS, GROUPS, title)
+def _labels(system: RotorSystem) -> tuple[list[str], list[str]]:
+    """q's labels and blocks: the stations, then each plane's shaft modal coordinates ξ."""
+    r = range(1, system.modes_kept + 1)
+    return (LABELS + [f"ξ<sub>x{k}</sub>" for k in r] + [f"ξ<sub>y{k}</sub>" for k in r],
+            GROUPS + ["i"] * len(r) + ["b"] * len(r))
 
 
 def matrices_html(system: RotorSystem, omega: float, hidden: bool = False) -> str:
@@ -76,9 +81,16 @@ def matrices_html(system: RotorSystem, omega: float, hidden: bool = False) -> st
     M, C, G, K = system.matrices()
     H = system.circulatory()
     s = system
+    labels, groups = _labels(s)
+
+    def _mat(A: np.ndarray, title: str) -> str:
+        return _matrix(A, labels, groups, title)
+
     ks = s.shaft_stiffness()
+    kept = s.modes_kept
     one = ["w<sub>A</sub>", "w<sub>D</sub>", "θ<sub>D</sub>", "w<sub>B</sub>"]
-    shaft = _matrix(ks, one, ["i"] * 4, "K<sub>shaft</sub>")
+    one += [f"ξ<sub>{k}</sub>" for k in range(1, kept + 1)]
+    shaft = _matrix(ks, one, ["i"] * len(one), "K<sub>shaft</sub>")
     modes = whirl_modes(system, omega)
     rows = []
     for r, (f, z, w) in enumerate(zip(modes.freq_hz, modes.zeta, modes.whirl)):
@@ -99,6 +111,31 @@ def matrices_html(system: RotorSystem, omega: float, hidden: bool = False) -> st
         elements = (f"Two Euler–Bernoulli beam elements, A to the disc (a = {s.a:.4g} m) and the disc to B "
                     f"(b = {s.b:.4g} m), with EI = {s.ei:.4g} N·m².")
         disc_k = f"3EIL/(a²b²) = {s.disc_stiffness:,.0f} N/m"
+    n_el = s.nodes.size - 1
+    if s.density:
+        freqs = ", ".join(f"{f:,.0f}" for f in s.fixed_interface_freqs) or "none"
+        elements = (
+            f"The shaft has mass, {s.shaft_mass:.3g} kg ({s.density:,.0f} kg/m³): it is {n_el} Euler–Bernoulli "
+            f"beam elements, with {'lumped' if s.lumped else 'consistent'} mass and their sections' rotary "
+            f"inertia, a displacement and a slope at every node. That model is reduced (Craig–Bampton): the "
+            f"stations' DOFs are kept, and the rest of the shaft moves as the static shape they give it plus "
+            f"its {kept} lowest mode{'s' if kept != 1 else ''} with the stations held, up to {MODE_LIMIT:,.0f} Hz "
+            f"({freqs} Hz). Each mode's mass-normalized amplitude ξ is a DOF of its own, in both planes. "
+            + elements.replace("Two Euler–Bernoulli beam elements", "Without the extra nodes, the stretches are")
+        )
+        mass_text = (f"M is no longer diagonal: the shaft's mass couples the stations and its modes. The disc's "
+                     f"mass m and I<sub>d</sub>, and the journals', are added on their own DOFs.")
+        gyro_text = (f"G has ±I<sub>p</sub> = ±{s.ip:.4g} kg·m² on the disc's slopes and the shaft's own sections' "
+                     f"(twice their rotary inertia), joining each plane to the other.")
+        condensed = ("The stations' block of K<sub>shaft</sub> is the shaft's exact static stiffness, as for the "
+                     "massless shaft; each mode adds its ω² alone on the diagonal (mass normalized).")
+    else:
+        mass_text = ("M is diagonal: the journal masses, the disc's mass m on its displacements and its diametral "
+                     "inertia I<sub>d</sub> on its slopes.")
+        gyro_text = (f"G has just two entries, ±I<sub>p</sub> = ±{s.ip:.4g} kg·m², joining the disc's two slopes, "
+                     f"one plane to the other.")
+        condensed = ("The bearings carry no moment, so the slopes at A and B are condensed out (they follow the "
+                     "four DOFs kept).")
     kxy_a, kxy_b = s.cross_coupling(omega)
     if s.bearing_a.swirl or s.bearing_b.swirl:
         swirl = (f" With fluid swirl the cross-coupling grows with the speed, k<sub>xy</sub> + λcΩ, and that part "
@@ -113,12 +150,17 @@ def matrices_html(system: RotorSystem, omega: float, hidden: bool = False) -> st
         gravity = (
             f"<h4>Gravity</h4><p>On a horizontal rotor f also holds the weights, constant: "
             f"−m<sub>A</sub>g, −mg and −m<sub>B</sub>g on y<sub>A</sub>, y<sub>D</sub> and y<sub>B</sub> "
-            f"(here {fmt(s.disc_mass * s.gravity, 1.0)} N on the disc). They hold the rotor at the static "
+            f"(here {fmt(s.disc_mass * s.gravity, 1.0)} N on the disc)"
+            + (f", and the shaft's own weight, {fmt(s.shaft_mass * s.gravity, 1.0)} N, spread over the stations "
+               f"and its modes" if s.density else "") + f". They hold the rotor at the static "
             f"deflection q<sub>s</sub> = (K + ΩH)<sup>−1</sup>f<sub>g</sub>, here the disc at "
             f"({qs[XD] * 1e6:.4g}, {qs[YD] * 1e6:.4g}) µm, about which it vibrates as without gravity.</p>"
         )
     else:
         gravity = ""
+    modal = (f", then the shaft's modal coordinates ξ, {kept} in each plane (in √kg·m: the modes are mass "
+             f"normalized, so a mode moving alone has kinetic energy ½ξ̇²)" if kept else "")
+    rigid = " (ξ = 0: a rigid motion is a static shape)" if kept else ""
     net = s.mass_unbalance
     if hidden:
         unbalance, force = "The unbalance (hidden: find it on the <i>Balancing</i> tab)", "hidden"
@@ -135,12 +177,11 @@ def matrices_html(system: RotorSystem, omega: float, hidden: bool = False) -> st
 <p>q = [x<sub>A</sub>, x<sub>D</sub>, θ<sub>x</sub>, x<sub>B</sub> | y<sub>A</sub>, y<sub>D</sub>,
 θ<sub>y</sub>, y<sub>B</sub>]: the journals' displacements at A and B, the disc's displacement, and the
 shaft's slope at the disc (θ<sub>x</sub> = dx/dz, θ<sub>y</sub> = dy/dz), first in the horizontal x–z
-plane, then in the vertical y–z plane. Units: m and rad; forces in N, moments in N·m.</p>
+plane, then in the vertical y–z plane{modal}. Units: m and rad; forces in N, moments in N·m.</p>
 {_legend()}
 
 <h4>Mass M and stiffness K</h4>
-<p>M is diagonal: the journal masses, the disc's mass m on its displacements and its diametral
-inertia I<sub>d</sub> on its slopes. K is the shaft's bending stiffness plus each support spring on its
+<p>{mass_text} K is the shaft's bending stiffness plus each support spring on its
 journal. Only the bearings' cross-coupled stiffness k<sub>xy</sub> joins the two planes, as
 K[x, y] = k<sub>xy</sub> and K[y, x] = −k<sub>xy</sub> at each journal (here
 {fmt(s.bearing_a.kxy, 1.0)} N/m at A and {fmt(s.bearing_b.kxy, 1.0)} N/m at B). That part is
@@ -149,17 +190,16 @@ two identical blocks.{swirl}</p>
 {_mat(M, "M")}<br>{_mat(K, "K")}
 
 <h4>The shaft (one plane)</h4>
-<p>{elements} The bearings carry no moment, so the slopes at A and B are
-condensed out (they follow the four DOFs kept). Moving the whole shaft sideways, or tilting it rigidly,
-takes no force: K<sub>shaft</sub>[1, 1, 0, 1]<sup>T</sup> = 0 and K<sub>shaft</sub>[0, a, 1, L]<sup>T</sup> = 0.
+<p>{elements} {condensed} Moving the whole shaft sideways, or tilting it rigidly,
+takes no force: K<sub>shaft</sub>[1, 1, 0, 1]<sup>T</sup> = 0 and K<sub>shaft</sub>[0, a, 1, L]<sup>T</sup> = 0{rigid}.
 The supports hold it.</p>
 {shaft}
 
 <h4>Damping C and the gyroscopic matrix Ω G</h4>
 <p>C has the support dampers, and the shaft's internal damping η K<sub>shaft</sub> in each plane
 (η = c<sub>i</sub>/k<sub>disc</sub> = {s.loss_time:.4g} s, so that it is c<sub>i</sub> =
-{s.internal_damping:g} N·s/m on the disc's own stiffness k<sub>disc</sub> = {disc_k}). G has just two entries, ±I<sub>p</sub> = ±{s.ip:.4g} kg·m², joining
-the disc's two slopes, one plane to the other. It is <b>skew-symmetric</b> (G<sup>T</sup> = −G), so
+{s.internal_damping:g} N·s/m on the disc's own stiffness k<sub>disc</sub> = {disc_k}). {gyro_text}
+It is <b>skew-symmetric</b> (G<sup>T</sup> = −G), so
 q̇<sup>T</sup>(ΩG)q̇ = 0: unlike C, it takes no power out. It only turns the motion from one plane into
 the other, and it grows with the speed.</p>
 {_mat(C, "C")}<br>{_mat(omega * G, "Ω G")}
@@ -178,7 +218,7 @@ and past the onset the whirl grows.</p>
 <p>With z = [q, q̇] the equations become z' = A(Ω) z + B u, u = f the force (or moment) on each
 DOF, B = [0 ; M<sup>−1</sup>]:</p>
 <p align='center'>A(Ω) = [ 0 &nbsp; I ; −M<sup>−1</sup>(K + ΩH) &nbsp; −M<sup>−1</sup>(C + ΩG) ]</p>
-<p>A is 16 × 16 and not symmetric, and its eigenvalues λ = −ζω<sub>n</sub> ± iω<sub>d</sub> come in
+<p>A is {2 * s.n_dof} × {2 * s.n_dof} and not symmetric, and its eigenvalues λ = −ζω<sub>n</sub> ± iω<sub>d</sub> come in
 conjugate pairs. The modes at this speed, lowest first:</p>
 <table border='1' cellspacing='0' cellpadding='3'>
 <tr><th>Mode</th><th>λ [1/s]</th><th>f<sub>d</sub> [Hz]</th><th>f<sub>d</sub> [rpm]</th><th>ζ</th>
@@ -221,7 +261,8 @@ horizontal (x) and vertical (y) directions, and the disc can tilt as well as mov
 <p>The shaft spins about its axis z. In each plane, x–z and y–z, four numbers describe its bending: the
 journal displacements at bearings A and B, the disc's displacement, and the shaft's slope at the disc.
 That makes 8 DOFs and, in state space, 16 states. The midspan's motion (and the shaft's shape anywhere)
-follows from these: between the stations a massless beam bends as a cubic.</p>
+follows from these: between the stations a massless beam bends as a cubic. (A shaft with mass needs more:
+see <i>The shaft's own mass</i> below.)</p>
 
 <h3>The classic case: disc at midspan</h3>
 <p>With the disc at midspan on identical bearings the problem is symmetric about the disc: its
@@ -523,6 +564,37 @@ smear. Analysers get round this by <i>order tracking</i>: sampling at fixed shaf
 keyphasor, so 1X stays in one bin whatever the speed. The Bode plot's once-per-revolution 1X vector is
 that kind of measurement.</p>
 
+<h3>The shaft's own mass: beam finite elements</h3>
+<p>Jeffcott's shaft has no mass: it only holds the disc. That keeps the model small, because a massless
+shaft bends as a cubic between the stations, so four DOFs in each plane describe it exactly. Tick
+<i>Shaft mass</i> and the shaft gets its mass, spread along it, and its sections' rotary inertia (and
+their gyroscopic moment). Its shape is then no longer set by the stations alone, so it is cut into beam
+<b>finite elements</b>: each bends as a cubic between two nodes, and each node has a displacement and a
+slope in each plane.</p>
+<p>A light shaft changes little. The defaults' steel shaft weighs 0.31 kg beside the 1 kg disc, and
+takes the first critical speed from 1584 to 1458 rpm. The old rule adds 17/35 of a simply supported
+shaft's mass to the disc (Rayleigh's method, with the shaft's static deflected shape), which gives 1477
+rpm. But a shaft has bending modes of its own, and a heavier one brings them down into the speed range.
+In the <i>Long shaft</i> preset (a 2 kg disc on a 1 m, 20 mm shaft of 2.47 kg) the critical speeds
+are 1589 and 6582 rpm. The massless model puts the first at 2146 rpm, 35% high, and has no second:
+its next modes are the journals bouncing on their supports, heavily damped. The Campbell diagram draws
+the massless model's branches dashed beside the real ones. Gravity shows it too: the disc sags 375 µm,
+not the massless model's 200 µm.</p>
+<p><b>Consistent or lumped mass.</b> The consistent mass matrix spreads each element's mass with the
+same cubic shapes as its stiffness. It is a Rayleigh–Ritz model, so at rest and undamped its frequencies
+are never too low, and they come down as elements are added: on the <i>Long shaft</i> the second
+critical comes out at 7393, 6591 and 6582 rpm with 2, 4 and 8 elements. A lumped mass matrix, half of
+each element's mass at each end, is simpler but has no such bound. Here it gives 8187, 6733 and 6620 rpm:
+with few elements much of the mass sits on the bearings, where it hardly moves.</p>
+<p><b>Keeping it fast.</b> Every element adds modes. The highest are at tens of kHz, far above
+anything the rotor does at these speeds, but the time stepping would still have to resolve them. So the
+model is reduced the way the <i>Substructuring</i> page reduces a substructure (Craig–Bampton). The
+stations' DOFs are kept as they are. The rest of the shaft moves in the static shape they give it, which
+is all a massless shaft ever does, plus its lowest modes with the stations held, up to 1000 Hz. Those
+modes' amplitudes ξ join q, after the stations. The reduced model's modes are within 0.2% of the full
+element model's below 500 Hz, and within 1% up to 1000 Hz (60,000 rpm, the top of the speed range).
+With a massless shaft there are no such modes, and the reduction is exactly the Jeffcott model.</p>
+
 <h3>Why state space</h3>
 <p>Undamped modes and modal superposition need symmetric M, C and K, and real modes that do not change.
 Here ΩG is skew-symmetric and changes with the speed, and support damping is not proportional, so the
@@ -591,6 +663,10 @@ every</i> 0.5 s, then set the target to 2,500 rpm and watch the <i>Waterfall</i>
 follow the dots of the forward and backward branches (backward from 14.5 down to 5.7 Hz), and the 1X ridge
 grows where it crosses the forward branch. Switch to <i>Time</i> and set a steady speed: the taps' peaks
 then stay at one frequency.</li>
+<li>Load the <i>Long shaft</i> preset and run up from 800 to 8000 rpm at 1000 rpm/s. Past 6582 rpm the
+shaft bends in its second mode, the one the dashed massless model doesn't have. Then set <i>Beam
+elements</i> to 2 and to 4, consistent and lumped, and watch the second critical move on the Campbell
+diagram.</li>
 <li>Pause near the critical speed and turn the 3D view: the shaft bows in one plane, which turns with
 the spin, rather than flapping back and forth.</li>
 </ol>
@@ -606,9 +682,10 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>θ<sub>x</sub>, θ<sub>y</sub></td><td>shaft's slope at the disc, dx/dz and dy/dz</td><td>rad</td></tr>
 <tr><td>Ω, φ</td><td>spin speed; angle of the keyphasor mark on the shaft from +x (φ' = Ω)</td><td>rad/s (rpm), rad</td></tr>
 <tr><td>U = m e, ψ</td><td>unbalance: disc mass times its centre of mass's offset e; the heavy spot's angle from the mark</td><td>kg·m (g·mm), rad</td></tr>
-<tr><td>M, C, G, K</td><td>mass, damping, gyroscopic and stiffness matrices (8 × 8)</td><td>—</td></tr>
+<tr><td>M, C, G, K</td><td>mass, damping, gyroscopic and stiffness matrices (8 × 8 for a massless shaft)</td><td>—</td></tr>
+<tr><td>ρ, ξ</td><td>the shaft's density; the amplitudes of its modes with the stations held (mass normalized)</td><td>kg/m³, √kg·m</td></tr>
 <tr><td>g, f<sub>g</sub>, q<sub>s</sub></td><td>gravity; the weights on the journals and the disc; the static deflection under them</td><td>m/s², N, m</td></tr>
-<tr><td>A(Ω), B</td><td>state matrix (16 × 16) and input matrix</td><td>—</td></tr>
+<tr><td>A(Ω), B</td><td>state matrix (16 × 16 for a massless shaft) and input matrix</td><td>—</td></tr>
 <tr><td>ω<sub>c</sub></td><td>critical speed</td><td>rad/s (rpm)</td></tr>
 <tr><td>ζ</td><td>damping ratio of a mode, −Re λ / |λ|</td><td>—</td></tr>
 <tr><td>α</td><td>angular acceleration of a ramp, Ω'</td><td>rad/s² (rpm/s)</td></tr>

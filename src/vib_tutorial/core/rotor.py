@@ -22,6 +22,23 @@ in y, which may differ (anisotropic supports) and may differ between A and B.
 The disc has mass m, polar moment of inertia Ip (about the spin axis) and
 diametral moment Id (about a diameter).
 
+The shaft may also have mass (density ρ > 0), which the Jeffcott model leaves
+out. It is then a beam finite element model: `elements` Euler–Bernoulli
+elements along it (Rayleigh beams: the sections' rotary inertia and their own
+gyroscopic moment included), with a consistent or a lumped mass matrix. Every
+node has a displacement and a slope in each plane, so the model has many more
+DOFs, and its highest modes are far above anything the page shows (tens of
+kHz, which the time stepping would have to resolve). So it is reduced, Craig–
+Bampton style: the four stations' DOFs are kept as they are, and the rest of
+the shaft moves as their static shape (exactly what the massless shaft does)
+plus its lowest few modes with the stations held (the fixed-interface modes,
+up to MODE_LIMIT). q is then
+
+    [x_A, x_D, θx, x_B, y_A, y_D, θy, y_B, ξ_x1, ..., ξ_xr, ξ_y1, ..., ξ_yr],
+
+the stations first, as before, then the r modal coordinates of each plane. With
+a massless shaft r = 0 and the reduction is exactly the condensation above.
+
 The rotor spins at Ω (rad/s) about +z, turning x toward y. A tilted, spinning
 disc has angular momentum Ip Ω along its tilted axis; turning that axis takes a
 moment, the gyroscopic moment. It enters the equations of motion through the
@@ -100,10 +117,13 @@ import scipy.linalg
 
 from .simulator import MAX_STEP, MAX_STEPS_PER_ADVANCE, STEPS_PER_PERIOD, foh_discretize
 
-N_DOF = 8
-# Index of each DOF in q.
+N_DOF = 8  # the stations' DOFs, the first of q (a shaft with mass adds its modal coordinates after them)
+# Index of each station DOF in q.
 XA, XD, TX, XB, YA, YD, TY, YB = range(N_DOF)
 DOF_NAMES = ("x_A", "x_D", "θx", "x_B", "y_A", "y_D", "θy", "y_B")
+STEEL = 7850.0  # kg/m³
+MODE_LIMIT = 1000.0  # Hz: the shaft's fixed-interface modes are kept up to this frequency (the top speed: 60,000 rpm)
+MAX_MODES = 12  # and at most this many in each plane
 CHUNK_TIME = 2e-3  # s; while the speed ramps, A(Ω) is held over chunks this long
 RPM = 60.0 / (2.0 * math.pi)  # rpm per rad/s
 MIN_GAP = 1e-3  # of the span: the closest the disc may come to a bearing
@@ -149,6 +169,9 @@ class RotorSystem:
     skew_angle: float = 0.0  # rad, of the skew's direction from the keyphasor mark
     weights: tuple[complex, ...] = ()  # balance weights on the disc, each m r e^{iθ} (kg·m) from the mark
     gravity: float = 0.0  # m/s², pulling in -y (9.81 for a horizontal rotor; 0 for a vertical one)
+    density: float = 0.0  # kg/m³ of the shaft: 0 for the Jeffcott model's massless shaft (steel: STEEL)
+    elements: int = 8  # beam elements along the shaft, shared between its stretches by length
+    lumped: bool = False  # the shaft's mass lumped at the nodes, rather than the consistent mass matrix
 
     def __post_init__(self) -> None:
         if min(abs(self.position), abs(self.position - 1.0)) < MIN_GAP:
@@ -165,6 +188,10 @@ class RotorSystem:
             raise ValueError("gravity pulls down (-y): give its size")
         if self.bow < 0.0 or self.skew < 0.0:
             raise ValueError("the bow and the skew are sizes; give their direction as an angle")
+        if self.density < 0.0:
+            raise ValueError("the shaft's density cannot be negative")
+        if self.elements < 2:
+            raise ValueError("the shaft needs at least two elements, one each side of the disc")
 
     def with_(self, **changes) -> RotorSystem:
         return replace(self, **changes)
@@ -201,43 +228,136 @@ class RotorSystem:
         """The disc's distance past the nearer bearing (m), 0 between the bearings."""
         return max(-self.a, self.a - self.length, 0.0)
 
-    def _elements(self) -> list[tuple[int, int, float, float]]:
-        """The shaft's two beam elements in axial order: (first node, second node, z of the first, length).
+    @property
+    def area(self) -> float:
+        """The shaft's cross-section (m²)."""
+        return math.pi * self.diameter**2 / 4.0
 
-        Nodes are 0 (bearing A), 1 (the disc) and 2 (bearing B).
-        """
-        nodes = sorted(((0.0, 0), (self.a, 1), (self.length, 2)))
-        return [(n0, n1, z0, z1 - z0) for (z0, n0), (z1, n1) in zip(nodes, nodes[1:])]
-
-    def _shaft_condensation(self) -> tuple[np.ndarray, np.ndarray]:
-        """(K_shaft, T): one plane's 4x4 shaft stiffness on [w_A, w_D, θ_D, w_B], and T (6x4)."""
-        K, T = self._condensed
-        return K.copy(), T.copy()
+    @property
+    def shaft_mass(self) -> float:
+        """The whole shaft's mass (kg), 0 for the Jeffcott model's massless shaft."""
+        lo, hi = self.extent
+        return self.density * self.area * (hi - lo)
 
     @cached_property
-    def _condensed(self) -> tuple[np.ndarray, np.ndarray]:
-        """_shaft_condensation's result, worked out once (the system is frozen).
+    def _mesh(self) -> tuple[np.ndarray, tuple[int, int, int]]:
+        """The shaft's nodes' z (m) in axial order, and the nodes at bearing A, the disc and bearing B.
 
-        The shaft is two beam elements (see _elements) on [w_A, θ_A, w_D, θ_D, w_B, θ_B].
-        The bearings take no moment, so θ_A and θ_B are condensed out: full = T @ retained.
+        Each stretch between the stations gets elements in proportion to its length, at least one.
         """
-        k6 = np.zeros((6, 6))
-        for n0, n1, _, length in self._elements():
-            dofs = [2 * n0, 2 * n0 + 1, 2 * n1, 2 * n1 + 1]
-            k6[np.ix_(dofs, dofs)] += beam_stiffness(self.ei, length)
-        keep, drop = [0, 2, 3, 4], [1, 5]
-        krr = k6[np.ix_(keep, keep)]
-        krc = k6[np.ix_(keep, drop)]
-        kcc = k6[np.ix_(drop, drop)]
-        recover = -np.linalg.solve(kcc, krc.T)  # θ_A, θ_B from the retained DOFs
-        T = np.zeros((6, 4))
-        T[keep] = np.eye(4)
-        T[drop] = recover
-        return krr + krc @ recover, T
+        stations = sorted(((0.0, 0), (self.a, 1), (self.length, 2)))
+        span = stations[-1][0] - stations[0][0]
+        z, node = [stations[0][0]], {stations[0][1]: 0}
+        for (z0, _), (z1, n1) in zip(stations, stations[1:]):
+            k = max(1, round(self.elements * (z1 - z0) / span))
+            z.extend(np.linspace(z0, z1, k + 1)[1:])
+            node[n1] = len(z) - 1
+        return np.array(z), (node[0], node[1], node[2])
+
+    @property
+    def nodes(self) -> np.ndarray:
+        """z (m) of the shaft's finite element nodes, in axial order."""
+        return self._mesh[0].copy()
+
+    @cached_property
+    def _reduced(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """(T, K, M, R, freqs): one plane's shaft, reduced to the stations and its fixed-interface modes.
+
+        The beam elements are assembled on every node's [w, θ]. The stations' DOFs
+        [w_A, w_D, θ_D, w_B] are kept; the others (the slopes at the bearings, and
+        every node in between) are the static shape the stations give them,
+        -K_ii^{-1} K_ib, plus the modes of the shaft with the stations held, mass
+        normalized, up to MODE_LIMIT: full = T @ [stations, ξ]. K, M and R are
+        T^T (·) T for the shaft's stiffness, mass and rotary inertia (its
+        gyroscopic matrix is 2R: a round section's polar inertia is twice its
+        diametral). freqs (Hz) are the modes kept.
+        """
+        z, (na, nd, nb) = self._mesh
+        n = 2 * z.size
+        K, M, R = np.zeros((n, n)), np.zeros((n, n)), np.zeros((n, n))
+        rho_a, rho_i = self.density * self.area, self.density * math.pi * self.diameter**4 / 64.0
+        for e, length in enumerate(np.diff(z)):
+            d = slice(2 * e, 2 * e + 4)
+            translation, rotation = beam_mass(rho_a, rho_i, length, self.lumped)
+            K[d, d] += beam_stiffness(self.ei, length)
+            M[d, d] += translation + rotation
+            R[d, d] += rotation
+        kept = [2 * na, 2 * nd, 2 * nd + 1, 2 * nb]
+        inner = [j for j in range(n) if j not in kept]
+        static = -np.linalg.solve(K[np.ix_(inner, inner)], K[np.ix_(inner, kept)])
+        if self.density > 0.0:
+            w2, shapes = scipy.linalg.eigh(K[np.ix_(inner, inner)], M[np.ix_(inner, inner)])
+            r = min(MAX_MODES, int(np.sum(w2 <= (2.0 * math.pi * MODE_LIMIT) ** 2)))
+            w2, shapes = w2[:r], shapes[:, :r]
+            shapes *= np.sign(shapes[np.argmax(np.abs(shapes), axis=0), np.arange(r)])  # largest entry positive
+        else:
+            w2, shapes = np.empty(0), np.empty((len(inner), 0))
+        T = np.zeros((n, 4 + w2.size))
+        T[kept, :4] = np.eye(4)
+        T[inner, :4] = static
+        T[inner, 4:] = shapes
+        return T, T.T @ K @ T, T.T @ M @ T, T.T @ R @ T, np.sqrt(w2) / (2.0 * math.pi)
+
+    @property
+    def modes_kept(self) -> int:
+        """r, the shaft's fixed-interface modes kept in each plane (0 for a massless shaft)."""
+        return self._reduced[0].shape[1] - 4
+
+    @property
+    def fixed_interface_freqs(self) -> np.ndarray:
+        """The frequencies (Hz) of the shaft's modes kept, with the stations held."""
+        return self._reduced[4].copy()
+
+    @property
+    def n_dof(self) -> int:
+        """The length of q: the 8 stations' DOFs and the shaft's modal coordinates in each plane."""
+        return N_DOF + 2 * self.modes_kept
+
+    @cached_property
+    def _planes(self) -> tuple[np.ndarray, np.ndarray]:
+        r = self.modes_kept
+        x = np.r_[0:4, N_DOF:N_DOF + r]
+        return x, np.r_[4:8, N_DOF + r:N_DOF + 2 * r]
+
+    @property
+    def plane_dofs(self) -> tuple[np.ndarray, np.ndarray]:
+        """The indices in q of the x plane's DOFs and the y plane's, each [stations, modal coordinates]."""
+        x, y = self._planes
+        return x.copy(), y.copy()
+
+    def merge(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """q (..., n_dof) from the two planes' parts (..., 4 + r): the inverse of q[..., plane_dofs]."""
+        ix, iy = self._planes
+        x, y = np.asarray(x), np.asarray(y)
+        out = np.empty(np.broadcast_shapes(x.shape, y.shape)[:-1] + (self.n_dof,), dtype=np.result_type(x, y))
+        out[..., ix], out[..., iy] = x, y
+        return out
+
+    def _blocks(self, xx: np.ndarray, yy: np.ndarray, xy: np.ndarray | None = None,
+                yx: np.ndarray | None = None) -> np.ndarray:
+        """An n_dof square matrix from its plane blocks: x on x, y on y, x's row on y's column, and back."""
+        ix, iy = self._planes
+        A = np.zeros((self.n_dof, self.n_dof), dtype=np.result_type(xx, yy))
+        A[np.ix_(ix, ix)], A[np.ix_(iy, iy)] = xx, yy
+        if xy is not None:
+            A[np.ix_(ix, iy)] = xy
+        if yx is not None:
+            A[np.ix_(iy, ix)] = yx
+        return A
 
     def shaft_stiffness(self) -> np.ndarray:
-        """One plane's shaft stiffness (4x4) on [w_A, w_D, θ_D, w_B]."""
-        return self._shaft_condensation()[0]
+        """One plane's shaft stiffness on [w_A, w_D, θ_D, w_B, ξ_1, ..., ξ_r]: 4x4 for a massless shaft.
+
+        The stations' block is the shaft's exact static stiffness (it does not depend
+        on the elements); each fixed-interface mode adds its ω² alone on the diagonal.
+        """
+        return self._reduced[1].copy()
+
+    def plane_mass(self) -> np.ndarray:
+        """One plane's mass matrix on [stations, ξ]: the shaft's, the journals', the disc's m and I_d."""
+        M = self._reduced[2].copy()
+        M[[0, 1, 2, 3], [0, 1, 2, 3]] += [self.bearing_a.mass, self.disc_mass, self.id, self.bearing_b.mass]
+        return M
 
     @property
     def disc_stiffness(self) -> float:
@@ -254,17 +374,20 @@ class RotorSystem:
         return self.internal_damping / self.disc_stiffness
 
     def bow_shape(self) -> np.ndarray:
-        """One plane's bow (4,) on [w_A, w_D, θ_D, w_B], per metre of bow at the disc.
+        """One plane's bow (4 + r,) on [w_A, w_D, θ_D, w_B, ξ], per metre of bow at the disc.
 
         The shape a load at the disc gives with the bearings held: no moment at the
         disc, so K_shaft times it is a force at the disc and the bearings' reactions.
+        It is a static shape, so the modal coordinates are zero.
         """
         k = self.shaft_stiffness()[1:3, 1:3]
         w, theta = np.linalg.solve(k, [1.0, 0.0])
-        return np.array([0.0, 1.0, theta / w, 0.0])
+        shape = np.zeros(4 + self.modes_kept)
+        shape[1:3] = 1.0, theta / w
+        return shape
 
     def rotating_load(self, omega: float | np.ndarray, alpha: float | np.ndarray = 0.0) -> np.ndarray:
-        """The 1X load on [A, D, θ, B] as f_x + i f_y = P e^{iφ}: P (..., 4) complex.
+        """The 1X load on one plane's DOFs as f_x + i f_y = P e^{iφ}: P (..., 4 + r) complex.
 
         The unbalance and the balance weights on the disc, the skew's moment on its
         slopes and the bow's force K_shaft q_bow, at speed Ω and acceleration Ω' = alpha.
@@ -275,54 +398,61 @@ class RotorSystem:
 
     @cached_property
     def _load_parts(self) -> tuple[np.ndarray, np.ndarray]:
-        """(the load per unit Ω² - iΩ', the bow's constant load), each (4,) complex."""
-        per_drive = np.array([0.0, self.mass_unbalance,
-                              (self.id - self.ip) * self.skew * np.exp(1j * self.skew_angle), 0.0])
+        """(the load per unit Ω² - iΩ', the bow's constant load), each (4 + r,) complex."""
+        per_drive = np.zeros(4 + self.modes_kept, dtype=complex)
+        per_drive[1:3] = self.mass_unbalance, (self.id - self.ip) * self.skew * np.exp(1j * self.skew_angle)
         bow = self.shaft_stiffness() @ self.bow_shape() * self.bow * np.exp(1j * self.bow_angle)
         return per_drive, bow
 
+    def plane_load(self, P: np.ndarray) -> np.ndarray:
+        """The real load f (..., n_dof) of a turning one f_x + i f_y = P (..., 4 + r): f_x = Re P, f_y = Im P."""
+        P = np.asarray(P)
+        return self.merge(P.real, P.imag)
+
     def gravity_load(self) -> np.ndarray:
-        """f_g (8,): the weights of the journals and the disc, in -y (N)."""
-        f = np.zeros(N_DOF)
-        f[[YA, YD, YB]] = -self.gravity * np.array([self.bearing_a.mass, self.disc_mass, self.bearing_b.mass])
-        return f
+        """f_g (n_dof,): the weights of the journals, the disc and the shaft, in -y (N)."""
+        # The stations moving together, the slope at the disc held, is a rigid shift (modal coordinates 0).
+        shift = np.zeros(4 + self.modes_kept)
+        shift[[0, 1, 3]] = 1.0
+        return self.merge(np.zeros_like(shift), -self.gravity * self.plane_mass() @ shift)
 
     def static_deflection(self, omega: float | np.ndarray = 0.0) -> np.ndarray:
-        """q_s = (K + ΩH)^{-1} f_g: where gravity holds the rotor, (8,) or (len(omega), 8).
+        """q_s = (K + ΩH)^{-1} f_g: where gravity holds the rotor, (n_dof,) or (len(omega), n_dof).
 
         Unless the stiffness depends on the speed (speed_dependent), neither does this.
         """
         omega = np.asarray(omega, dtype=float)
+        n = self.n_dof
         if not self.gravity:
-            return np.zeros(omega.shape + (N_DOF,))
+            return np.zeros(omega.shape + (n,))
         f = self.gravity_load()
         if not self.speed_dependent or omega.ndim == 0:
             q = np.linalg.solve(self.stiffness(float(omega) if omega.ndim == 0 else 0.0), f)
-            return q if omega.ndim == 0 else np.broadcast_to(q, omega.shape + (N_DOF,)).copy()
+            return q if omega.ndim == 0 else np.broadcast_to(q, omega.shape + (n,)).copy()
         K, H = self.matrices()[3], self._circulatory
-        return np.linalg.solve(K + omega[..., None, None] * H, np.broadcast_to(f, omega.shape + (N_DOF,))[..., None])[..., 0]
+        return np.linalg.solve(K + omega[..., None, None] * H, np.broadcast_to(f, omega.shape + (n,))[..., None])[..., 0]
 
     def bow_displacement(self, phase: float) -> np.ndarray:
-        """q_bow (8,): the bow at shaft angle φ, as displacements in fixed coordinates."""
+        """q_bow (n_dof,): the bow at shaft angle φ, as displacements in fixed coordinates."""
         b = self.bow_shape() * self.bow * np.exp(1j * (phase + self.bow_angle))
-        return np.concatenate([b.real, b.imag])
+        return self.merge(b.real, b.imag)
 
     def shape_matrix(self, z: np.ndarray) -> np.ndarray:
-        """S (len(z) x 4): the shaft's deflection at axial positions z (m) is S @ [w_A, w_D, θ_D, w_B].
+        """S (len(z) x (4 + r)): the shaft's deflection at axial positions z (m) is S @ one plane's DOFs.
 
-        Exact for the massless shaft: between the stations it bends as a cubic.
+        Within each element the shaft bends as a cubic through its nodes' displacements and
+        slopes (exact for the massless shaft); beyond the shaft's ends the end element carries on.
         """
         z = np.atleast_1d(np.asarray(z, dtype=float))
-        T = self._shaft_condensation()[1]
-        S = np.zeros((z.size, 4))
-        (n0, n1, z0, l0), (m0, m1, z1, l1) = self._elements()
-        # Each element takes its own stretch; beyond the shaft's ends the nearer one carries on.
-        for (a, b, start, length), inside in (((n0, n1, z0, l0), z < z1), ((m0, m1, z1, l1), z >= z1)):
-            s = (z[inside] - start) / length
-            h = np.column_stack([1 - 3 * s**2 + 2 * s**3, length * (s - 2 * s**2 + s**3),
-                                 3 * s**2 - 2 * s**3, length * (s**3 - s**2)])
-            S[inside] = h @ T[[2 * a, 2 * a + 1, 2 * b, 2 * b + 1]]
-        return S
+        nodes = self._mesh[0]
+        T = self._reduced[0]
+        e = np.clip(np.searchsorted(nodes, z, side="right") - 1, 0, nodes.size - 2)
+        length = nodes[e + 1] - nodes[e]
+        s = (z - nodes[e]) / length
+        h = np.column_stack([1 - 3 * s**2 + 2 * s**3, length * (s - 2 * s**2 + s**3),
+                             3 * s**2 - 2 * s**3, length * (s**3 - s**2)])
+        rows = 2 * e[:, None] + np.arange(4)
+        return np.einsum("zk,zkj->zj", h, T[rows])
 
     @property
     def extent(self) -> tuple[float, float]:
@@ -330,34 +460,39 @@ class RotorSystem:
         return min(0.0, self.a), max(self.length, self.a)
 
     def deflection(self, q: np.ndarray, z: np.ndarray) -> np.ndarray:
-        """Shaft centre (x, y) at axial positions z for displacements q: shape (..., len(z), 2)."""
+        """Shaft centre (x, y) at axial positions z for displacements q (..., n_dof): shape (..., len(z), 2)."""
         S = self.shape_matrix(z)
         q = np.asarray(q)
-        return np.stack([q[..., :4] @ S.T, q[..., 4:] @ S.T], axis=-1)
+        ix, iy = self._planes
+        return np.stack([q[..., ix] @ S.T, q[..., iy] @ S.T], axis=-1)
 
     # ------------------------------------------------------------- matrices
     def matrices(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """(M, C, G, K), each 8x8 on q = [x_A, x_D, θx, x_B, y_A, y_D, θy, y_B].
+        """(M, C, G, K), each n_dof square on q = [x_A, x_D, θx, x_B, y_A, y_D, θy, y_B, ξ_x, ξ_y].
 
         The equations of motion are M q'' + (C + Ω G) q' + (K + Ω H) q = f, H from
         circulatory(). K holds the bearings' cross-coupled stiffness (so it is not
         symmetric unless k_xy = 0) and C the shaft's internal damping.
         """
+        return tuple(m.copy() for m in self._matrices)
+
+    @cached_property
+    def _matrices(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         A, B = self.bearing_a, self.bearing_b
         ks = self.shaft_stiffness()
-        M = np.diag([A.mass, self.disc_mass, self.id, B.mass] * 2)
-        K = np.zeros((N_DOF, N_DOF))
-        K[:4, :4] = ks + np.diag([A.kx, 0.0, 0.0, B.kx])
-        K[4:, 4:] = ks + np.diag([A.ky, 0.0, 0.0, B.ky])
+        mp = self.plane_mass()
+        M = self._blocks(mp, mp)
+        K = self._blocks(ks, ks)
+        K[[XA, XB, YA, YB], [XA, XB, YA, YB]] += [A.kx, B.kx, A.ky, B.ky]
         for j, bearing in ((XA, A), (XB, B)):
             K[j, j + 4], K[j + 4, j] = bearing.kxy, -bearing.kxy
-        C = np.diag([A.cx, 0.0, 0.0, B.cx, A.cy, 0.0, 0.0, B.cy])
-        C[:4, :4] += self.loss_time * ks
-        C[4:, 4:] += self.loss_time * ks
-        G = np.zeros((N_DOF, N_DOF))
-        # Id θx'' + Ω Ip θy' = moment in x-z;  Id θy'' - Ω Ip θx' = moment in y-z.
-        G[TX, TY] = self.ip
-        G[TY, TX] = -self.ip
+        C = self._blocks(self.loss_time * ks, self.loss_time * ks)
+        C[[XA, XB, YA, YB], [XA, XB, YA, YB]] += [A.cx, B.cx, A.cy, B.cy]
+        # Id θx'' + Ω Ip θy' = moment in x-z;  Id θy'' - Ω Ip θx' = moment in y-z. The shaft's own
+        # sections do the same, with twice their diametral rotary inertia.
+        gp = 2.0 * self._reduced[3]
+        gp[2, 2] += self.ip
+        G = self._blocks(np.zeros_like(gp), np.zeros_like(gp), gp, -gp)
         return M, C, G, K
 
     def circulatory(self) -> np.ndarray:
@@ -372,9 +507,9 @@ class RotorSystem:
 
     @cached_property
     def _circulatory(self) -> np.ndarray:
-        H = np.zeros((N_DOF, N_DOF))
         eta_ks = self.loss_time * self.shaft_stiffness()
-        H[:4, 4:], H[4:, :4] = eta_ks, -eta_ks
+        zero = np.zeros_like(eta_ks)
+        H = self._blocks(zero, zero, eta_ks, -eta_ks)
         for j, bearing in ((XA, self.bearing_a), (XB, self.bearing_b)):
             H[j, j + 4] += bearing.swirl * bearing.damping
             H[j + 4, j] -= bearing.swirl * bearing.damping
@@ -392,24 +527,33 @@ class RotorSystem:
 
     def stiffness(self, omega: float) -> np.ndarray:
         """K + Ω H: the whole stiffness at speed Ω."""
-        K = self.matrices()[3]
-        return K + omega * self._circulatory if self.speed_dependent else K
+        K = self._matrices[3]
+        return K + omega * self._circulatory if self.speed_dependent else K.copy()
+
+    @cached_property
+    def mass_inverse(self) -> np.ndarray:
+        """M^{-1}: diagonal for the massless shaft, full once the shaft's mass couples the DOFs."""
+        M = self._matrices[0]
+        if np.count_nonzero(M - np.diag(np.diag(M))) == 0:
+            return np.diag(1.0 / np.diag(M))
+        return np.linalg.inv(M)
 
     def state_matrix(self, omega: float) -> np.ndarray:
-        """A(Ω) (16x16) for z = [q, q']: z' = A z + B u."""
-        M, C, G, _ = self.matrices()
-        Minv = np.diag(1.0 / np.diag(M))
-        A = np.zeros((2 * N_DOF, 2 * N_DOF))
-        A[:N_DOF, N_DOF:] = np.eye(N_DOF)
-        A[N_DOF:, :N_DOF] = -Minv @ self.stiffness(omega)
-        A[N_DOF:, N_DOF:] = -Minv @ (C + omega * G)
+        """A(Ω) (2n x 2n) for z = [q, q']: z' = A z + B u."""
+        _, C, G, _ = self._matrices
+        Minv = self.mass_inverse
+        n = self.n_dof
+        A = np.zeros((2 * n, 2 * n))
+        A[:n, n:] = np.eye(n)
+        A[n:, :n] = -Minv @ self.stiffness(omega)
+        A[n:, n:] = -Minv @ (C + omega * G)
         return A
 
     def input_matrix(self) -> np.ndarray:
-        """B (16x8): the inputs u = f (8,), a force or moment on each DOF."""
-        B = np.zeros((2 * N_DOF, N_DOF))
-        A, Bb = self.bearing_a, self.bearing_b
-        B[N_DOF:] = np.diag(1.0 / np.array([A.mass, self.disc_mass, self.id, Bb.mass] * 2))
+        """B (2n x n): the inputs u = f (n,), a force or moment on each DOF."""
+        n = self.n_dof
+        B = np.zeros((2 * n, n))
+        B[n:] = self.mass_inverse
         return B
 
     # ------------------------------------------------------------- checks
@@ -441,30 +585,54 @@ def beam_stiffness(ei: float, length: float) -> np.ndarray:
     ])
 
 
+def beam_mass(rho_a: float, rho_i: float, length: float, lumped: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """A beam element's mass on [w1, θ1, w2, θ2]: (translation, rotary inertia), ρA and ρI per length.
+
+    Consistent: the cubic shape functions' ∫ρA N^T N and ∫ρI N'^T N' (a Rayleigh beam).
+    Lumped: half of each to each node, on its displacement and its slope.
+    """
+    L = length
+    if lumped:
+        half_a, half_i = 0.5 * rho_a * L, 0.5 * rho_i * L
+        return np.diag([half_a, 0.0, half_a, 0.0]), np.diag([0.0, half_i, 0.0, half_i])
+    translation = rho_a * L / 420.0 * np.array([
+        [156.0, 22 * L, 54.0, -13 * L],
+        [22 * L, 4 * L * L, 13 * L, -3 * L * L],
+        [54.0, 13 * L, 156.0, -22 * L],
+        [-13 * L, -3 * L * L, -22 * L, 4 * L * L],
+    ])
+    rotation = rho_i / (30.0 * L) * np.array([
+        [36.0, 3 * L, -36.0, 3 * L],
+        [3 * L, 4 * L * L, -3 * L, -L * L],
+        [-36.0, -3 * L, 36.0, -3 * L],
+        [3 * L, -L * L, -3 * L, 4 * L * L],
+    ])
+    return translation, rotation
+
+
 # ------------------------------------------------------------------ whirl analysis
 
 
 def whirl_ratio(system: RotorSystem, Q: np.ndarray) -> np.ndarray:
-    """Whirl direction of complex amplitudes Q (..., 8), x = Re(X e^{iωt}) for ω > 0.
+    """Whirl direction of complex amplitudes Q (..., n_dof), x = Re(X e^{iωt}) for ω > 0.
 
     +1 is a circular forward whirl (with the spin, x toward y), -1 a circular
-    backward whirl, 0 a straight line. The four stations (journals, disc, disc
-    tilt) are weighted by their masses and Id, i.e. by kinetic energy.
+    backward whirl, 0 a straight line. The motion is weighted by one plane's mass
+    matrix, i.e. by kinetic energy: the stations (journals, disc, disc tilt) and,
+    with a shaft of some mass, the shaft between them.
     """
-    M = np.diag(system.matrices()[0])[:4]
-    X, Y = Q[..., :4], Q[..., 4:]
-    num = 2.0 * np.sum(M * np.imag(X * np.conj(Y)), axis=-1)
-    den = np.sum(M * (np.abs(X) ** 2 + np.abs(Y) ** 2), axis=-1)
+    mp = system.plane_mass()
+    ix, iy = system.plane_dofs
+    X, Y = Q[..., ix], Q[..., iy]
+    num = 2.0 * np.imag(np.einsum("...i,ij,...j->...", np.conj(Y), mp, X))
+    den = np.real(np.einsum("...i,ij,...j->...", np.conj(X), mp, X) + np.einsum("...i,ij,...j->...", np.conj(Y), mp, Y))
     return np.divide(num, den, out=np.zeros_like(num), where=den > 0)
 
 
 def _whirl_forms(system: RotorSystem) -> tuple[np.ndarray, np.ndarray]:
     """Hermitian (H, D) with v^H H v and v^H D v the numerator and denominator of whirl_ratio."""
-    m = np.diag(system.matrices()[0])[:4]
-    H = np.zeros((N_DOF, N_DOF), dtype=complex)
-    H[:4, 4:] = 1j * np.diag(m)
-    H[4:, :4] = -1j * np.diag(m)
-    return H, np.diag(np.concatenate([m, m])).astype(complex)
+    mp = system.plane_mass().astype(complex)
+    return system._blocks(0 * mp, 0 * mp, 1j * mp, -1j * mp), system._blocks(mp, mp)
 
 
 def _circularize(system: RotorSystem, lam: np.ndarray, vec: np.ndarray, tol: float = 1e-7) -> None:
@@ -497,7 +665,7 @@ class WhirlModes:
     freq_hz: np.ndarray  # damped natural frequencies
     zeta: np.ndarray  # damping ratios, -Re λ / |λ|
     whirl: np.ndarray  # whirl ratios (see whirl_ratio): > 0 forward, < 0 backward
-    shapes: np.ndarray  # (n, 8) complex displacement shapes, largest entry 1
+    shapes: np.ndarray  # (n, n_dof) complex displacement shapes, largest station entry 1
 
     @property
     def forward(self) -> np.ndarray:
@@ -508,13 +676,15 @@ def whirl_modes(system: RotorSystem, omega: float) -> WhirlModes:
     """Eigen-solution of A(Ω): the oscillatory modes (Im λ > 0), lowest first."""
     lam, vec = np.linalg.eig(system.state_matrix(omega))
     keep = lam.imag > 1e-9 * max(1.0, float(np.abs(lam).max()))
-    lam, vec = lam[keep], vec[:N_DOF, keep]
+    lam, vec = lam[keep], vec[:system.n_dof, keep]
     order = np.argsort(lam.imag)
     lam, vec = lam[order], vec[:, order]
     _circularize(system, lam, vec)
     shapes = vec.T.copy()
     for s in shapes:
-        s /= s[np.argmax(np.abs(s))]
+        # By a station's largest entry (a shaft mode may barely move them: then by its largest).
+        big = s[:N_DOF] if np.abs(s[:N_DOF]).max() > 1e-6 * np.abs(s).max() else s
+        s /= big[np.argmax(np.abs(big))]
     return WhirlModes(
         omega=omega,
         freq_hz=lam.imag / (2.0 * math.pi),
@@ -579,7 +749,7 @@ def _refine_critical(system: RotorSystem, branch: int, guess: float, lo: float, 
 
 
 def synchronous_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
-    """Steady-state 1X response at constant speeds: Q (len(omegas), 8), complex.
+    """Steady-state 1X response at constant speeds: Q (len(omegas), n_dof), complex.
 
     The unbalance, the disc's skew and the shaft's bow together. q(t) = Re(Q e^{iΩt}),
     with the keyphasor mark at angle φ = Ωt (along +x at t = 0). Above
@@ -588,11 +758,11 @@ def synchronous_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
     """
     M, C, G, _ = system.matrices()
     omegas = np.atleast_1d(np.asarray(omegas, dtype=float))
-    out = np.empty((omegas.size, N_DOF), dtype=complex)
+    out = np.empty((omegas.size, system.n_dof), dtype=complex)
     load = system.rotating_load(omegas)
     for i, w in enumerate(omegas):
         # f_x + i f_y = P e^{iφ}: f_x = Re(P e^{iφ}), f_y = Re(-iP e^{iφ}).
-        f = np.concatenate([load[i], -1j * load[i]])
+        f = system.merge(load[i], -1j * load[i])
         out[i] = np.linalg.solve(system.stiffness(w) - w * w * M + 1j * w * (C + w * G), f)
     return out
 
@@ -605,7 +775,7 @@ class RotorSamples:
     """What one advance returns, one row per step."""
 
     t: np.ndarray  # (k,) s
-    q: np.ndarray  # (k, 8) displacements
+    q: np.ndarray  # (k, n_dof) displacements
     omega: np.ndarray  # (k,) spin speed (rad/s)
     phase: np.ndarray  # (k,) angle φ of the keyphasor mark (rad, unwrapped)
 
@@ -627,7 +797,16 @@ class RotorSimulator:
 
     # ------------------------------------------------------------- setup
     def set_system(self, system: RotorSystem) -> None:
-        """New parameters, keeping the motion (live editing)."""
+        """New parameters, keeping the motion (live editing).
+
+        If the shaft's modal coordinates change in number, the stations keep their
+        motion and the shaft starts again from its static shape between them.
+        """
+        if system.n_dof != self.system.n_dof:
+            n0, n1 = self.system.n_dof, system.n_dof
+            state = np.zeros(2 * n1)
+            state[:N_DOF], state[n1:n1 + N_DOF] = self.state[:N_DOF], self.state[n0:n0 + N_DOF]
+            self.state = state
         self.system = system
         self._cache.clear()
         self._f_still = self._highest_freq_still()
@@ -635,7 +814,7 @@ class RotorSimulator:
     def _rest(self) -> np.ndarray:
         """The state at rest: the shaft in its bowed shape (which loads nothing), sagging under gravity."""
         q = self.system.bow_displacement(self.phase) + self.system.static_deflection(0.0)
-        return np.concatenate([q, np.zeros(N_DOF)])
+        return np.concatenate([q, np.zeros_like(q)])
 
     def reset(self) -> None:
         """Back to rest, not spinning (the target speed is kept)."""
@@ -643,17 +822,17 @@ class RotorSimulator:
         self.state = self._rest()
 
     def tap(self, impulse_x: float = 0.0, impulse_y: float = 0.0) -> None:
-        """Hit the disc: an impulse (N·s) in x and y changes its velocity at once."""
-        self.state[N_DOF + XD] += impulse_x / self.system.disc_mass
-        self.state[N_DOF + YD] += impulse_y / self.system.disc_mass
+        """Hit the disc: an impulse (N·s) in x and y changes the velocities at once, by M^{-1} times it."""
+        Minv = self.system.mass_inverse
+        self.state[self.system.n_dof:] += Minv[:, XD] * impulse_x + Minv[:, YD] * impulse_y
 
     @property
     def q(self) -> np.ndarray:
-        return self.state[:N_DOF]
+        return self.state[:self.system.n_dof]
 
     @property
     def qdot(self) -> np.ndarray:
-        return self.state[N_DOF:]
+        return self.state[self.system.n_dof:]
 
     def energy(self) -> tuple[float, float]:
         """(kinetic, potential) energy of the vibration (J); the spin's own energy left out."""
@@ -672,11 +851,12 @@ class RotorSimulator:
     def step_size(self) -> float:
         """h resolving the fastest mode at any speed up to the target, and the spin.
 
-        A forward mode's frequency rises with speed by at most (Ip/Id) Ω. Rounded
-        down to a power of two so the discretization is reused.
+        A forward mode's frequency rises with speed by at most (Ip/Id) Ω (the shaft's
+        own sections: 2Ω). Rounded down to a power of two so the discretization is reused.
         """
         spin = max(abs(self.omega), abs(self.target)) / (2.0 * math.pi)
-        fmax = max(self._f_still + spin * self.system.ip / self.system.id, spin)
+        gyro = max(self.system.ip / self.system.id, 2.0 if self.system.density else 0.0)
+        fmax = max(self._f_still + spin * gyro, spin)
         h = MAX_STEP if fmax <= 0 else min(MAX_STEP, 1.0 / (STEPS_PER_PERIOD * fmax))
         return 2.0 ** math.floor(math.log2(h))
 
@@ -692,9 +872,9 @@ class RotorSimulator:
         return out
 
     def force(self, phase: np.ndarray, omega: np.ndarray, alpha: np.ndarray) -> np.ndarray:
-        """The load f (..., 8) on q: the 1X unbalance, skew moment and bow force, and gravity."""
+        """The load f (..., n_dof) on q: the 1X unbalance, skew moment and bow force, and gravity."""
         p = self.system.rotating_load(omega, alpha) * np.exp(1j * np.asarray(phase))[..., None]
-        return np.concatenate([p.real, p.imag], axis=-1) + self.system.gravity_load()
+        return self.system.plane_load(p) + self.system.gravity_load()
 
     def _speeds(self, h: float, n: int) -> np.ndarray:
         """Ω at the end of each of the next n steps, ramping toward the target at self.accel."""
@@ -708,7 +888,8 @@ class RotorSimulator:
         """Advance by about `duration` s of simulated time (at most MAX_STEPS_PER_ADVANCE steps)."""
         h = self.step_size()
         steps = min(MAX_STEPS_PER_ADVANCE, max(0, round(duration / h)))
-        ts, qs = np.empty(steps), np.empty((steps, N_DOF))
+        n_dof = self.system.n_dof
+        ts, qs = np.empty(steps), np.empty((steps, n_dof))
         ws, phis = np.empty(steps), np.empty(steps)
         chunk = max(1, int(CHUNK_TIME / h))
         k = 0
@@ -727,7 +908,7 @@ class RotorSimulator:
             z = self.state
             for j in range(n):
                 z = Phi @ z + drive[:, j]
-                qs[k + j] = z[:N_DOF]
+                qs[k + j] = z[:n_dof]
             self.state = z
             ts[k : k + n] = self.t + h * np.arange(1, n + 1)
             ws[k : k + n], phis[k : k + n] = w1, phi1

@@ -41,7 +41,7 @@ def station_positions(system: RotorSystem) -> np.ndarray:
 
 
 def vibration(system: RotorSystem, q: np.ndarray, omega: np.ndarray) -> np.ndarray:
-    """q (..., 8) less the static deflection under gravity at the speeds Ω (...): the vibration.
+    """q (..., n_dof) less the static deflection under gravity at the speeds Ω (...): the vibration.
 
     As a proximity probe's AC signal: the 1X filter and the peaks measure the motion
     about where gravity holds the rotor, not its sag.
@@ -52,7 +52,7 @@ def vibration(system: RotorSystem, q: np.ndarray, omega: np.ndarray) -> np.ndarr
 
 
 def station_motion(system: RotorSystem, q: np.ndarray) -> np.ndarray:
-    """(x, y) of the shaft's centre at each station for displacements q (..., 8): shape (..., 4, 2)."""
+    """(x, y) of the shaft's centre at each station for displacements q (..., n_dof): shape (..., 4, 2)."""
     return system.deflection(q, station_positions(system))
 
 

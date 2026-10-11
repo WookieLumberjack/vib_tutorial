@@ -27,6 +27,8 @@ from ..core.rotor import (
     YA,
     YB,
     YD,
+    MODE_LIMIT,
+    STEEL,
     Bearing,
     Campbell,
     RotorSimulator,
@@ -145,6 +147,27 @@ INTERNAL_TIP = (
     "(the shaft then turns faster than it whirls) it drives it.</p>"
     "<p>Try 20 N·s/m: the rotor becomes unstable at 3,910 rpm and, above that, whirls at its first "
     "natural frequency, about 27 Hz, whatever the speed.</p>"
+)
+SHAFT_MASS_TIP = (
+    "<p>The Jeffcott model's shaft has no mass: it is a spring holding the disc. Tick this to give it "
+    "its mass (and its sections' rotary inertia and gyroscopic moment), spread along it: it then "
+    "becomes a beam finite element model, and has bending modes of its own.</p>"
+    "<p>A shaft light beside its disc changes little: the first critical speed drops a little, as if "
+    "part of the shaft's mass sat on the disc. Make the shaft long and the disc light and the "
+    "massless model fails: the shaft's own bending modes come down into the speed range.</p>"
+)
+ELEMENTS_TIP = (
+    "<p>How many beam elements model the shaft, shared between its stretches by length. Each has a "
+    "displacement and a slope at both ends, bending as a cubic in between. More elements, closer to "
+    "the true beam's modes.</p>"
+    "<p><i>Consistent</i> mass spreads each element's mass with the same cubic shapes as its "
+    "stiffness. It is a Rayleigh–Ritz model, so at rest and undamped its frequencies are never too "
+    "low, and come down toward the true ones as elements are added. <i>Lumped</i> puts half of each "
+    "element's mass at each end. It is simpler, but it has no such bound: with few elements much of the "
+    "mass sits on the bearings, where it hardly moves, and the frequencies come out high.</p>"
+    "<p>The stations are kept as they are; the rest of the shaft follows them, plus its own modes "
+    "with the stations held, up to " + f"{MODE_LIMIT:,.0f}" + " Hz (a Craig–Bampton reduction). The "
+    "modes far above those would only slow the simulation down.</p>"
 )
 KXY_TIP = (
     "<p>Cross-coupled stiffness: a displacement in x pushes the journal in y, and one in y pushes it "
@@ -334,7 +357,7 @@ class RotorView(pg.PlotWidget):
 
     # ------------------------------------------------------------- drawing
     def update_state(self, q: np.ndarray, phase: float, trails: list[np.ndarray], peak: float) -> None:
-        """Draw displacements q (8,) with the keyphasor mark at angle `phase`, and each station's recent (x, y)."""
+        """Draw displacements q (n_dof,) with the keyphasor mark at angle `phase`, and each station's recent (x, y)."""
         s = self.system
         # The disc's own axis: the shaft's slope there plus the skew. Its rim's wobble counts as motion.
         axis = np.array([q[2], q[6]]) + s.skew * np.array([math.cos(phase + s.skew_angle),
@@ -347,7 +370,7 @@ class RotorView(pg.PlotWidget):
         self.scale_label.setText(f"motion ×{_round_gain(g * self._metres)}")
 
         # Shaft centre line.
-        z = np.union1d(np.linspace(*s.extent, 41), [0.0, s.a, s.length])
+        z = np.union1d(np.linspace(*s.extent, 81), s.nodes)
         defl = s.deflection(q, z) * g
         line = np.column_stack([defl, self._z(z)])
         self.shaft.setData(*self.project(line))
@@ -637,6 +660,9 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         self.damped = pg.ScatterPlotItem(size=3, name=f"heavily damped (ζ > {DAMPED:g})")
         p.addItem(self.damped)
         self.sync = p.plot(name="1X (synchronous)")
+        # The same rotor with a massless shaft, when its shaft has mass: one curve per branch.
+        self.reference: list[pg.PlotDataItem] = []
+        self.reference_sample = pg.PlotDataItem(name="massless shaft (Jeffcott)")
         # Other orders of the speed, drawn on request: lines but not in the legend, labelled at their ends.
         self.orders = {order: p.plot() for order in ORDERS}
         self.order_labels = {order: pg.TextItem(f"{name}", anchor=(1.1, 1.0)) for order, name in ORDERS.items()}
@@ -662,6 +688,7 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         for item in (*self.points.values(), self.damped, self.sync, self.crit, self.uncrit, self.unstable):
             self.legend.addItem(item, item.name())
         self.result: Campbell | None = None
+        self._reference_shown = False
         self.apply_theme()
 
     def apply_theme(self) -> None:
@@ -672,6 +699,8 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         self.damped.setBrush(pg.mkBrush(None))
         self.damped.setPen(pg.mkPen(colors.grey, width=1))
         self.sync.setPen(pg.mkPen(colors.strong, width=1, style=DASH))
+        for line in (*self.reference, self.reference_sample):
+            line.setPen(pg.mkPen(colors.muted, width=1.5, style=DASH))
         for order, line in self.orders.items():
             line.setPen(pg.mkPen(colors.muted, width=1, style=DOT))
             self.order_labels[order].setColor(colors.muted)
@@ -740,6 +769,29 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         if onset is not None:
             self.onset_label.setAnchor((1.05, 0.0) if onset.omega * RPM > 0.5 * max_rpm else (-0.05, 0.0))
             self.onset_label.setPos(onset.omega * RPM, 0.97 * y_top)
+        self.apply_theme()
+
+    def set_reference(self, result: Campbell | None) -> None:
+        """Draw another Campbell diagram's lightly damped branches as dashed curves (None: none)."""
+        p = self.plot
+        branches = [] if result is None else [j for j in range(result.freq_hz.shape[1])
+                                              if np.any(result.zeta[:, j] <= DAMPED)]
+        while len(self.reference) < len(branches):
+            line = p.plot()
+            line.setZValue(-1)
+            self.reference.append(line)
+        for i, line in enumerate(self.reference):
+            if i < len(branches):
+                j = branches[i]
+                f = np.where(result.zeta[:, j] <= DAMPED, result.freq_hz[:, j], np.nan)
+                line.setData(result.omega * RPM, f, connect="finite")
+            line.setVisible(i < len(branches))
+        if (result is not None) != self._reference_shown:
+            if result is not None:
+                self.legend.addItem(self.reference_sample, self.reference_sample.name())
+            else:
+                self.legend.removeItem(self.reference_sample)
+            self._reference_shown = result is not None
         self.apply_theme()
 
     def set_orders(self, shown: set[float]) -> None:
@@ -1169,6 +1221,28 @@ class RotorPage(QtWidgets.QWidget):
         form.addRow("Span L:", self.length)
         form.addRow("Shaft diameter:", self.diameter)
         form.addRow("Young's modulus:", self.youngs)
+        self.shaft_mass = QtWidgets.QCheckBox("Shaft mass, ρ")
+        self.shaft_mass.setToolTip(SHAFT_MASS_TIP)
+        self.density = spin(100.0, 30000.0, STEEL, 0, " kg/m³")
+        self.density.setToolTip("The shaft's density (steel ≈ 7850 kg/m³, aluminium ≈ 2700)")
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.shaft_mass)
+        row.addWidget(self.density, 1)
+        form.addRow("Shaft:", row)
+        self.elements = QtWidgets.QSpinBox()
+        self.elements.setRange(2, 60)
+        self.elements.setValue(s.elements)
+        self.elements.setKeyboardTracking(False)
+        self.mass_matrix = QtWidgets.QComboBox()
+        self.mass_matrix.addItems(["Consistent", "Lumped"])
+        for w in (self.elements, self.mass_matrix):
+            w.setToolTip(ELEMENTS_TIP)
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.elements, 1)
+        row.addWidget(self.mass_matrix, 1)
+        form.addRow("Beam elements:", row)
+        self.shaft_mass.toggled.connect(self._on_params)
+        self.mass_matrix.currentIndexChanged.connect(self._on_params)
         form.addRow("Disc position a/L:", self.position)
         form.addRow("Disc mass m:", self.disc_mass)
         form.addRow("Polar inertia Ip:", self.ip)
@@ -1208,7 +1282,7 @@ class RotorPage(QtWidgets.QWidget):
         form.addRow(self.shaft_note)
         for box_ in (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip,
                      self.id, self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle,
-                     self.internal_damping):
+                     self.internal_damping, self.density, self.elements):
             box_.valueChanged.connect(self._on_params)
         return box
 
@@ -1283,6 +1357,8 @@ class RotorPage(QtWidgets.QWidget):
                     w.blockSignals(False)
                 w.setEnabled(not (same and r == 1) and not (iso and c in (1, 3)))
         bearings = [Bearing(*(w.value() for w in row)) for row in self.bearing_rows]
+        for w in (self.density, self.elements, self.mass_matrix):
+            w.setEnabled(self.shaft_mass.isChecked())
         return RotorSystem(
             length=self.length.value(),
             diameter=self.diameter.value() / 1e3,
@@ -1303,13 +1379,17 @@ class RotorPage(QtWidgets.QWidget):
             skew=math.radians(self.skew.value()),
             skew_angle=math.radians(self.skew_angle.value()),
             internal_damping=self.internal_damping.value(),
+            density=self.density.value() if self.shaft_mass.isChecked() else 0.0,
+            elements=self.elements.value(),
+            lumped=self.mass_matrix.currentIndex() == 1,
         )
 
     def set_system(self, system: RotorSystem) -> None:
         """Show and use `system` (for scripts and tests)."""
         boxes = (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip, self.id,
                  self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle, self.internal_damping,
-                 self.gravity, self.isotropic, self.same_bearings, *(w for row in self.bearing_rows for w in row))
+                 self.gravity, self.isotropic, self.same_bearings, self.shaft_mass, self.density, self.elements,
+                 self.mass_matrix, *(w for row in self.bearing_rows for w in row))
         for w in boxes:
             w.blockSignals(True)
         self.length.setValue(system.length)
@@ -1329,6 +1409,11 @@ class RotorPage(QtWidgets.QWidget):
         self.skew.setValue(math.degrees(system.skew))
         self.skew_angle.setValue(math.degrees(system.skew_angle))
         self.internal_damping.setValue(system.internal_damping)
+        self.shaft_mass.setChecked(system.density > 0.0)
+        if system.density > 0.0:
+            self.density.setValue(system.density)
+        self.elements.setValue(system.elements)
+        self.mass_matrix.setCurrentIndex(1 if system.lumped else 0)
         A, B = system.bearing_a, system.bearing_b
         self.isotropic.setChecked(all(b.kx == b.ky and b.cx == b.cy for b in (A, B)))
         self.same_bearings.setChecked(A == B)
@@ -1427,18 +1512,32 @@ class RotorPage(QtWidgets.QWidget):
             formula = f" (48EI/L³ = {ks:,.0f} N/m at midspan)"
         self.shaft_note.setText(
             f"EI = {system.ei:.4g} N·m²; shaft stiffness at the disc (bearings rigid) "
-            f"{system.disc_stiffness:,.0f} N/m" + formula + self._sag_text(system)
+            f"{system.disc_stiffness:,.0f} N/m" + formula + self._shaft_mass_text(system) + self._sag_text(system)
         )
         self._analysis_timer.start()
+
+    @staticmethod
+    def _shaft_mass_text(system: RotorSystem) -> str:
+        if not system.density:
+            return ""
+        f = system.fixed_interface_freqs
+        held = (f"its lowest {f.size} mode{'s' if f.size != 1 else ''} with the stations held "
+                f"({', '.join(f'{x:,.0f}' for x in f)} Hz)" if f.size else
+                f"no modes with the stations held below {MODE_LIMIT:,.0f} Hz")
+        return (f"<br>Shaft {system.shaft_mass:.3g} kg ({system.shaft_mass / system.disc_mass:.0%} of the disc), "
+                f"{system.nodes.size - 1} elements, reduced to the stations and {held}")
 
     def _refresh_analysis(self) -> None:
         """The Campbell diagram and critical speeds for the current parameters."""
         system = self.sim.system
         top = self.top_rpm
         self.campbell = campbell(system, top / RPM, n_modes=8)
+        # With the shaft's mass: the same rotor's Jeffcott model, for comparison.
+        massless = campbell(system.with_(density=0.0), top / RPM, n_modes=8) if system.density else None
         self.onset = stability_onset(system, top / RPM)
         iso = _isotropic(system)
         self.campbell_plot.set_result(self.campbell, top, iso, self.onset)
+        self.campbell_plot.set_reference(massless)
         self.stability_map.set_result(self.campbell, self.onset, top)
         crits = critical_speeds(self.campbell, iso)
         self.time.set_criticals([w * RPM for w, _ in crits])
@@ -1450,6 +1549,9 @@ class RotorPage(QtWidgets.QWidget):
             + ("<br><small>The backward whirl crossings are not critical: an isotropic rotor's unbalance "
                "drives only forward whirl.</small>" if iso else "")
             + f"<br><small>Textbook Jeffcott estimate (massless journals, no tilt): {jeff:,.0f} rpm</small>"
+            + (f"<br><small>With a massless shaft (the Jeffcott model, dashed): "
+               + (", ".join(f"{w * RPM:,.0f}" for w, _ in critical_speeds(massless, iso)) or "none") + " rpm</small>"
+               if massless is not None else "")
             + f"<br><b>Stability:</b> {self._onset_text()}"
         )
         self.stability_note.setText(self._stability_note())
@@ -2106,7 +2208,9 @@ def _same_rotor(a: RotorSystem, b: RotorSystem) -> bool:
             return len(u) == len(v) and all(close(x, y) for x, y in zip(u, v))
         return cmath.isclose(u, v, rel_tol=1e-9, abs_tol=1e-15)
 
-    return all(close(getattr(a, f.name), getattr(b, f.name)) for f in fields(RotorSystem))
+    # A massless shaft is the same however it is meshed.
+    skip = {"elements", "lumped"} if a.density == b.density == 0.0 else set()
+    return all(close(getattr(a, f.name), getattr(b, f.name)) for f in fields(RotorSystem) if f.name not in skip)
 
 
 def _off_bearing(position: float) -> float:
