@@ -637,6 +637,43 @@ unbalance shows at +1X, and the instability as a growing line below it on the fo
 linear, so the whirl would grow for ever; in a machine it grows until something rubs or the bearing's
 nonlinearity holds it to a limit cycle. The page pauses when it reaches 2% of the span.</p>
 
+<h3>The fluid-film bearing</h3>
+<p>A plain journal bearing has no balls or rollers: the journal turns in a sleeve a little larger than
+itself, the gap (the radial clearance c, a thousandth or two of the radius) full of oil. Turning, the
+journal drags the oil round with it into the narrowing side of the gap, and the oil, squeezed, rises in
+pressure and holds the journal off the sleeve. Reynolds' equation gives that pressure; in a bearing short
+beside its diameter (L/D up to about ½) the oil escapes mostly out of the ends, and the pressure is a
+parabola along the bearing, <b>short-bearing</b> (Ocvirk) theory. Where it would go below zero the oil
+cavitates instead, so only the half of the film that narrows carries load (the π-film).</p>
+<p>At rest the journal lies on the bottom of its clearance. As the speed rises the film lifts it, and,
+since the film's pressure peaks ahead of the thinnest point, it pushes the journal <b>sideways</b>, in
+the direction of spin, as well as up. The journal settles off the load line by the <b>attitude angle</b>
+at an <b>eccentricity</b> ε = e/c that depends only on the Sommerfeld number
+S = (μNLD/W)(R/c)², N in rev/s: the more speed and viscosity, or the less load, the larger S, and the
+closer the journal to the centre, at nearly 90° to the load. On the <i>Fluid-film bearing</i> tab, the
+default bearing (D = 10 mm, L = 5 mm, c = 15 µm, oil of 30 mPa·s, 5 N) has ε = 0.80 at 100 rpm, 0.44 at
+1,000 rpm and 0.22 at 3,000 rpm, its thinnest film 11.7 µm there. Every short bearing travels the same
+path, the <b>locus</b>, only at a different pace.</p>
+<p>For small motions about that point the film acts as springs and dampers, eight coefficients:
+f = −KΔq − CΔq̇, with K = (W/c)·a(ε) and C = (W/cΩ)·b(ε). The film's sideways push makes K far from
+symmetric: at 3,000 rpm, k<sub>xy</sub> = 1.36 MN/m but k<sub>yx</sub> = −1.81 MN/m. Its skew part is
+the cross-coupling of the <i>Stability</i> section, and for the short bearing it is exactly
+k<sub>xy</sub> − k<sub>yx</sub> = ½Ω(c<sub>xx</sub> + c<sub>yy</sub>), at every load: the oil swirls
+at half the shaft's speed, the swirl ratio λ = ½ of the bearing table. As the speed rises the
+cross-coupling grows with it while the direct stiffness and damping level off.</p>
+<p>So a rotor on such bearings has a <b>threshold speed</b>. A rigid rotor of mass m per bearing
+(Lund's formula) whirls at ν with mν² = K<sub>eq</sub> at the threshold, where
+K<sub>eq</sub> = (k<sub>xx</sub>c<sub>yy</sub> + k<sub>yy</sub>c<sub>xx</sub> − k<sub>xy</sub>c<sub>yx</sub>
+− k<sub>yx</sub>c<sub>xy</sub>)/(c<sub>xx</sub> + c<sub>yy</sub>). Lightly loaded, ν is half the speed:
+<b>oil whirl</b>. With the default bearing carrying its load as weight (0.51 kg), the rotor goes unstable
+at 21,324 rpm and whirls at 0.50×. Heavily loaded bearings (ε above 0.756) are stable at any speed,
+which is one reason a lightly loaded bearing is the one that whirls. A flexible rotor goes unstable much
+sooner, near twice its first critical speed, which is the oil whip of the <i>Stability</i> section.</p>
+<p>The tab draws the locus, with the page's speed range solid and the speed now as a dot, and the
+coefficients against the speed, or made dimensionless against S on log scales (dashed where negative),
+as on a bearing designer's chart. For now the rotor's supports are still the bearing table's springs and
+dampers; putting the film on the rotor, its coefficients changing with speed, is the next step.</p>
+
 <h3>The asymmetric shaft: a two-pole rotor</h3>
 <p>The rotor of a two-pole generator has slots for its winding cut along two sides, so it is stiffer
 bending one way than the other; a keyway or a flat does the same on a smaller scale (and a crack, that
@@ -847,6 +884,8 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>V</td><td>1X vector: amplitude |V|, phase lag −arg V</td><td>m</td></tr>
 <tr><td>k<sub>xy</sub></td><td>a bearing's cross-coupled stiffness (k<sub>yx</sub> = −k<sub>xy</sub>)</td><td>N/m</td></tr>
 <tr><td>λ</td><td>a fluid-film bearing's swirl ratio: k<sub>xy</sub> grows by λcΩ, c the mean of c<sub>x</sub> and c<sub>y</sub></td><td>—</td></tr>
+<tr><td>D, L, c, μ, W</td><td>on the <i>Fluid-film bearing</i> tab: journal diameter, bearing length, radial clearance, oil viscosity, load</td><td>m, m, m (µm), Pa·s, N</td></tr>
+<tr><td>ε, S</td><td>the journal's eccentricity (its offset over c); the Sommerfeld number (μNLD/W)(R/c)², N in rev/s</td><td>—</td></tr>
 <tr><td>c<sub>i</sub>, η</td><td>internal (rotating) damping of the shaft, as a damper at the disc; η = c<sub>i</sub>/k<sub>disc</sub></td><td>N·s/m, s</td></tr>
 <tr><td>H</td><td>circulatory matrix: the skew stiffness per unit speed, from internal damping and fluid swirl</td><td>N·s/m</td></tr>
 <tr><td>δ</td><td>log decrement, 2πζ/√(1 − ζ²)</td><td>—</td></tr>

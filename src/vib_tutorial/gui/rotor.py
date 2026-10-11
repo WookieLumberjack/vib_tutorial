@@ -53,6 +53,7 @@ from ..core.rotor_waterfall import Waterfall
 from .cms_time import SampleBuffer
 from .panels import spin
 from .rotor_balance import BalancingPanel
+from .rotor_bearing import BearingPanel
 from .rotor_bode import SWEEP_COLORS, BodePlots, PolarPlot, SweepPlots, nice_marks
 from .rotor_notes import THEORY_HTML, matrices_html, whirl_name
 from .rotor_stability import MEASURES, AsymmetryPlot, FullSpectrum, StabilityMap
@@ -1065,6 +1066,8 @@ class RotorPage(QtWidgets.QWidget):
         wt.addWidget(self.waterfall_plot, 1)
         wt.addWidget(self.waterfall_note)
         self.balancing = BalancingPanel(self)
+        self.bearing_panel = BearingPanel()
+        self.bearing_panel.set_top_rpm(self.top_rpm)
         self.matrices = QtWidgets.QTextBrowser()
         self.theory = QtWidgets.QTextBrowser()
         self.theory.setHtml(THEORY_HTML)
@@ -1075,10 +1078,12 @@ class RotorPage(QtWidgets.QWidget):
         self.tabs.addTab(stability_tab, "Stability")
         self.tabs.addTab(waterfall_tab, "Waterfall")
         self.tabs.addTab(self.balancing, "Balancing")
+        self.tabs.addTab(self.bearing_panel, "Fluid-film bearing")
         self.tabs.addTab(self.matrices, "Equations && matrices")
         self.tabs.addTab(self.theory, "Theory")
         self.tabs.currentChanged.connect(lambda _: self._refresh_matrices())
         self.tabs.currentChanged.connect(lambda _: self._draw_waterfall(only_new=True))
+        self.tabs.currentChanged.connect(lambda _: self._show_bearing_speed())
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)
@@ -1746,6 +1751,10 @@ class RotorPage(QtWidgets.QWidget):
         self.balancing.rotor_changed()
         self.balancing.refresh()
 
+    def _show_bearing_speed(self) -> None:
+        if self.tabs.currentWidget() is self.bearing_panel:
+            self.bearing_panel.set_speed(self.sim.omega * RPM)
+
     def _refresh_matrices(self) -> None:
         rpm = self.sim.omega * RPM
         if self.tabs.currentWidget() is not self.matrices or abs(rpm - self._matrices_speed) < 25.0:
@@ -1767,6 +1776,7 @@ class RotorPage(QtWidgets.QWidget):
         self.polar.apply_theme()
         self.sweep_plots.apply_theme()
         self.balancing.apply_theme()
+        self.bearing_panel.apply_theme()
         self._draw_tracking(full=True)
         scroll = self.theory.verticalScrollBar().value()
         self.theory.setHtml(THEORY_HTML)
@@ -1787,6 +1797,7 @@ class RotorPage(QtWidgets.QWidget):
             w.setMaximum(rpm)  # a target above it comes down (and the speed with it)
         self._set_sag(self.sim.system)
         self._new_waterfall()
+        self.bearing_panel.set_top_rpm(rpm)
         self._analysis_timer.start()
 
     def _on_orders(self) -> None:
@@ -2172,6 +2183,7 @@ class RotorPage(QtWidgets.QWidget):
                                 self.window.value())
         self.campbell_plot.set_speed(sim.omega * RPM)
         self.stability_map.set_speed(sim.omega * RPM)
+        self._show_bearing_speed()
         self.asymmetry_plot.set_here(sim.omega * RPM, sim.system.asymmetry)
         self._work_asymmetry_chart()
         self._draw_tracking()
