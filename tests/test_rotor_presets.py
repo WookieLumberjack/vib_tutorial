@@ -18,7 +18,7 @@ def criticals(name: str, forward: bool | None = None) -> list[int]:
 
 
 def test_every_preset_is_a_valid_rotor_with_its_target_in_range():
-    assert len(PRESETS) == 8
+    assert len(PRESETS) == 9
     for p in PRESETS.values():
         assert 0 < p.target_rpm < p.top_rpm and p.note
 
@@ -69,3 +69,21 @@ def test_two_pole_rotor():
     band = stability_onset(p.system, p.top_rpm / RPM)
     assert (round(band.omega * RPM), round(band.end * RPM)) == (1527, 1631)
     assert least_damped(p.system, p.target_rpm / RPM)[0] > 0  # it runs stable at the gravity critical
+
+
+def test_cracked_shaft():
+    import numpy as np
+
+    from vib_tutorial.core.rotor_sweep import probe, steady_vectors
+
+    p = PRESETS["Cracked shaft (breathing crack)"]
+    assert p.system.crack.depth == 0.4 and p.system.gravity > 0
+    assert criticals("Cracked shaft (breathing crack)", forward=True) == [1562, 1574]
+    w = np.linspace(300.0, 2000.0, 17001) / RPM
+    peaks = []
+    for order in (1, 2, 3):
+        v = np.abs(probe(steady_vectors(p.system, w, order)[:, 1], "orbit"))
+        i = int(np.argmax(v))
+        peaks.append((round(v[i] * 1e6, 1), round(w[i] * RPM)))
+    assert round(peaks[0][0]) == 164 and peaks[1:] == [(37.6, 783), (18.6, 522)]
+    assert p.target_rpm == 783.0

@@ -8,7 +8,7 @@ from collections.abc import Collection
 
 import numpy as np
 
-from ..core.rotor import DOF_NAMES, MODE_LIMIT, RPM, XD, YD, RotorSystem, gravity_response, whirl_modes
+from ..core.rotor import DOF_NAMES, MODE_LIMIT, RPM, XD, YD, RotorSystem, periodic_steady, whirl_modes
 from .cms_notes import fmt
 from .style import colors
 
@@ -170,6 +170,7 @@ def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = (
         )
     else:
         asymmetric = ""
+    cracked = _crack_note(s) if s.crack is not None else ""
     if s.overhung:
         near, far = ("B", "A") if s.a > s.length else ("A", "B")
         elements = (f"Two Euler–Bernoulli beam elements: the span between the bearings (L = {s.length:.4g} m) and "
@@ -214,21 +215,29 @@ def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = (
         swirl = ""
     fb = ks @ s.bow_shape() * s.bow
     bow_journals = f"{fmt(-fb[0], 1.0)} N at A and {fmt(-fb[3], 1.0)} N at B"
-    if s.gravity and s.asymmetry:
-        qs = s.static_deflection(omega)
-        q2 = gravity_response(s, [omega])[1][0]
+    if s.gravity and s.periodic:
+        qs, qk = (x[0] for x in periodic_steady(s, [omega], gravity=True, rotating=False, top=3))
+        breathing = s.spacing == 1
         gravity = (
             f"<h4>Gravity</h4><p>On a horizontal rotor f also holds the weights, constant: "
             f"−m<sub>A</sub>g, −mg and −m<sub>B</sub>g on y<sub>A</sub>, y<sub>D</sub> and y<sub>B</sub> "
             f"(here {fmt(s.disc_mass * s.gravity, 1.0)} N on the disc)"
             + (f", and the shaft's own weight, {fmt(s.shaft_mass * s.gravity, 1.0)} N" if s.density else "")
-            + ". On the asymmetric shaft a constant force meets a stiffness that turns, so the rotor never "
-            "settles: its steady state is periodic, q = Q<sub>0</sub> + Re(Q<sub>2</sub>e<sup>2iφ</sup>)"
-            + ("" if s.isotropic_supports else " + (4X, ...)") + ", found by harmonic balance (each "
-            "harmonic k of the response is tied to k ± 2 by ΔK). The mean sag Q<sub>0</sub> puts the disc at "
-            f"({qs[XD] * 1e6:.4g}, {qs[YD] * 1e6:.4g}) µm; about it the disc whirls at 2X, "
-            f"{abs(q2[XD]) * 1e6:.4g} µm in x and {abs(q2[YD]) * 1e6:.4g} µm in y at this speed, most where 2Ω "
-            "meets a natural frequency: the gravity critical.</p>"
+            + ". On the turning shaft a constant force meets a stiffness that turns, so the rotor never "
+            "settles: its steady state is periodic, "
+            + ("q = Q<sub>0</sub> + Re(Q<sub>1</sub>e<sup>iφ</sup> + Q<sub>2</sub>e<sup>2iφ</sup> + "
+               "Q<sub>3</sub>e<sup>3iφ</sup> + ...), found by harmonic balance (each harmonic k of the response "
+               "is tied to k ± 1, k ± 2 and k ± 3 by the breathing crack's ΔK, up to ±6X)" if breathing else
+               "q = Q<sub>0</sub> + Re(Q<sub>2</sub>e<sup>2iφ</sup>)"
+               + ("" if s.rotating_frame else " + (4X, ...)") + ", found by harmonic balance (each "
+               "harmonic k of the response is tied to k ± 2 by ΔK)")
+            + f". The mean sag Q<sub>0</sub> puts the disc at ({qs[XD].real * 1e6:.4g}, {qs[YD].real * 1e6:.4g}) "
+            "µm; about it the disc whirls at "
+            + (", ".join(f"{k + 1}X {abs(qk[k, XD]) * 1e6:.3g} µm in x and {abs(qk[k, YD]) * 1e6:.3g} µm in y"
+                         for k in range(3)) + " at this speed (on top of the unbalance's 1X), 2X most where 2Ω "
+               "meets a natural frequency and 3X where 3Ω does." if breathing else
+               f"2X, {abs(qk[1, XD]) * 1e6:.4g} µm in x and {abs(qk[1, YD]) * 1e6:.4g} µm in y at this speed, "
+               "most where 2Ω meets a natural frequency: the gravity critical.") + "</p>"
         )
     elif s.gravity:
         qs = s.static_deflection(omega)
@@ -277,7 +286,7 @@ def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = (
              "(I<sub>d</sub> − I<sub>p</sub>)τe<sup>iγ</sup>." if any(p.disc for p in s.plane_weights) else "")
     return f"""
 <h3>Equations of motion at {rpm:,.0f} rpm (Ω = {omega:.4g} rad/s)</h3>
-<p style='font-size:large' align='center'>M q̈ + (C + Ω G) q̇ + (K + Ω H{" + ΔK(φ)" if s.asymmetry else ""}) q = f(t)</p>
+<p style='font-size:large' align='center'>M q̈ + (C + Ω G) q̇ + (K + Ω H{" + ΔK(φ)" if s.periodic else ""}) q = f(t)</p>
 <p>q = [x<sub>A</sub>, x<sub>D</sub>, θ<sub>x</sub>, x<sub>B</sub> | y<sub>A</sub>, y<sub>D</sub>,
 θ<sub>y</sub>, y<sub>B</sub>]: the journals' displacements at A and B, the disc's displacement, and the
 shaft's slope at the disc (θ<sub>x</sub> = dx/dz, θ<sub>y</sub> = dy/dz), first in the horizontal x–z
@@ -319,6 +328,7 @@ along its orbit: per cycle it puts in energy where C takes it out. Damping falls
 and past the onset the whirl grows.</p>
 {_mat(omega * H, "Ω H")}
 {asymmetric}
+{cracked}
 
 <h4>State space</h4>
 <p>With z = [q, q̇] the equations become z' = A(Ω) z + B u, u = f the force (or moment) on each
@@ -334,7 +344,7 @@ conjugate pairs. The modes at this speed, lowest first:</p>
 <p><small>Whirl ratio: +1 for a circular forward whirl (the same way as the spin, x toward y), −1 for
 circular backward whirl, 0 for a straight line; in between, an ellipse. The stations are weighted by
 their masses (and the slopes by I<sub>d</sub>). A negative ζ is a mode that grows: the rotor is unstable
-at this speed.{" For the asymmetric shaft these are Floquet modes, e<sup>λt</sup> times a motion periodic in φ: each is listed by its harmonic with the most kinetic energy, and a mode locked to 1X sits at exactly the speed." if s.asymmetry else ""}</small></p>
+at this speed.{" For the turning shaft these are Floquet modes, e<sup>λt</sup> times a motion periodic in φ: each is listed by its harmonic with the most kinetic energy, and a mode locked to 1X sits at exactly the speed." if s.periodic else ""}</small></p>
 
 <h4>The 1X forces</h4>
 <p>{unbalance} turns with the shaft, the keyphasor mark at angle φ (φ' = Ω). For the heavy spot at the
@@ -440,9 +450,10 @@ excitations).</p>
 lines (<i>Also draw</i>), as far up in speed as <i>Speeds up to</i> is set. <b>2X</b>: a shaft stiffer
 one way than the other (a keyway, a crack) flexes twice per revolution under its own weight, and
 misalignment pulls twice per revolution; where a forward branch meets 2X, at about half its critical
-speed, such a rotor has a <i>secondary critical</i>. <b>½X</b>: the oil in a plain journal bearing
-circulates at about half the shaft's speed, so its instability begins near ½X (below). The model has no
-2X source and no ½X source; the lines show where a real machine would have trouble.</p>
+speed, such a rotor has a <i>secondary critical</i>. Set an asymmetry or a crack on a horizontal rotor
+to see one (below). <b>3X</b>: a breathing crack's stiffness changes with 3X in it too, so its weight
+drives 3X near a third of the critical speed. <b>½X</b>: the oil in a plain journal bearing circulates at
+about half the shaft's speed, so its instability begins near ½X (below).</p>
 
 <h3>Anisotropic supports and backward whirl</h3>
 <p>Supports stiffer vertically than horizontally (common: gravity, foundations, oil-film bearings) split
@@ -547,6 +558,7 @@ and the vibration about it is exactly what it would be without gravity. In parti
 makes no whirl, however different the supports' stiffness vertically and horizontally: a constant force
 on a linear rotor only moves its equilibrium. (A shaft stiffer one way than the other is the exception:
 it bends more under its weight twice per turn, a 2X excitation; see <i>The asymmetric shaft</i> below.
+So is a crack, which the weight opens and shuts as the shaft turns; see <i>The cracked shaft</i>.
 And a fluid-film bearing's stiffness depends on the load it carries.)</p>
 <p>The sag need not be straight down. Where the stiffness is not symmetric the weight also pushes
 sideways. With cross-coupled bearings, k<sub>xy</sub> = 15,000 N/m, the journals settle 17° from the
@@ -781,6 +793,47 @@ the turning stiffness ties each harmonic k to k ± 2, which closes at once on is
 step of the rest (the exact update), the kick of the turning stiffness at mid-step on the velocities,
 and the other half step. It agrees with the harmonic balance to about 10<sup>−5</sup>.</p>
 
+<h3>The cracked shaft</h3>
+<p>A fatigue crack grows across a shaft from its surface, often where the bending stress is highest,
+at a shoulder or a shrink fit. Set the <i>Crack depth</i> a/D in the <i>Shaft and disc</i> box (up to
+half the shaft), with its mouth's angle from the keyphasor mark and its place along the shaft. The 3D
+view draws it as a dark tick on the shaft, pointing at its mouth, thick while it is open.</p>
+<p><b>A hinge.</b> Where it is open, the crack lets the shaft's slope jump across it: Δθ = c M under a
+bending moment M. Its compliance c comes from fracture mechanics (Dimarogonas and Papadopoulos): cut
+the crack into strips across its front, each an edge crack in a strip as tall as the shaft there, and
+add up the energy each releases as the crack grows, (1 − ν²)K<sub>I</sub>²/E. Bending that pulls the
+mouth open (the moment along the crack's front) loads every strip; bending across it loads one half in
+tension and the other in compression. So it gives far more one way: for a/D = 0.4 in the 10 mm shaft,
+c<sub>o</sub> = 1.45 × 10<sup>−4</sup> rad/(N·m) opening it, c<sub>a</sub> = 0.60 × 10<sup>−4</sup> across.
+On the shaft the hinge is condensed out exactly, with everything else, onto the stations: it takes
+b b<sup>T</sup> c/(1 + c s) off their stiffness, b the moment at the crack that the stations' displacements
+make and s the shaft's stiffness against the jump. Open, it is an asymmetric shaft, its two axes along
+and across the mouth, softened.</p>
+<p><b>Breathing.</b> A real crack is shut most of the time, its faces pressed together, unless the
+bending stretches its side of the shaft. On a horizontal rotor the shaft's weight bends it far more than
+its vibration does (<i>weight dominance</i>, as in Mayes and Davies' model), so the weight sets it: fully
+open as its mouth turns to the side the sag stretches (the bottom, between the bearings), shut half a turn
+later. Between them it is open by g = (1 + cos)/2 of the angle from there. That opening changes once per
+revolution, and it multiplies a stiffness that already changes twice per revolution, so the stiffness
+has 1X, 2X and 3X in it, not only the asymmetric shaft's 2X. And it changes even in axes turning with the
+shaft, because the weight does not turn: the modes come from Hill's method, the steady states from
+harmonic balance with every harmonic tied to its neighbours ±1, ±2 and ±3 (cut at ±6X), and the time
+stepping kicks the velocities with the whole turning stiffness at each mid-step. On a vertical rotor
+nothing opens it: a breathing crack stays shut, invisible. Untick <i>Breathing</i> to hold it open, as a
+sawn notch.</p>
+<p><b>What it does.</b> Load the <i>Cracked shaft</i> preset: a crack 40% through the shaft at the disc,
+laid horizontal. On average over a turn it takes 3.6% off the disc's stiffness along its mouth and
+1.7% across, so the critical speed splits a little, to 1562 and 1574 rpm. The weight then drives three
+whirls the round shaft doesn't have. A <b>2X</b>, 37.6 µm at 783 rpm, half the critical speed, as the
+asymmetric shaft's. A <b>3X</b>, 18.6 µm at 522 rpm, a third of it: the asymmetric shaft has none, so a
+3X peak at a third of the critical on a run-up points to a crack rather than to slots or a keyway.
+And a <b>1X</b>: with no unbalance at all the disc whirls 107 µm at the critical. It adds to the
+unbalance's, so the 1X vector changes as the crack grows (on a machine, a slowly drifting 1X vector is
+the other warning sign): with the heavy spot at the crack's mouth the disc whirls 164 µm at the critical,
+against 54 µm uncracked; with the mouth opposite it, 52 µm. Held open (untick <i>Breathing</i>) the crack
+has no 3X and twice the 2X, 75.3 µm at 775 rpm: it is then an asymmetric shaft. The 2X and 3X grow fast
+with the depth: at a/D = 0.2, 0.3, 0.4 and 0.5 the 2X peaks at 9.5, 21.8, 37.6 and 51.5 µm.</p>
+
 <h3>Waterfall and cascade plots</h3>
 <p>A spectrum analyser on a machine takes the spectrum of a block of signal, then of the next, and so
 on. The <i>Waterfall</i> tab does the same with the full spectrum of the orbit at a station: blocks of
@@ -925,6 +978,12 @@ the dot sits inside the tongue and the whirl grows at exactly 1X. Raise the supp
 <li>Untick <i>Horizontal rotor</i> on the <i>Two-pole rotor</i> preset, set the asymmetry to 10% and the
 unbalance to 20 g·mm, and look at the disc's orbit on the Bode plot with the heavy spot at 0°, 45° and
 90°: one tall peak, two short ones, one tall one.</li>
+<li>Load the <i>Cracked shaft</i> preset, choose <i>Orbit</i> and <i>3X</i> beside the probe, set the ramp
+rate to 100 rpm/s and run up and coast down from 400 to 1000 rpm: the 3X peaks at 547 rpm going up and
+499 rpm coming down, either side of the steady state's 522 rpm (a third of the critical speed), and the
+2X (choose <i>2X</i>) at 804 and 757 rpm about 783 rpm. The 3X lags most: it sweeps through its
+resonance three times as fast as the speed. Untick <i>Breathing</i>: the 3X is gone and the 2X doubles. Tick it again and turn the crack's
+angle to 180°, opposite the heavy spot: the 1X at the critical speed falls from 164 to 52 µm.</li>
 <li>Pause near the critical speed and turn the 3D view: the shaft bows in one plane, which turns with
 the spin, rather than flapping back and forth.</li>
 </ol>
@@ -959,6 +1018,41 @@ the spin, rather than flapping back and forth.</li>
 <tr><td>T, W, α</td><td>trial and correction weights (mass × radius at an angle); influence coefficient (V<sub>1</sub> − V<sub>0</sub>)/T</td><td>kg·m (g·mm); m per kg·m</td></tr>
 <tr><td>τ, γ</td><td>disc skew (its axis's tilt from the shaft's), and its angle from the keyphasor mark</td><td>rad (°)</td></tr>
 <tr><td>Δ, α</td><td>shaft asymmetry (EI(1 ± Δ) about its stiff and soft axes), and the stiff axis's angle from the keyphasor mark</td><td>—, rad (°)</td></tr>
-<tr><td>ΔK(φ)</td><td>the asymmetric shaft's stiffness less its mean, turning with it</td><td>N/m</td></tr>
+<tr><td>a/D, β<sub>c</sub></td><td>a crack's depth from the shaft's surface, over its diameter; its mouth's angle from the keyphasor mark</td><td>—, rad (°)</td></tr>
+<tr><td>c<sub>o</sub>, c<sub>a</sub></td><td>a crack's compliance (the jump in slope across it per unit bending moment), opening it and across</td><td>rad/(N·m)</td></tr>
+<tr><td>g(φ)</td><td>how open a breathing crack is, 0 (shut) to 1</td><td>—</td></tr>
+<tr><td>ΔK(φ)</td><td>the asymmetric or cracked shaft's stiffness less its mean, turning with it</td><td>N/m</td></tr>
 </table>
 """
+
+
+def _crack_note(s: RotorSystem) -> str:
+    """The live notes' section on the crack: its compliance, its loss of stiffness and how it breathes."""
+    crack = s.crack
+    c_open, c_across = s.crack_compliances
+    if not s.crack_opening:
+        state = ("It is a breathing crack, but nothing opens it: with no gravity its faces stay pressed together, "
+                 "and the shaft is as if round. Untick <i>Breathing</i> to hold it open.")
+    elif crack.breathing:
+        down = s.crack_sign > 0
+        state = ("It breathes: the shaft's weight opens it as its mouth turns "
+                 + ("down (the shaft sags there, stretching its bottom)" if down else
+                    "up (the shaft hogs there, stretching its top)")
+                 + ", and shuts it half a turn later, open by g(φ) = (1 "
+                 + ("−" if down else "+") + " sin(φ + β<sub>c</sub>))/2. The loss is g(φ) times the open crack's, "
+                 "so it has the mean ½P in K and harmonics 1X, 2X and 3X: ΔK(φ) = Σ E<sub>k</sub>e<sup>ikφ</sup> + "
+                 "conj. Even on isotropic supports it changes in axes turning with the shaft (the weight does "
+                 "not turn), so the modes below come from Hill's method, from harmonics up to ±3Ω.")
+    else:
+        state = ("It is held open: the loss is P + [the deviatoric part], an asymmetric shaft's, its soft axis along "
+                 "the mouth, turning with the shaft.")
+    return (
+        f"<h4>The crack</h4><p>A crack {crack.depth:.0%} of the shaft's diameter deep, at z = {s.crack_z * 1e3:.4g} mm, "
+        f"its mouth at β<sub>c</sub> = {math.degrees(crack.angle):.0f}° from the mark. Open, it is a hinge whose "
+        f"compliance is c<sub>o</sub> = {c_open:.3g} rad/(N·m) to bending that opens it and c<sub>a</sub> = "
+        f"{c_across:.3g} across. Condensed onto the stations it takes D = b b<sup>T</sup> c/(1 + c s) off one "
+        "plane's stiffness, b the bending moment at the crack per unit of each station's displacement and s the "
+        "shaft's stiffness against a jump in its slope there: D<sub>o</sub> along the mouth and D<sub>a</sub> "
+        "across, so in fixed axes P = (D<sub>o</sub> + D<sub>a</sub>)/2 on both planes and the deviatoric part of "
+        f"(D<sub>o</sub> − D<sub>a</sub>)/2 turning at 2X, as the asymmetric shaft's. {state}</p>"
+    )

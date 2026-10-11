@@ -487,7 +487,7 @@ exact modes:
 The **Jeffcott rotor** page spins a disc on a flexible shaft, between two bearings
 or overhung past one, each bearing on springs and dampers to ground, horizontally and vertically. The disc has a mass,
 polar and diametral moments of inertia, and a mass unbalance; the disc can also be skewed on
-the shaft, the shaft bent (bowed), and made stiffer about one axis than the other (asymmetric). With the Jeffcott model's massless shaft the model has 8 DOFs: in each
+the shaft, the shaft bent (bowed), made stiffer about one axis than the other (asymmetric), and cracked. With the Jeffcott model's massless shaft the model has 8 DOFs: in each
 plane, both journals, the disc, and the shaft's slope at the disc. Give the shaft its mass and
 it becomes a beam finite element model, reduced to those 8 DOFs plus a few of the shaft's own
 modes. It is stepped in state space with the same exact first-order-hold update as the chain, as
@@ -495,7 +495,7 @@ the speed ramps to a target.
 
 - **Presets**: the classic Jeffcott rotor, an off-centre disc, anisotropic supports, an
   overhung rotor, a long shaft whose own mass matters, a two-pole rotor with an asymmetric shaft,
-  oil swirl at λ = ½, and plain journal bearings, both going into oil whip. Each loads a rotor with a speed range to suit it and a note on what to look for.
+  a cracked shaft, oil swirl at λ = ½, and plain journal bearings, both going into oil whip. Each loads a rotor with a speed range to suit it and a note on what to look for.
 - **Shaft mass**: tick it (and set the density) and the shaft gets its mass, its sections'
   rotary inertia and their gyroscopic moment. It is then 2 to 60 Euler–Bernoulli beam elements
   with consistent or lumped mass, reduced Craig–Bampton style to the stations and the shaft's
@@ -530,7 +530,7 @@ the speed ramps to a target.
   switches the drawing between a DC-coupled probe's view and an AC-coupled one. The tracking,
   the spectrum and the phase always use the vibration about the sag, which is exactly the
   response without gravity: gravity alone makes no whirl, even on anisotropic supports (unless
-  the shaft is asymmetric). Cross-coupled bearings and internal damping push the sag sideways.
+  the shaft is asymmetric or cracked). Cross-coupled bearings and internal damping push the sag sideways.
 - **Asymmetric shaft**: a shaft stiffer about one axis, EI(1 + Δ), than across it, EI(1 − Δ),
   as a two-pole generator's slots make it, its stiff axis at an angle from the keyphasor mark.
   Its stiffness turns with it, so it has two critical speeds and between them an unstable band
@@ -539,6 +539,14 @@ the speed ramps to a target.
   heavy spot sits from the stiff axis. The modes are exact Floquet modes (from axes turning with
   the shaft, or Hill's method on anisotropic supports), the steady states come by harmonic
   balance, and the time step splits off the turning stiffness as a mid-step kick.
+- **Cracked shaft**: a transverse crack, its depth (up to half the shaft), its place along the
+  shaft and its mouth's angle from the mark. Open, it is a hinge whose compliance comes from
+  fracture mechanics (much larger to bending that opens it), condensed exactly onto the stations.
+  Breathing, the shaft's weight opens and shuts it once a turn (weight dominance, as in Mayes and
+  Davies' model), so its stiffness has 1X, 2X and 3X in it: the weight drives 2X and 3X whirls
+  near a half and a third of the critical speed, and adds its own 1X to the unbalance's. The same
+  machinery takes it, Hill's method and harmonic balance over every harmonic; the Bode and polar
+  plots track 3X too.
 - **Balancing, in one plane or two**: the field procedure by influence coefficients. Read the
   slow roll, the 1X vector as found, then with a trial weight, and the page works out the
   correction weight (grams at a radius and an angle from the keyphasor mark), puts it on and
@@ -595,7 +603,7 @@ the speed ramps to a target.
   peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²), the bent
   shaft (slow-roll runout, why it is subtracted before balancing), the couple unbalance,
   gravity's static sag, the asymmetric shaft (its unstable band, the gravity critical and the
-  unbalance angle),
+  unbalance angle), the breathing crack (its compliance, 2X and 3X, and its 1X),
   single- and two-plane balancing by influence coefficients (where the planes go, and why planes
   close together need large weights: the influence matrix's condition number),
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
@@ -697,6 +705,15 @@ shaft, the centrifugal force beats the soft axis's stiffness but not the stiff o
 grows locked to 1X. Undamped, the band runs exactly between the two critical speeds (a test
 checks); damping narrows it, and below Δ = 0.123 on the default supports there is none. Above
 it the rotor is stable again, unlike the instabilities from cross-coupling and internal damping.
+
+![Cracked shaft preset (a crack 40% through the shaft at the disc, laid horizontal) run up and coasted down between 400 and 1000 rpm at 100 rpm/s, with the Bode plot tracking the disc orbit's 3X: the steady-state 3X peak is 18.6 µm at 522 rpm, a third of the critical speeds of 1562 and 1574 rpm; the run-up's peak comes at 547 rpm and the coast-down's at 499](docs/images/jeffcott_cracked.png)
+
+A crack in a horizontal shaft breathes: the weight opens it as its mouth turns down and shuts it
+half a turn later. Its stiffness then changes once a turn, with 2X and 3X in it, so the weight
+drives a 2X whirl near half the critical speed, as the asymmetric shaft's does, and a 3X near a
+third of it, which the asymmetric shaft has none of. The *Cracked shaft* preset's disc whirls
+37.6 µm at 2X at 783 rpm and 18.6 µm at 3X at 522 rpm, and its 1X at the critical is 164 µm
+against 54 µm uncracked. Held open, the crack is an asymmetric shaft: no 3X, and twice the 2X.
 
 ## The math, briefly
 

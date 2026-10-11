@@ -2020,6 +2020,72 @@ def test_rotor_asymmetric_shaft(app):
     assert "nothing drives 2X on a round shaft" in p.sweep_summary.text()
 
 
+def test_rotor_cracked_shaft(app):
+    from vib_tutorial.core.rotor import RotorSystem
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    p.running = False
+    p.load_preset("Cracked shaft (breathing crack)")
+    p._refresh_analysis()
+    s = p.sim.system
+    assert p.preset.currentText() == "Cracked shaft (breathing crack)"
+    assert s.crack.depth == pytest.approx(0.4) and s.crack.breathing and p.crack_depth.value() == pytest.approx(40.0)
+    assert "Crack 40% deep" in p.shaft_note.text() and "opened by the weight" in p.shaft_note.text()
+    assert "1,562 rpm" in p.crit_label.text() and "1,574 rpm" in p.crit_label.text()
+    # The Bode plot tracks 3X: the weight drives it most near a third of the critical speed.
+    p.probe_direction.setCurrentIndex(2)
+    p.probe_order.setCurrentIndex(2)
+    p.sweep_from.setValue(450.0)
+    p.sweep_to.setValue(600.0)
+    assert "3X amplitude" in p.bode.amp.getAxis("left").labelText
+    text = p.sweep_summary.text()
+    assert "peak 18.6 µm at 522 rpm" in text and "a third of the critical speed 1,562 rpm" in text
+    p.ramp.setValue(2000.0)
+    p.start_sweep()
+    for _ in range(400):
+        if p.run_up is None:
+            break
+        p.step(0.05)
+    assert p.run_up is None and len(p.sweeps) == 2 and len(p.sweeps[0].vectors3) == len(p.sweeps[0])
+    assert "3X peak" in p.sweep_summary.text()
+    # The 3D view draws the crack; the spectrum marks +2X and +3X.
+    p._draw()
+    assert p.view.crack_mark.getData()[0].size == 2
+    assert "heavy spot leads" not in p.readout.text()
+    p.tabs.setCurrentWidget(p.spectrum.parentWidget())
+    p._draw_spectrum()
+    assert all(line.isVisible() for line in p.spectrum.sync)
+    w.set_theme("Dark")
+    # The matrices tab explains the crack.
+    p.tabs.setCurrentWidget(p.matrices)
+    p._refresh_matrices()
+    text = p.matrices.toPlainText()
+    assert "The crack" in text and "It breathes" in text and "Floquet" in text
+    # Held open: a softened asymmetric shaft, no 3X.
+    p.crack_breathing.setChecked(False)
+    p._refresh_analysis()
+    assert not p.sim.system.crack.breathing and p.sim.system.spacing == 2
+    assert "nothing drives 3X on an asymmetric shaft" in p.sweep_summary.text()
+    # A vertical rotor: nothing opens a breathing crack.
+    p.crack_breathing.setChecked(True)
+    p.gravity.setChecked(False)
+    p._refresh_analysis()
+    assert not p.sim.system.periodic and "but shut" in p.shaft_note.text()
+    # A crack is kept inside the shaft, and depth 0 takes it away.
+    p.crack_position.setValue(1.5)
+    assert p.sim.system.crack.position < 1.0
+    p.crack_depth.setValue(0.0)
+    assert p.sim.system.crack is None and not p.crack_angle.isEnabled()
+    p.set_system(RotorSystem())
+    p._refresh_analysis()
+    p._draw()
+    assert not len(p.view.crack_mark.getData()[0])
+
+
 def test_rotor_fluid_film_bearing(app):
     from vib_tutorial.core.fluid_bearing import JournalBearing
     from vib_tutorial.gui.main_window import MainWindow

@@ -16,9 +16,10 @@ keyphasor to the probe's positive peak. For the orbit, (x + iy) = F e^{iφ} +
 B e^{-iφ}: F is the forward whirl, B the backward, |F| + |B| the major
 semi-axis and -arg F the angle from the mark back to the high spot.
 
-The tracking filter takes the 2X vector over each revolution too, the same way
-(x + iy against e^{2iφ}): an asymmetric shaft's weight drives it, most at half
-a critical speed (the gravity critical).
+The tracking filter takes the 2X and 3X vectors over each revolution too, the
+same way (x + iy against e^{2iφ}, e^{3iφ}): an asymmetric shaft's weight drives
+2X, most at half a critical speed (the gravity critical), and a breathing
+crack's drives 2X and 3X, most at a half and a third of one.
 
 RunUpCoastDown drives a RotorSimulator from one speed to another and back at
 its ramp rate, recording each leg as its own TrackedSweep.
@@ -36,16 +37,15 @@ from .rotor import (
     RotorSamples,
     RotorSimulator,
     RotorSystem,
-    gravity_response,
-    synchronous_response,
+    steady_harmonics,
     whirl_modes,
 )
 
 STATIONS = ("Bearing A", "Disc", "Midspan", "Bearing B")
 DIRECTIONS = ("x", "y", "orbit")  # probe directions; "orbit" is the major axis
-ORDERS = (1, 2)  # the harmonics of the speed tracked: 1X, and 2X
+ORDERS = (1, 2, 3)  # the harmonics of the speed tracked: 1X, 2X and 3X
 SETTLE_MAX = 2.0  # s, the longest dwell at the starting speed before a sweep is recorded
-SAG_SPEEDS = 16  # an asymmetric shaft's sag under many samples' speeds is interpolated between this many
+SAG_SPEEDS = 16  # a turning (asymmetric or cracked) shaft's sag under many samples' speeds is interpolated between this many
 TWO_PI = 2.0 * math.pi
 
 
@@ -63,8 +63,8 @@ def vibration(system: RotorSystem, q: np.ndarray, omega: np.ndarray) -> np.ndarr
     if not system.gravity:
         return q
     omega = np.asarray(omega, dtype=float)
-    if system.asymmetry and omega.size > SAG_SPEEDS and np.ptp(omega) > 0.0:
-        # An asymmetric shaft's sag takes a harmonic balance at each speed: through a ramp, work it
+    if system.periodic and omega.size > SAG_SPEEDS and np.ptp(omega) > 0.0:
+        # A turning shaft's sag takes a harmonic balance at each speed: through a ramp, work it
         # out at a few speeds across the samples' and interpolate (it changes smoothly with speed).
         grid = np.linspace(omega.min(), omega.max(), SAG_SPEEDS)
         sag = system.static_deflection(grid)
@@ -78,16 +78,15 @@ def station_motion(system: RotorSystem, q: np.ndarray) -> np.ndarray:
 
 
 def steady_vectors(system: RotorSystem, omegas: np.ndarray, order: int = 1) -> np.ndarray:
-    """Steady-state 1X (or 2X) vectors at each station, (len(omegas), 4, 2) complex: (x, y) = Re(V e^{iφ})
-    (or Re(V e^{2iφ})).
+    """Steady-state vectors of one order at each station, (len(omegas), 4, 2) complex: (x, y) = Re(V e^{i order φ}).
 
-    The 2X is gravity's on an asymmetric shaft (zero on a round one, or with no gravity).
+    Of the whole steady state, gravity's and the 1X loads' (steady_harmonics): as the
+    tracking filter measures it. A round shaft has only 1X; an asymmetric shaft's
+    weight drives 2X, a breathing crack's 1X, 2X and 3X.
     """
-    if order == 2:
-        return station_motion(system, gravity_response(system, omegas)[1])
-    if order != 1:
+    if order not in ORDERS:
         raise ValueError(f"order must be one of {ORDERS}")
-    return station_motion(system, synchronous_response(system, omegas))
+    return station_motion(system, steady_harmonics(system, omegas, max(ORDERS))[1][:, order - 1])
 
 
 def probe(vectors: np.ndarray, direction: str) -> np.ndarray:
@@ -136,6 +135,7 @@ class TrackedSweep:
     vectors: list[np.ndarray] = field(default_factory=list)  # each (4, 2) complex: the 1X vectors
     peaks: list[np.ndarray] = field(default_factory=list)  # each (4, 3): max |x|, max |y|, max radius
     vectors2: list[np.ndarray] = field(default_factory=list)  # each (4, 2) complex: the 2X vectors
+    vectors3: list[np.ndarray] = field(default_factory=list)  # each (4, 2) complex: the 3X vectors
 
     @property
     def label(self) -> str:
@@ -153,8 +153,8 @@ class TrackedSweep:
     def trace(self, station: int, direction: str, order: int = 1) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """(speed rad/s, 1X (or 2X) complex, per-revolution peak) at one station, in one direction."""
         w, v, p = self.arrays()
-        if order == 2:
-            v = np.array(self.vectors2).reshape(v.shape)
+        if order != 1:
+            v = np.array((self.vectors2, self.vectors3)[order - 2]).reshape(v.shape)
         return w, probe(v[:, station], direction), p[:, station, peak_column(direction)]
 
     def peak(self, station: int, direction: str, order: int = 1) -> tuple[float, float]:
@@ -221,6 +221,7 @@ class RevolutionTracker:
         self.sweep.speed.append(float(np.interp(middle, ph, om)))
         self.sweep.vectors.append(dft(1))
         self.sweep.vectors2.append(dft(2))
+        self.sweep.vectors3.append(dft(3))
         self.sweep.peaks.append(peak)
 
 

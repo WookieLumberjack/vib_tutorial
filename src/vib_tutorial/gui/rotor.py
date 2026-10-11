@@ -27,14 +27,17 @@ from ..core.rotor import (
     YA,
     YB,
     YD,
+    CRACK_DEPTH_MAX,
     MODE_LIMIT,
     STEEL,
     Bearing,
+    Crack,
     PlaneWeight,
     Campbell,
     RotorSimulator,
     RotorSystem,
     campbell,
+    steady_harmonics,
     whirl_modes,
 )
 from ..core.rotor_sweep import (
@@ -44,7 +47,7 @@ from ..core.rotor_sweep import (
     TrackedSweep,
     lag_degrees,
     probe,
-    steady_vectors,
+    station_motion,
 )
 from ..core.fluid_bearing import JournalBearing
 from ..core.rotor_balance import SteadyMeasurement
@@ -66,7 +69,7 @@ FRAME_MS = 16
 SPEEDS = (0.1, 0.25, 0.5, 1.0, 2.0)  # simulation speed, × real time
 TOP_RPM = 10_000.0  # the default speed range
 MAX_TOP_RPM = 60_000.0  # the widest it can be set to
-ORDERS = {2.0: "2X", 0.5: "½X"}
+ORDERS = {2.0: "2X", 3.0: "3X", 0.5: "½X"}
 CUSTOM = "Custom"  # the preset box's entry for a rotor that is none of the presets  # other orders of the speed the Campbell diagram can draw
 DIRECTION_NAMES = ("x (horizontal probe)", "y (vertical probe)", "Orbit (major axis)")
 # Columns of the history: (x, y) at each station, then the unbalance's angle φ and the speed Ω.
@@ -79,6 +82,7 @@ ORBIT_MAX_TIME = 1.0  # s, the longest orbit trail (at low speed)
 AXIAL = 4.0  # display length of the shaft in the 3D view
 SWING = 0.5  # display units: the largest whirl is magnified to this
 SHAFT_DOT = 0.1  # display units: how far off the shaft's centre line a weight on it is drawn
+CRACK_TICK = 0.22  # display units: the longest tick a crack is drawn as, from the shaft's centre line
 GROUND = 1.1  # display units from the shaft's axis to the supports
 HOUSING = 0.16  # display units: an oil-film bearing's housing, drawn round the bearing's axis
 DAMPED = 0.3  # modes with more damping than this are drawn hollow and are not called critical
@@ -96,13 +100,18 @@ WATERFALL_FRAMES = 15  # new spectra are drawn at most every this many frames (e
 WATERFALL_RANGE = 2.0  # the waterfall keeps frequencies up to this many times the top speed
 CHART_BUDGET = 0.012  # s per frame spent filling in the asymmetry chart while it shows
 CHART_DELTA = 0.5  # the asymmetry chart's top Δ (taller only for a rotor past it)
-ORDER_NAMES = ("1X", "2X")  # what the Bode and polar plots can track
+ORDER_NAMES = ("1X", "2X", "3X")  # what the Bode and polar plots can track
 
 ORDER_TIPS = {
-    2.0: "<p>Twice the speed. A shaft stiffer one way than the other (a keyway, a crack) bends twice per "
-         "turn under its weight, and misalignment pulls twice per turn too. Where a forward branch meets "
-         "this line, at about half its critical speed, a horizontal rotor with such a shaft whirls at "
-         "2X: a <i>secondary critical</i>. The model has neither, so nothing drives it here.</p>",
+    2.0: "<p>Twice the speed. A shaft stiffer one way than the other (a two-pole rotor's slots, a "
+         "keyway, a crack) bends twice per turn under its weight, and misalignment pulls twice per turn "
+         "too. Where a forward branch meets this line, at about half its critical speed, a horizontal "
+         "rotor with such a shaft whirls at 2X: a <i>secondary critical</i> (set an asymmetry Δ or a "
+         "crack, and tick <i>Horizontal rotor</i>).</p>",
+    3.0: "<p>Three times the speed. A breathing crack, opened and closed by the shaft's weight once per "
+         "turn, changes the stiffness with 3X in it too, so the weight drives a 3X whirl where a forward "
+         "branch meets this line, at about a third of the critical speed. An asymmetric shaft's stiffness "
+         "changes only at 2X: no 3X.</p>",
     0.5: "<p>Half the speed. Oil in a plain journal bearing swirls at just under half the shaft's speed, "
          "so its whirl starts near ½X (<i>oil whirl</i>) and, once ½X has passed the first natural "
          "frequency, locks onto it (<i>oil whip</i>): set the bearings' swirl ratio λ to 0.5. A rub "
@@ -145,7 +154,8 @@ VIEW_TIP = (
     "magnified (the scale is in the top corner). Drag to turn the view; double-click to reset it.</p>"
     "<p>The red dot on the disc is the heavy spot, where its unbalance is: it turns with the shaft. The "
     "tick across the rim is the keyphasor mark that angles are measured from, and squares are balance "
-    "weights. An asymmetric shaft's stiff axis is the dashed diameter across the disc. "
+    "weights. An asymmetric shaft's stiff axis is the dashed diameter across the disc; a crack is the "
+    "dark tick on the shaft, pointing at its mouth and thick while it is open. "
     "The thin lines are the orbits of the four stations (bearings, disc, midspan).</p>"
 )
 INTERNAL_TIP = (
@@ -212,13 +222,26 @@ ASYMMETRY_TIP = (
     "speed (the <i>gravity critical</i>; plot 2X on the Bode plot). The 1X response depends on where the "
     "heavy spot sits from the stiff axis.</p>"
 )
+CRACK_TIP = (
+    "<p>A transverse crack in the shaft, cut to a depth a/D from the surface, its mouth at the angle "
+    "given from the keyphasor mark. Open, it is a hinge: the shaft's slope jumps across it, much more "
+    "under bending that pulls its mouth open than across (its compliance comes from fracture "
+    "mechanics, for depths up to half the shaft).</p>"
+    "<p><i>Breathing</i>, it is opened and closed by the shaft's weight as it turns (tick "
+    "<i>Horizontal rotor</i>): fully open with its mouth on the side the sag stretches, shut half a turn "
+    "later. That stiffness changes with 1X, 2X and 3X in it, so the weight drives 2X and 3X whirls, "
+    "largest near a half and a third of the critical speed, and changes the 1X. Unticked, it is held "
+    "open (a notch): then it is an asymmetric shaft, softened.</p>"
+    "<p>The position is z/L from bearing A, as the disc's.</p>"
+)
 GRAVITY_TIP = (
     "<p>A horizontal rotor: gravity pulls the disc and the journals down. The shaft sags and the "
     "supports give, so the rotor whirls about a point below the bearings' centre. The model is linear, "
     "so the vibration about that point is just as without gravity: on these supports gravity alone "
     "makes no whirl. With cross-coupled bearings or internal damping the sag also goes sideways.</p>"
-    "<p>An asymmetric shaft is the exception: its stiffness turns under its weight, so gravity drives "
-    "it at 2X.</p>"
+    "<p>An asymmetric or cracked shaft is the exception: its stiffness turns under its weight, so "
+    "gravity drives it at 2X (and a breathing crack at 1X and 3X too). Without gravity nothing opens a "
+    "breathing crack.</p>"
 )
 SAG_TIP = (
     "<p>Draw the motion with the static sag, as a DC-coupled probe reads the shaft's position in its "
@@ -287,13 +310,14 @@ class RotorView(pg.PlotWidget):
         self.weight_dots = pg.ScatterPlotItem(size=7, symbol="s")  # balance weights, on the disc or the shaft
         self.mark = pg.PlotCurveItem()  # the keyphasor mark: a tick across the disc's rim
         self.stiff_axis = pg.PlotCurveItem()  # an asymmetric shaft's stiff axis: a diameter across the disc
+        self.crack_mark = pg.PlotCurveItem()  # a crack: a tick on the shaft toward its mouth
         self.show_heavy = True
         self.stations = pg.ScatterPlotItem(size=8)
         self.triad = pg.PlotCurveItem(connect="pairs")
         self.triad_labels = [pg.TextItem(t, anchor=(0.5, 0.5)) for t in ("x", "y", "z")]
         self.end_labels = [pg.TextItem(t, anchor=(0.5, 0.0)) for t in ("A", "B")]
         for item in (self.frame, self.axis, self.supports, *self.trails, self.shaft, self.disc,
-                     self.spoke, self.stiff_axis, self.heavy, self.weight_dots, self.mark, self.stations, self.triad, *self.triad_labels, *self.end_labels):
+                     self.spoke, self.stiff_axis, self.crack_mark, self.heavy, self.weight_dots, self.mark, self.stations, self.triad, *self.triad_labels, *self.end_labels):
             plot.addItem(item)
         self.scale_label = pg.TextItem(anchor=(1.0, 0.0))
         plot.addItem(self.scale_label)
@@ -468,6 +492,16 @@ class RotorView(pg.PlotWidget):
             self.stiff_axis.setData(*self.project(np.vstack([on_disc(angle, 0.75), on_disc(angle + math.pi, 0.75)])))
         else:
             self.stiff_axis.setData([], [])
+        if s.crack is not None and s.crack.depth:
+            angle = phase + s.crack.angle
+            centre = s.deflection(q, [s.crack_z])[0] * g
+            reach = CRACK_TICK * (0.4 + 0.6 * s.crack.depth / CRACK_DEPTH_MAX)
+            tick = np.array([[centre[0], centre[1]], [centre[0] + reach * math.cos(angle),
+                                                      centre[1] + reach * math.sin(angle)]])
+            self.crack_mark.setData(*self.project(np.column_stack([tick, np.full(2, self._z(s.crack_z))])))
+            self.crack_mark.setPen(pg.mkPen(colors.strong, width=1.5 + 3.0 * float(s.crack_open(phase))))
+        else:
+            self.crack_mark.setData([], [])
 
         # Supports: a spring and a damper to ground below (y) and to the side wall (x) at each bearing;
         # or an oil film's housing round the bearing's axis, on a pedestal.
@@ -888,7 +922,7 @@ class RotorPage(QtWidgets.QWidget):
         self._sweep_pairs = 0  # sweeps started since the plots were cleared (each pair's colour)
         self._steady_rpm = np.empty(0)  # the steady-state curve: speeds (rpm)
         self._steady_vectors = np.empty((0, len(STATIONS), 2), dtype=complex)  # and 1X vectors there
-        self._steady_vectors2 = np.empty((0, len(STATIONS), 2), dtype=complex)  # and 2X vectors there
+        self._steady_orders = [self._steady_vectors] * len(ORDER_NAMES)  # and the 1X, 2X and 3X vectors
         self.asym_chart: AsymmetryChart | None = None  # the stability tab's asymmetry chart, as far as it got
         self.onset: Onset | None = None  # where the rotor goes unstable, if it does up to top_rpm
         self.rubbed = False  # the whirl grew past RUB of the span and the simulation paused
@@ -1244,9 +1278,10 @@ class RotorPage(QtWidgets.QWidget):
         self.probe_order = QtWidgets.QComboBox()
         self.probe_order.addItems(ORDER_NAMES)
         self.probe_order.setToolTip(
-            "<p>Track the 1X vector (once per revolution: the unbalance, the bow, the skew) or the 2X vector "
-            "(twice per revolution). On a round shaft nothing drives 2X; an asymmetric shaft's weight does, "
-            "most near half its critical speeds.</p>")
+            "<p>Track the 1X vector (once per revolution: the unbalance, the bow, the skew), the 2X vector "
+            "(twice per revolution) or the 3X. On a round shaft nothing drives 2X or 3X; an asymmetric "
+            "shaft's weight drives 2X, most near half its critical speeds, and a breathing crack's drives "
+            "2X and 3X, most near a half and a third of them.</p>")
         for c in (self.probe_station, self.probe_direction, self.probe_order):
             c.currentIndexChanged.connect(self._on_probe)
         probe_row = QtWidgets.QHBoxLayout()
@@ -1340,11 +1375,16 @@ class RotorPage(QtWidgets.QWidget):
         self.skew_angle = spin(-180.0, 180.0, math.degrees(s.skew_angle), 0, "°")
         self.asymmetry = spin(0.0, 90.0, s.asymmetry * 100, 1, " %")
         self.asymmetry_angle = spin(-180.0, 180.0, math.degrees(s.asymmetry_angle), 0, "°")
+        crack = Crack()
+        self.crack_depth = spin(0.0, CRACK_DEPTH_MAX * 100, 0.0, 1, " %")
+        self.crack_depth.setSingleStep(5.0)
+        self.crack_angle = spin(-180.0, 180.0, math.degrees(crack.angle), 0, "°")
         for size, angle, tip, label in ((self.unbalance, self.unbalance_angle, None, "Unbalance m·e:"),
                                         (self.bow, self.bow_angle, BOW_TIP, "Shaft bow δ<sub>b</sub>:"),
                                         (self.skew, self.skew_angle, SKEW_TIP, "Disc skew τ:"),
                                         (self.asymmetry, self.asymmetry_angle, ASYMMETRY_TIP,
-                                         "Asymmetry ±Δ:")):
+                                         "Asymmetry ±Δ:"),
+                                        (self.crack_depth, self.crack_angle, CRACK_TIP, "Crack depth a/D:")):
             angle.setWrapping(True)
             angle.setStepType(QtWidgets.QAbstractSpinBox.StepType.DefaultStepType)
             angle.setSingleStep(15.0)
@@ -1355,6 +1395,17 @@ class RotorPage(QtWidgets.QWidget):
             for w in (size, angle) if tip else ():
                 w.setToolTip(tip)
             form.addRow(label, row)
+        self.crack_position = spin(-1.0, 2.0, crack.position, 3, "")
+        self.crack_position.setSingleStep(0.05)
+        self.crack_breathing = QtWidgets.QCheckBox("Breathing")
+        self.crack_breathing.setChecked(crack.breathing)
+        self.crack_breathing.toggled.connect(self._on_params)
+        for w in (self.crack_position, self.crack_breathing):
+            w.setToolTip(CRACK_TIP)
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.crack_position, 3)
+        row.addWidget(self.crack_breathing, 2)
+        form.addRow("Crack at z/L:", row)
         self.internal_damping = spin(0.0, 1e5, s.internal_damping, 1, " N·s/m")
         self.internal_damping.setToolTip(INTERNAL_TIP)
         form.addRow("Internal damping c<sub>i</sub>:", self.internal_damping)
@@ -1368,7 +1419,8 @@ class RotorPage(QtWidgets.QWidget):
         form.addRow(self.shaft_note)
         for box_ in (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip,
                      self.id, self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle,
-                     self.asymmetry, self.asymmetry_angle, self.internal_damping, self.density, self.elements):
+                     self.asymmetry, self.asymmetry_angle, self.crack_depth, self.crack_angle, self.crack_position,
+                     self.internal_damping, self.density, self.elements):
             box_.valueChanged.connect(self._on_params)
         return box
 
@@ -1452,6 +1504,9 @@ class RotorPage(QtWidgets.QWidget):
         bearings = [Bearing(*(w.value() for w in row), film=oil) for row in self.bearing_rows]
         for w in (self.density, self.elements, self.mass_matrix):
             w.setEnabled(self.shaft_mass.isChecked())
+        cracked = self.crack_depth.value() > 0.0
+        for w in (self.crack_angle, self.crack_position, self.crack_breathing):
+            w.setEnabled(cracked)
         return RotorSystem(
             length=self.length.value(),
             diameter=self.diameter.value() / 1e3,
@@ -1473,17 +1528,28 @@ class RotorPage(QtWidgets.QWidget):
             skew_angle=math.radians(self.skew_angle.value()),
             asymmetry=self.asymmetry.value() / 100,
             asymmetry_angle=math.radians(self.asymmetry_angle.value()),
+            crack=self._crack() if cracked else None,
             internal_damping=self.internal_damping.value(),
             density=self.density.value() if self.shaft_mass.isChecked() else 0.0,
             elements=self.elements.value(),
             lumped=self.mass_matrix.currentIndex() == 1,
         ).with_(**(self._hidden or {}))
 
+    def _crack(self) -> Crack:
+        """The crack the panel describes, kept inside the shaft (and off its ends)."""
+        lo, hi = (x / self.length.value() for x in (min(0.0, self.position.value() * self.length.value()),
+                                                    max(self.length.value(), self.position.value() * self.length.value())))
+        margin = 1e-3 * (hi - lo)
+        return Crack(position=min(max(self.crack_position.value(), lo + margin), hi - margin),
+                     depth=self.crack_depth.value() / 100, angle=math.radians(self.crack_angle.value()),
+                     breathing=self.crack_breathing.isChecked())
+
     def set_system(self, system: RotorSystem) -> None:
         """Show and use `system` (for scripts and tests)."""
         boxes = (self.length, self.diameter, self.youngs, self.position, self.disc_mass, self.ip, self.id,
                  self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle,
-                 self.asymmetry, self.asymmetry_angle, self.internal_damping,
+                 self.asymmetry, self.asymmetry_angle, self.crack_depth, self.crack_angle, self.crack_position,
+                 self.crack_breathing, self.internal_damping,
                  self.gravity, self.isotropic, self.same_bearings, self.film, self.shaft_mass, self.density,
                  self.elements, self.mass_matrix, *(w for row in self.bearing_rows for w in row))
         for w in boxes:
@@ -1507,6 +1573,12 @@ class RotorPage(QtWidgets.QWidget):
         self.skew_angle.setValue(math.degrees(system.skew_angle))
         self.asymmetry.setValue(system.asymmetry * 100)
         self.asymmetry_angle.setValue(math.degrees(system.asymmetry_angle))
+        crack = system.crack
+        self.crack_depth.setValue(0.0 if crack is None else crack.depth * 100)
+        if crack is not None:
+            self.crack_angle.setValue(math.degrees(crack.angle))
+            self.crack_position.setValue(crack.position)
+            self.crack_breathing.setChecked(crack.breathing)
         self.internal_damping.setValue(system.internal_damping)
         self.shaft_mass.setChecked(system.density > 0.0)
         if system.density > 0.0:
@@ -1633,7 +1705,7 @@ class RotorPage(QtWidgets.QWidget):
             formula = f" (48EI/L³ = {ks:,.0f} N/m at midspan)"
         self.shaft_note.setText(
             f"EI = {system.ei:.4g} N·m²; shaft stiffness at the disc (bearings rigid) "
-            f"{system.disc_stiffness:,.0f} N/m" + formula + self._asymmetry_text(system)
+            f"{system.disc_stiffness:,.0f} N/m" + formula + self._asymmetry_text(system) + self._crack_text(system)
             + self._shaft_mass_text(system) + self._sag_text(system)
         )
         self._analysis_timer.start()
@@ -1645,6 +1717,21 @@ class RotorPage(QtWidgets.QWidget):
         d = system.asymmetry
         return (f"<br>Asymmetric: EI = {system.ei * (1 + d):.4g} N·m² bending toward the stiff axis "
                 f"({math.degrees(system.asymmetry_angle):.0f}° from the mark), {system.ei * (1 - d):.4g} across it")
+
+    @staticmethod
+    def _crack_text(system: RotorSystem) -> str:
+        crack = system.crack
+        if crack is None:
+            return ""
+        c_open, c_across = system.crack_compliances
+        soft, stiff = (system.axis_system(k).stiffness(0.0) for k in (False, True))
+        loss = [1.0 - k[XD, XD] / system.with_(crack=None).stiffness(0.0)[XD, XD] for k in (soft, stiff)]
+        state = ("held open" if not crack.breathing else
+                 "breathing, opened by the weight" if system.crack_opening else
+                 "breathing, but shut: nothing opens it without gravity")
+        return (f"<br>Crack {crack.depth:.0%} deep at z = {system.crack_z * 1e3:.4g} mm ({state}): compliance "
+                f"{c_open:.3g} rad/(N·m) opening it, {c_across:.3g} across; on average over a turn it takes "
+                f"{loss[0]:.2%} and {loss[1]:.2%} off the disc's stiffness along and across its mouth")
 
     @staticmethod
     def _shaft_mass_text(system: RotorSystem) -> str:
@@ -1683,8 +1770,8 @@ class RotorPage(QtWidgets.QWidget):
                "drives only forward whirl.</small>" if iso else "")
             + f"<br><small>Textbook Jeffcott estimate (massless journals, no tilt"
             + (", rigid bearings" if system.films else "") + f"): {jeff:,.0f} rpm</small>"
-            + ("<br><small>An asymmetric shaft has two critical speeds for each mode: those of a round shaft as "
-               "stiff as each of its axes.</small>" if system.asymmetry else "")
+            + ("<br><small>An asymmetric or cracked shaft has two critical speeds for each mode: those of a "
+               "round shaft as stiff as each of its axes (on average over a turn).</small>" if system.periodic else "")
             + (f"<br><small>With a massless shaft (the Jeffcott model, dashed): "
                + (", ".join(f"{w * RPM:,.0f}" for w, _ in critical_speeds(massless, iso)) or "none") + " rpm</small>"
                if massless is not None else "")
@@ -1729,8 +1816,10 @@ class RotorPage(QtWidgets.QWidget):
             coupled.append(f"internal damping c<sub>i</sub> = {s.internal_damping:g} N·s/m")
         if s.asymmetry:
             coupled.append(f"the shaft's asymmetry Δ = {s.asymmetry:.3g}")
+        if s.crack_opening:
+            coupled.append(f"a {'breathing' if s.crack.breathing else 'open'} crack {s.crack.depth:.0%} deep")
         cause = ("With " + " and ".join(coupled) + ": " if coupled else
-                 "No cross-coupling, internal damping or asymmetry: every mode stays damped, however fast it "
+                 "No cross-coupling, internal damping, asymmetry or crack: every mode stays damped, however fast it "
                  "spins. Set c<sub>i</sub>, k<sub>xy</sub>, λ or Δ to see one go unstable. ")
         if self.measure.currentIndex() == 2:
             chart = (" The chart shades where the rotor is unstable against the shaft's asymmetry Δ and the speed "
@@ -1777,13 +1866,16 @@ class RotorPage(QtWidgets.QWidget):
         """The steady-state 1X vectors at every station, finely around each critical speed."""
         w = [np.linspace(self.top_rpm / STEADY_POINTS, self.top_rpm, STEADY_POINTS) / RPM]
         crits = [c for c, _, _ in self.campbell.criticals] if self.campbell else []
-        if self.sim.system.asymmetry and self.sim.system.gravity:
-            crits += [0.5 * c for c in crits]  # gravity's 2X peaks near half of each
+        system = self.sim.system
+        if system.periodic and system.gravity:
+            # Gravity's 2X peaks near half of each (and a breathing crack's 3X near a third).
+            crits += [c / k for c in crits for k in ((2, 3) if system.spacing == 1 else (2,))]
         w += [np.linspace(0.8 * c, 1.2 * c, STEADY_POINTS // max(len(crits), 1)) for c in crits]
         w = np.unique(np.concatenate(w))
         self._steady_rpm = w * RPM
-        self._steady_vectors = steady_vectors(self.sim.system, w)
-        self._steady_vectors2 = steady_vectors(self.sim.system, w, order=2)
+        V = steady_harmonics(system, w, len(ORDER_NAMES))[1]
+        self._steady_orders = [station_motion(system, V[:, k]) for k in range(len(ORDER_NAMES))]
+        self._steady_vectors = self._steady_orders[0]
         self._draw_tracking(full=True)
         self.balancing.rotor_changed()
         self.balancing.refresh()
@@ -2033,7 +2125,7 @@ class RotorPage(QtWidgets.QWidget):
         return self.probe_station.currentIndex(), DIRECTIONS[self.probe_direction.currentIndex()]
 
     def _order(self) -> int:
-        """The harmonic the Bode and polar plots track: 1 (1X) or 2 (2X)."""
+        """The harmonic the Bode and polar plots track: 1 (1X), 2 (2X) or 3 (3X)."""
         return self.probe_order.currentIndex() + 1
 
     def _tracking_range(self) -> tuple[float, float]:
@@ -2052,9 +2144,9 @@ class RotorPage(QtWidgets.QWidget):
         self.polar.getPlotItem().enableAutoRange()
 
     def _steady_probe(self) -> tuple[np.ndarray, np.ndarray]:
-        """The steady-state 1X (or 2X) values at the chosen station and direction, and their unwrapped lag."""
+        """The steady-state 1X (or 2X, 3X) values at the chosen station and direction, and their unwrapped lag."""
         station, direction = self._probe()
-        vectors = self._steady_vectors2 if self._order() == 2 else self._steady_vectors
+        vectors = self._steady_orders[self._order() - 1]
         values = probe(vectors[:, station], direction)
         return values, lag_degrees(values)
 
@@ -2091,19 +2183,23 @@ class RotorPage(QtWidgets.QWidget):
         wc = ss_rpm / RPM
         where = f"{STATIONS[station].lower()}, {DIRECTION_NAMES[self.probe_direction.currentIndex()].lower()}"
         order = self._order()
-        if order == 2:
-            where += ", 2X"
+        system = self.sim.system
+        if order > 1:
+            where += f", {order}X"
             if not ss_amp:
-                return (f"<b>Steady state</b> ({where}): nothing drives 2X"
-                        + (" on a round shaft." if not self.sim.system.asymmetry else
+                return (f"<b>Steady state</b> ({where}): nothing drives {order}X"
+                        + (" on a round shaft." if not system.periodic else
+                           " on an asymmetric shaft (only a breathing crack's stiffness changes at 3X)."
+                           if order == 3 and system.spacing == 2 else
                            " without gravity: tick <i>Horizontal rotor</i>."))
         head = f"<b>Steady state</b> ({where}): peak {_fmt_len(ss_amp)} at {ss_rpm:,.0f} rpm"
         crits = self.campbell.criticals if self.campbell else []
         zetas = [(abs(w - wc), z) for w, _, z in crits]
-        near = min(crits, key=lambda c: abs(c[0] - 2.0 * wc), default=None)
-        if order == 2:
-            if near is not None and abs(near[0] - 2.0 * wc) < 0.15 * 2.0 * wc:
-                head += f", about half the critical speed {near[0] * RPM:,.0f} rpm: the <i>gravity critical</i>"
+        near = min(crits, key=lambda c: abs(c[0] - order * wc), default=None)
+        if order > 1:
+            if near is not None and abs(near[0] - order * wc) < 0.15 * order * wc:
+                head += (f", about {'half' if order == 2 else 'a third of'} the critical speed "
+                         f"{near[0] * RPM:,.0f} rpm" + (": the <i>gravity critical</i>" if order == 2 else ""))
         elif zetas and min(zetas)[0] < 0.05 * wc:
             z = min(zetas)[1]
             head += f"; its mode has ζ = {z:.3g}, ζ² = {z * z:.2g}"
@@ -2266,8 +2362,8 @@ class RotorPage(QtWidgets.QWidget):
                 text += ", whirling " + ("forward" if swept > 0 else "backward")
             parts.append(text)
         growing = self.onset is not None and sim.omega >= self.onset.omega and least_damped(sim.system, w)[0] < 0
-        # (Not where an asymmetric shaft's weight drives 2X: the disc's position then says little of the 1X.)
-        if (heavy is not None and steady and not growing and not (sim.system.asymmetry and sim.system.gravity)
+        # (Not where a turning shaft's weight drives 2X: the disc's position then says little of the 1X.)
+        if (heavy is not None and steady and not growing and not (sim.system.periodic and sim.system.gravity)
                 and r_disc > 1e-3 * max(abs(sim.system.mass_unbalance) / sim.system.disc_mass, MIN_PEAK)):
             lag = math.degrees(heavy - math.atan2(here[3], here[2])) % 360.0
             parts.append(f"heavy spot leads the high spot by {lag:.0f}°")
@@ -2338,7 +2434,7 @@ class RotorPage(QtWidgets.QWidget):
         freqs, amps = full_spectrum(t, self._vibration(hist)[:, 2 * st : 2 * st + 2])
         omega = self.sim.omega
         self.spectrum.update_spectrum(freqs, amps, omega, whirl_modes(self.sim.system, omega), DAMPED,
-                                      twice=bool(self.sim.system.asymmetry))
+                                      top=(3 if self.sim.system.spacing == 1 else 2) if self.sim.system.periodic else 1)
         self.spectrum_note.setText(
             f"Full spectrum of the {STATIONS[st].lower()} orbit over the last {self.window.value():g} s "
             "(the strip chart's station and window): forward whirl on the right, backward on the left.")
@@ -2442,7 +2538,7 @@ def _same_rotor(a: RotorSystem, b: RotorSystem) -> bool:
     def close(u, v) -> bool:
         if u is None or v is None:
             return u is v
-        if isinstance(u, (Bearing, JournalBearing)):
+        if isinstance(u, (Bearing, JournalBearing, Crack)):
             # A film's own load is not used on the rotor: each bearing carries its share of the weight.
             return type(u) is type(v) and all(close(getattr(u, f.name), getattr(v, f.name)) for f in fields(u)
                                               if not (isinstance(u, JournalBearing) and f.name == "load"))
