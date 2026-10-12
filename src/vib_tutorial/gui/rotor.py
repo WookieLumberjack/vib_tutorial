@@ -59,6 +59,7 @@ from .panels import spin
 from .rotor_balance import BalancingPanel
 from .rotor_bearing import BearingPanel
 from .rotor_bode import SWEEP_COLORS, BodePlots, PolarPlot, SweepPlots, nice_marks
+from .rotor_figures import FigureBrowser
 from .rotor_notes import THEORY_HTML, matrices_html, whirl_name
 from .rotor_stability import MEASURES, AsymmetryPlot, FullSpectrum, StabilityMap
 from .rotor_waterfall import AGAINST, SCALES, WaterfallPlot, against_speed, baselines
@@ -1126,7 +1127,7 @@ class RotorPage(QtWidgets.QWidget):
         self.bearing_panel.set_top_rpm(self.top_rpm)
         self.bearing_panel.changed.connect(self._on_film)
         self.matrices = QtWidgets.QTextBrowser()
-        self.theory = QtWidgets.QTextBrowser()
+        self.theory = FigureBrowser()
         self.theory.setHtml(THEORY_HTML)
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(campbell_tab, "Campbell diagram")

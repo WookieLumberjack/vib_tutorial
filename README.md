@@ -599,7 +599,8 @@ the speed ramps to a target.
 - **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
   the shaft's beam stiffness (condensed, or with mass reduced to the stations and the shaft's modes), the state matrix A(Ω), and the modes at the current
   speed. G is skew-symmetric: it sits beside C but does no work.
-- **Theory**: the classic case, heavy and high spot, the gyroscopic effect, the overhung
+- **Theory**: whirl in complex coordinates, the classic case (the Jeffcott equation solved),
+  heavy and high spot, the gyroscopic effect, the overhung
   rotor, forward and backward whirl, 2X and ½X excitations, anisotropic supports, run-ups through a critical speed (why a fast ramp
   peaks lower and later, beating, and the dimensionless ramp rate Ω'/ω<sub>c</sub>²), the bent
   shaft (slow-roll runout, why it is subtracted before balancing), the couple unbalance,
@@ -612,7 +613,8 @@ the speed ramps to a target.
   fluid-film bearing (the film's sideways push, the locus, the coefficients and the threshold), waterfall and
   cascade plots (a measured Campbell diagram; block length against ramp rate), the shaft's own mass
   (beam elements, consistent against lumped mass, the reduction), and why the solution uses state
-  space.
+  space. Three figures, drawn in the current theme, show the heavy and high spots, a schematic
+  Campbell diagram and a journal's attitude angle.
 
 The default is the classic case: the disc at midspan on identical, isotropic supports, so its
 translation and tilt are uncoupled, and the first critical speed is the textbook
