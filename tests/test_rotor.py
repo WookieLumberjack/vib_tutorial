@@ -195,6 +195,10 @@ def test_theory_lag_and_peak_come_just_after_the_critical():
     assert np.interp(1584.0, rpm, lag) == pytest.approx(88.4, abs=0.05)
     assert round(float(np.interp(90.0, lag, rpm))) == 1586
     assert rpm[np.abs(v).argmax()] == pytest.approx(1589.0, abs=0.5) and np.abs(v).max() * 1e6 == pytest.approx(217, abs=0.5)
+    # At r = 1 the one-mass model's whirl is e/(2ζ): 215 µm with the first mode's ζ, close to the peak.
+    modes = whirl_modes(RotorSystem(), 1584.0 / RPM)
+    zeta = modes.zeta[np.argmin(modes.freq_hz)]
+    assert round(zeta, 3) == 0.046 and round(20.0 / (2 * zeta)) == 215
     far = synchronous_response(RotorSystem(), [3000.0 / RPM])[0, XD]
     assert abs(far) * 1e6 == pytest.approx(28, abs=0.5)  # Things to try #1: toward the 20 µm eccentricity
 
