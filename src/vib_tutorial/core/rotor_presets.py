@@ -100,11 +100,22 @@ def rotor_presets() -> list[RotorPreset]:
         ),
         RotorPreset(
             "Journal bearings (oil whip)",
-            RotorSystem(bearing_a=JOURNAL_BEARING, bearing_b=JOURNAL_BEARING, gravity=9.81),
+            RotorSystem(bearing_a=JOURNAL_BEARING, bearing_b=JOURNAL_BEARING, gravity=9.81, nonlinear_films=True),
             10_000.0, 2500.0,
             "Horizontal, in plain journal bearings: the oil film is stiff, so the critical, 1845 rpm, is "
             "close to the rigid-bearing one (1854 rpm), and the journals rise along the bearing's locus as "
             "the speed rises. A little below twice the critical, at 3576 rpm, the film's own cross-coupling "
-            "drives oil whip at 30.5 Hz (0.51×).",
+            "drives oil whip at 30.5 Hz (0.51×). The films hold the journals inside their clearance, but "
+            "not the shaft's bending: the whip grows on until it would rub.",
+        ),
+        RotorPreset(
+            "Oil whirl (vertical rotor)",
+            RotorSystem(bearing_a=JOURNAL_BEARING, bearing_b=JOURNAL_BEARING, nonlinear_films=True),
+            10_000.0, 3500.0,
+            "Upright in plain journal bearings: unloaded, the films have no direct stiffness, so the rotor "
+            "whirls at any speed. At 3500 rpm it is oil whirl, at half the speed (29.2 Hz), until the films, "
+            "stiffening toward the wall, hold it to a limit cycle with the journals circling past ε = 0.9. "
+            "Past twice the first natural frequency, about 3700 rpm, the whirl locks at 30.8 Hz: oil whip, "
+            "growing on.",
         ),
     ]

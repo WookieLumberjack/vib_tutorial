@@ -154,7 +154,7 @@ from typing import NamedTuple
 import numpy as np
 import scipy.linalg
 
-from .fluid_bearing import BearingState, JournalBearing
+from .fluid_bearing import BearingState, JournalBearing, full_film_damping, pi_film
 from .simulator import MAX_STEP, MAX_STEPS_PER_ADVANCE, STEPS_PER_PERIOD, foh_discretize
 
 N_DOF = 8  # the stations' DOFs, the first of q (a shaft with mass adds its modal coordinates after them)
@@ -171,6 +171,12 @@ RPM = 60.0 / (2.0 * math.pi)  # rpm per rad/s
 MIN_GAP = 1e-3  # of the span: the closest the disc may come to a bearing
 POISSON = 0.3  # the shaft's Poisson's ratio, for a crack's compliance
 CRACK_DEPTH_MAX = 0.5  # a / D: the strip model's crack compliance holds to half the shaft's diameter
+# Nonlinear oil films (RotorSystem.nonlinear_films) in the time step, see RotorSimulator._film_steps:
+FILM_MODE_STEPS = 10  # steps per period of the fastest mode (the spin keeps STEPS_PER_PERIOD)
+FILM_DRIFT = 0.3  # the films' damping bound is taken afresh once it has moved this much (of its largest term)
+FILM_TOL = 1e-7  # Newton stops when the remainder's residual is this small, over (1 N + the largest load)
+FILM_ITERATIONS = 12  # and after this many iterations at most
+FILM_CORRECTION = 1e-4  # a Newton correction this small (over the same) is taken without checking: it converges
 
 
 def _edge_crack_factor(s: np.ndarray, bending: bool) -> np.ndarray:
@@ -316,6 +322,7 @@ class RotorSystem:
     asymmetry: float = 0.0  # Δ: the shaft's EI is EI(1 + Δ) bending toward its stiff axis, EI(1 - Δ) across it
     asymmetry_angle: float = 0.0  # rad, α: the stiff axis's angle from the keyphasor mark
     crack: Crack | None = None  # a transverse crack in the shaft
+    nonlinear_films: bool = False  # the time response takes the oil films' whole force, not their linearization
 
     def __post_init__(self) -> None:
         if min(abs(self.position), abs(self.position - 1.0)) < MIN_GAP:
@@ -845,6 +852,14 @@ class RotorSystem:
     def films(self) -> bool:
         """True if either bearing is an oil film."""
         return self.bearing_a.film is not None or self.bearing_b.film is not None
+
+    @property
+    def whole_films(self) -> bool:
+        """True if the time response takes the oil films' whole force (`nonlinear_films`, on a round shaft).
+
+        A turning shaft's split time step keeps them linearized.
+        """
+        return self.nonlinear_films and self.films and not self.periodic
 
     @property
     def speed_dependent(self) -> bool:
@@ -1576,6 +1591,125 @@ class RotorSamples:
     phase: np.ndarray  # (k,) angle φ of the keyphasor mark (rad, unwrapped)
 
 
+class _Films:
+    """The oil films' whole force on the journals, for RotorSimulator._film_steps.
+
+    The exact update carries each film linearized: its stiffness K_f and load p
+    at the held speed (as the linear films have), and in place of its damping
+    C_f the bound C_b, the whole uncavitated film's damping where the journal
+    was when it was last taken. The rest of the film's force, the remainder r_f
+    = f - (p - K_f q - C_b q'), goes in as a force on the journals.
+    """
+
+    def __init__(self, system: RotorSystem) -> None:
+        self.system = system
+        n = system.n_dof
+        films = [(j, b) for j, b in ((XA, system.bearing_a), (XB, system.bearing_b)) if b.film is not None]
+        loads = dict(zip((XA, XB), system.bearing_loads))
+        self.dofs = [d for j, _ in films for d in (j, j + 4)]  # x and y of each film's journal
+        self.rates = [d + n for d in self.dofs]
+        # (k, c, the speed below which the film is held): per film.
+        self.films = [(b.film.film_scale, b.film.clearance, b.film.with_load(abs(loads[j])).slowest())
+                      for j, b in films]
+        self.scale = 1.0 + max(abs(w) for w in system.bearing_loads)
+        self.held = math.nan
+        self.key: tuple | None = None
+
+    def hold(self, omega: float) -> None:
+        """Take the films' K_f and p at the speed Ω the exact update holds."""
+        if omega == self.held:
+            return
+        Kf, Cf, p = self.system._film_terms(omega)
+        d = self.dofs
+        self.held = omega
+        self.Kf, self.Cf = Kf[np.ix_(d, d)], Cf[np.ix_(d, d)]
+        self.p = p[d] if self.system.gravity else np.zeros(len(d))
+
+    def bound(self, z: np.ndarray) -> list[tuple[float, float, float]]:
+        """Each film's whole damping (c_xx, c_xy, c_yy) where its journal is in the state z."""
+        x = z[self.dofs].tolist()
+        return [full_film_damping(k, c, x[2 * i], x[2 * i + 1]) for i, (k, c, _) in enumerate(self.films)]
+
+    def take(self, z: np.ndarray, h: float, omega: float) -> None:
+        """Bound the damping where the journals are in z, and discretize over h at the held speed Ω."""
+        system, n, d = self.system, self.system.n_dof, self.dofs
+        self.taken = self.bound(z)
+        self.size = max(abs(c) for b in self.taken for c in b)
+        self.Cb = scipy.linalg.block_diag(*(((cxx, cxy), (cxy, cyy)) for cxx, cxy, cyy in self.taken))
+        A = system.state_matrix(omega)
+        A[n:, self.rates] -= system.mass_inverse[:, d] @ (self.Cb - self.Cf)
+        self.Phi, self.G0, self.G1 = foh_discretize(A, system.input_matrix(), h)
+        self.R0, self.R1 = self.G0[:, d], self.G1[:, d]
+        self.Ex, self.Ev = self.R1[d], self.R1[self.rates]  # the journals' x and x' at the step's end, per force
+        self.E = np.vstack([self.Ex, self.Ev])
+        self.Es = 0.5 * (self.Ev + self.Ev.T)  # ½ Δvᵀ sym(E_v⁻¹) Δv = ½ rᵀ sym(E_v) r
+        self.lin = np.hstack([self.Kf, self.Cb])  # the update's films: p - K_f x - C_b x'
+        self.eye = np.eye(len(d))
+        self.key = (h, omega)
+
+    def drifted(self, z: np.ndarray) -> bool:
+        """True once a journal has moved far enough that the damping bound should be taken afresh."""
+        limit = FILM_DRIFT * self.size
+        return any(abs(a - b) > limit for new, old in zip(self.bound(z), self.taken) for a, b in zip(new, old))
+
+    def forces(self, y: np.ndarray, omega: float) -> tuple[np.ndarray, np.ndarray, float]:
+        """(f, D, Ψ) with the journals at y = [x, x']: the films' force, their stiffness and damping
+        [K C] (each film's rows), and their dissipation."""
+        m = len(self.dofs)
+        f, D = np.empty(m), np.zeros((m, 2 * m))
+        psi = 0.0
+        for i, (k, c, slowest) in enumerate(self.films):
+            j = 2 * i
+            o = pi_film(k, c, y[j], y[j + 1], y[m + j], y[m + j + 1], max(abs(omega), slowest))
+            f[j:j + 2] = o[:2]
+            D[j:j + 2, j:j + 2] = (o[2:4], o[4:6])
+            D[j:j + 2, m + j:m + j + 2] = ((o[6], o[7]), (o[7], o[8]))
+            psi += o[9]
+        return f, D, psi
+
+    def remainder(self, z: np.ndarray, omega: float) -> np.ndarray:
+        """r at the state z: the films' force less its part in the exact update."""
+        y = z[self.dofs + self.rates]
+        return self.forces(y.tolist(), omega)[0] - self.p + self.lin @ y
+
+    def solve(self, zb: np.ndarray, r: np.ndarray, omega: float) -> np.ndarray:
+        """r at the step's end, where z = zb + R1 r: Newton from the guess r.
+
+        The journals' velocities settle where a convex function is least, Q =
+        their inertia over the step, ½ rᵀ E_v r, plus the films' dissipation Ψ, less
+        what the update carries: a Newton step that does not lower it, nor halve
+        the residual, is cut back.
+        """
+        m = len(self.dofs)
+        yb = zb[self.dofs + self.rates]
+        tol = FILM_TOL * self.scale
+
+        def at(r: np.ndarray) -> tuple:
+            y = yb + self.E @ r
+            f, D, psi = self.forces(y.tolist(), omega)
+            x, v = y[:m], y[m:]
+            q = 0.5 * r @ self.Es @ r + psi - 0.5 * v @ self.Cb @ v + (self.p - self.Kf @ x) @ v
+            return r - f + self.p - self.lin @ y, D, q
+
+        R, D, q = at(r)
+        for _ in range(FILM_ITERATIONS):
+            size = np.abs(R).max()
+            if size <= tol:
+                break
+            dr = -np.linalg.solve(self.eye + (D - self.lin) @ self.E, R)
+            if np.abs(dr).max() <= FILM_CORRECTION * self.scale:  # what is left is far smaller still
+                return r + dr
+            slope = R @ (self.Ev @ dr)
+            t = 1.0
+            while True:
+                Rt, Dt, qt = at(r + t * dr)
+                if qt <= q + 1e-4 * t * slope or np.abs(Rt).max() <= 0.5 * size or t < 1e-3:
+                    break
+                t *= 0.5
+            r, R, D, q = r + t * dr, Rt, Dt, qt
+        return r
+
+
 class RotorSimulator:
     """Steps the rotor exactly (FOH matrix exponential) while its speed follows a target."""
 
@@ -1592,6 +1726,7 @@ class RotorSimulator:
         self._gravity_at: tuple[float, np.ndarray] = (math.nan, np.empty(0))  # gravity's load, and its speed
         self._f_at: dict[float, float] = {}  # with oil films: the highest frequency at each top speed asked
         self._f_still = self._highest_freq(0.0)
+        self._films = _Films(self.system) if self.system.whole_films else None
 
     # ------------------------------------------------------------- setup
     def set_system(self, system: RotorSystem) -> None:
@@ -1610,6 +1745,7 @@ class RotorSimulator:
         self._gravity_at = (math.nan, np.empty(0))
         self._f_at.clear()
         self._f_still = self._highest_freq(0.0)
+        self._films = _Films(system) if system.whole_films else None
 
     def _rest(self) -> np.ndarray:
         """The state at rest: the shaft in its bowed shape (which loads nothing), sagging under gravity."""
@@ -1662,8 +1798,11 @@ class RotorSimulator:
 
         A forward mode's frequency rises with speed by at most (Ip/Id) Ω (the shaft's
         own sections: 2Ω). An oil film's stiffness changes with the speed, so with
-        films the modes at the top speed are looked at too. Rounded down to a power
-        of two so the discretization is reused.
+        films the modes at the top speed are looked at too. With the films' whole
+        force the exact update still carries every mode, and only the force on the
+        journals is stepped: the step resolves the spin, and the modes only to
+        FILM_MODE_STEPS a period. Rounded down to a power of two so the
+        discretization is reused.
         """
         top = max(abs(self.omega), abs(self.target))
         spin = top / (2.0 * math.pi)
@@ -1675,6 +1814,8 @@ class RotorSimulator:
                     self._f_at.clear()
                 self._f_at[top] = self._highest_freq(top)
             fmax = max(fmax, self._f_at[top])
+        if self._films is not None:
+            fmax = max(spin, fmax * FILM_MODE_STEPS / STEPS_PER_PERIOD)
         h = MAX_STEP if fmax <= 0 else min(MAX_STEP, 1.0 / (STEPS_PER_PERIOD * fmax))
         return 2.0 ** math.floor(math.log2(h))
 
@@ -1740,7 +1881,9 @@ class RotorSimulator:
             u = self.force(phi1, w1, alpha, held)
             # A turning shaft standing still has a fixed stiffness: stepped exactly, like a round one.
             still = self.system.periodic and steady and self.omega == 0.0
-            if self.system.periodic and not still:
+            if self._films is not None:
+                z = self._film_steps(h, held, w1, u0, u, qs[k:k + n])
+            elif self.system.periodic and not still:
                 z = self._split_steps(h, held, steady, w0, w1, alpha, u0, u, qs[k:k + n])
             else:
                 Phi, G0, G1 = self._discrete(h, held, steady, self.phase if still else None)
@@ -1756,6 +1899,42 @@ class RotorSimulator:
             self.omega, self.phase, self._alpha = float(w1[-1]), float(phi1[-1]), float(alpha[-1])
             k += n
         return RotorSamples(ts, qs, ws, phis)
+
+    def _film_steps(self, h: float, held: float, w1: np.ndarray, u0: np.ndarray, u: np.ndarray,
+                    out: np.ndarray) -> np.ndarray:
+        """Steps with the oil films' whole force (`whole_films`); fills out (n, n_dof), returns the last state.
+
+        The film's force depends on where the journal is and how it moves, far from
+        linearly once it moves a fair part of its clearance. Each step is the exact
+        update of the films linearized (see _Films), plus their remainder r_f as a
+        force on the journals, linear over the step (as the FOH takes the loads):
+
+            z1 = Φ z0 + Γ0 (u0 + r_f0) + Γ1 (u1 + r_f1),
+
+        r_f1 found by Newton, since it depends on z1. The films damp their journals
+        far faster than the step, so r1 must be implicit; and their damping, the
+        stiff part of the remainder, is no more than the bound C_b in the update
+        carries, so the remainder is never stiffer than the exact part (the
+        trapezoidal rule would ring if it were). C_b is taken afresh, and the
+        update with it, as the journals move round; second order in h.
+        """
+        films, n_dof = self._films, self.system.n_dof
+        films.hold(held)
+        z = self.state
+        if films.key != (h, held):
+            films.take(z, h, held)
+        r = films.remainder(z, self.omega)
+        last = older = r
+        for j in range(w1.size):
+            if films.drifted(z):
+                films.take(z, h, held)
+                r = last = older = films.remainder(z, w1[j - 1] if j else self.omega)
+            zb = films.Phi @ z + films.G0 @ (u[j - 1] if j else u0) + films.G1 @ u[j] + films.R0 @ r
+            guess = 3.0 * (r - last) + older  # r on the parabola through the last three steps
+            r, last, older = films.solve(zb, guess, w1[j]), r, last
+            z = zb + films.R1 @ r
+            out[j] = z[:n_dof]
+        return z
 
     def _split_steps(self, h: float, held: float, steady: bool, w0: np.ndarray, w1: np.ndarray,
                      alpha: np.ndarray, u0: np.ndarray, u: np.ndarray, out: np.ndarray) -> np.ndarray:

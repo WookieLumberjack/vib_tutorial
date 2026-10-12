@@ -108,7 +108,10 @@ def _films_html(s: RotorSystem, omega: float) -> str:
         "p = W + K<sub>f</sub>q<sub>J</sub> joins f, so the rotor rests with its journals at q<sub>J</sub>. "
         "Both change with the speed. K<sub>f</sub> is not symmetric, and its skew part is the oil's swirl at "
         "half the speed, k<sub>xy</sub> − k<sub>yx</sub> = ½Ω(c<sub>xx</sub> + c<sub>yy</sub>). At this speed "
-        + "; ".join(parts) + "." + slow + "</p>"
+        + "; ".join(parts) + "." + slow
+        + (" The time response takes the films' whole force instead, the remainder r<sub>f</sub> beyond this "
+           "linearization stepped as a load on the journals (<i>Theory</i>, Numerics)." if s.whole_films else "")
+        + "</p>"
     )
 
 
@@ -953,12 +956,13 @@ two, which is the same for equal dampers.</p>
 the forward whirl's 26.1 Hz, and just there the whirl is at exactly ½X. Faster, it stays locked at the
 natural frequency (26.3 Hz, 0.32×, at 5000 rpm, growing by e every 0.22 s): <i>oil whip</i>, its ratio
 to the speed falling as the speed rises.</p>
-<p>In this linear model the whirl turns straight into whip at the onset. On real machines <i>oil
+<p>With a constant λ the whirl turns straight into whip at the onset. On real machines <i>oil
 whirl</i> often comes first: a limit cycle near 0.45X that follows the speed up, and locks into whip once
 it reaches the natural frequency. Raising the damping does not help, since it raises the cross-coupling
 with it. Real machines use bearings that break up the swirl (tilting pads, pressure dams), or lower λ
 with anti-swirl devices. A real oil film also stiffens as the journal moves off-centre, so the whirl
-settles to a limit cycle about the size of the clearance; the linear model grows for ever.</p>
+settles to a limit cycle about the size of the clearance, where a linear model grows for ever. The
+page's journal bearings show both (<i>The fluid-film bearing</i>, below).</p>
 <p><b>Internal (rotating) damping.</b> Damping in the shaft itself (material hysteresis, friction in
 shrink fits, splines and couplings) resists the bending rate that the spinning shaft sees, not the one
 seen from the bearings. In a forward whirl at ω the shaft is bent toward the orbit's centre, and that
@@ -1064,22 +1068,45 @@ to the rigid-bearing one: 1845 rpm, against 1854 rpm on rigid bearings. The film
 (ζ = 0.007). The film is not isotropic, so the backward whirl crosses 1X too, at 1853 rpm, even more
 lightly damped (ζ = 0.002). The unbalance excites both, and through the pair the disc's orbit is an
 ellipse.</p>
-<p>The film is linearized, so nothing holds the response inside the clearance. At the critical the
-journals' 1X orbits reach about 28 µm (their half-length), almost twice the 15 µm clearance. A real
-journal would touch the bearing long before that, so read them as the linear model's prediction only.</p>
+<p>Linearized, nothing holds the response inside the clearance. At the critical the journals' steady
+1X orbits reach about 28 µm (their half-length), almost twice the 15 µm clearance. A real journal would
+touch the bearing long before that, so read them as the linear model's prediction only.</p>
 <p>A little below twice the critical, at 3576 rpm, the forward whirl grows at 30.5 Hz (0.51×). This is
 oil whip from the bearing itself, not from a chosen λ. It is locked at 30.7 Hz at 5000 rpm (0.37×),
 growing by e every 0.85 s. Long before it reaches the size of the disc's whirl, it fills the 15 µm
-clearance, where a real film stiffens sharply and holds it to a limit cycle. The linear model cannot, so
-the page pauses there. A vertical rotor's bearings carry no load, and an unloaded plain bearing has no
-direct stiffness, only the swirl's cross-coupling. On them the rotor whirls at any speed, which is why
-vertical machines use tilting-pad or preloaded bearings.</p>
+clearance. A vertical rotor's bearings carry no load, and an unloaded plain bearing has no direct
+stiffness, only the swirl's cross-coupling. On them the rotor whirls at any speed, which is why vertical
+machines use tilting-pad or preloaded bearings.</p>
+<p><b>The whole film.</b> The linearization holds for small motions about where the journal rests. Off
+there the film's force is far from linear: at ε → 1 the film between journal and wall goes to nothing,
+and its stiffness and damping grow without bound, so a journal never reaches the wall. The short
+bearing's whole force has a closed form too. The film carries pressure over half the bearing: the half
+where the gap, the oil dragged into it at half the speed and squeezed by the journal, closes. That half
+turns with the journal's velocity, set by its speed along the line of centres and how fast it whirls
+across it against Ω/2. Over it, with ϑ the angle from the line of centres, the force is integrals of
+sin²ϑ, sin ϑ cos ϑ and cos²ϑ over (1 − ε cos ϑ)³. In the angle ϑ<sub>e</sub> with
+tan(ϑ<sub>e</sub>/2) = √((1 + ε)/(1 − ε)) tan(ϑ/2), the eccentric anomaly of an orbit, each is a short
+trigonometric polynomial.</p>
+<p>A journal circling the centre at exactly half the speed leaves the film nothing to squeeze or drag,
+and it carries no load at all. That is where oil whirl lives. The film
+pushes a slower whirl along and holds a faster one back, so past twice its natural frequency, where the
+rotor's whirl is slower than half the speed, the film feeds it. Tick <i>Nonlinear film</i> under the bearing supports and the time
+response takes the films' whole force (<i>Numerics</i>), while the Campbell diagram, stability and the
+steady-state curves stay those of the linearized films.</p>
+<p>On the <i>Journal bearings</i> preset, run up through the critical at 500 rpm/s: linearized, the
+journals come within 1% of the wall (ε = 0.99); whole, the films hold them to ε = 0.63, while the disc's
+peak is much the same, 0.66 mm. Past the onset the films keep the journals in their clearance, but the
+shaft, far softer, bends on: its whirl grows ever more slowly, but does not stop, until it would rub. On
+the <i>Oil whirl</i> preset, upright, the whirl at 3500 rpm (below twice the first natural frequency) is
+at half the speed, 29.2 Hz. It settles to a limit cycle with the journals circling past ε = 0.9 and the
+disc about 0.16 mm off centre. At 5000 rpm it is locked at 30.8 Hz instead: oil whip, which grows on.</p>
 <p><b>On the page.</b> The <i>Fluid-film bearing</i> tab draws the locus, with the page's speed range
 solid and the speed now as a dot. It plots the coefficients against the speed, or dimensionless against
 S(L<sub>b</sub>/D<sub>b</sub>)² on log scales (dashed where negative), as on a bearing designer's chart.
 Tick <i>Oil-film journal bearings</i> under the bearing supports to run both journals in the tab's
-bearing, on rigid housings, in place of the springs and dampers. With <i>Static sag</i> ticked, the
-bearings' orbits rise along the locus as the speed rises.</p>
+bearing, on rigid housings, in place of the springs and dampers, and <i>Nonlinear film</i> beside it to
+step their whole force. With <i>Static sag</i> ticked, the bearings' orbits rise along the locus as the
+speed rises.</p>
 
 <h2>6. Numerics</h2>
 
@@ -1095,6 +1122,27 @@ Z<sub>k+1</sub> = ΦZ<sub>k</sub> + Γ<sub>0</sub>u<sub>k</sub> + Γ<sub>1</sub>
 updated every 2 ms of simulated time, and the unbalance force follows the exact angle φ, including the
 Ω' term. The ramp's gyroscopic term I<sub>p</sub>Ω'θ is left out: at 5000 rpm/s it is about 0.03% of the
 disc's tilt stiffness.</p>
+
+<h3>Stepping the whole film</h3>
+<p>The films' whole force is not linear, so no one Φ steps it. Each step is still the exact update, of
+the films linearized, with the rest of their force, the remainder r<sub>f</sub>, as a load on the
+journals, linear over the step as the loads are:</p>
+<p align='center'>Z<sub>k+1</sub> = ΦZ<sub>k</sub> + Γ<sub>0</sub>(u<sub>k</sub> + r<sub>f,k</sub>) +
+Γ<sub>1</sub>(u<sub>k+1</sub> + r<sub>f,k+1</sub>)</p>
+<p>r<sub>f,k+1</sub> depends on Z<sub>k+1</sub>, so it is found by Newton's method. It has to be: a film damps
+its journal in microseconds, far faster than the step. That speed is also the trap. If the exact update
+carried the films' damping at the journals' rest, the remainder near the wall, many times stiffer, would
+make the update ring from step to step and throw the journal through the wall. So the update carries
+C<sub>b</sub> instead: the damping of the whole film, uncavitated, where the journal is. The film's
+damping is a sum of positive terms over the half carrying pressure, so it is never more than
+C<sub>b</sub>, whatever the velocity. The remainder is then never stiffer than the update, and the step
+stays second order in h. As the journal moves round, C<sub>b</sub> is taken afresh, and Φ with it.</p>
+<p>The film's force is also minus the gradient, in the journal's velocity, of its dissipation Ψ, which
+is convex. So each step's journal velocities are where a convex function is least, and a Newton step
+that does not lower it is cut back. That keeps Newton right where the film's force bends sharply: at the
+half-speed whirl, which oil whirl circles. The step need only resolve the spin and the force on the
+journals, so it is coarser than the linear films' (10 steps a period of the fastest mode), but each costs
+a hundred times more. Past what a frame can compute, the page runs slower than the speed set.</p>
 
 <h3>Keeping a shaft with mass fast</h3>
 <p>Every beam element adds modes. The highest are at tens of kHz, far above anything the rotor does at
@@ -1211,9 +1259,16 @@ support damping: the onset does not move.</li>
 <li>Load the <i>Journal bearings</i> preset, tick <i>Static sag</i> and run up to 3000 rpm. The bearings'
 orbits climb from where the journals rest, (4.8, −12.6) µm, toward the centre along the locus on the
 <i>Fluid-film bearing</i> tab. Then set the target to 5000 rpm and tap the disc: the whirl grows at
-30.7 Hz until a journal reaches its clearance. Then make the clearance 30 µm and the oil 10 mPa·s
-(hotter). The journals sink lower (ε = 0.71 at 3000 rpm, against 0.25), the bearings more heavily loaded,
-and the onset rises from 3576 to 4358 rpm. A heavily loaded plain bearing resists whirl.</li>
+30.7 Hz, the journals staying in their clearance while the disc's whirl grows on. Untick <i>Nonlinear
+film</i>, Reset and run again: the linearized films let a journal reach its clearance, and the page
+pauses. Then make the clearance 30 µm and the oil 10 mPa·s (hotter). The journals sink lower (ε = 0.71
+at 3000 rpm, against 0.25), the bearings more heavily loaded, and the onset rises from 3576 to 4358 rpm.
+A heavily loaded plain bearing resists whirl.</li>
+<li>Load the <i>Oil whirl</i> preset and watch the bearings' orbits: past 3000 rpm a whirl at half the
+speed sets in and grows until the journals circle close to the wall, where it holds. The full spectrum
+shows it at +½X. Set the target to 5000 rpm: the whirl stays at the natural frequency, 30.8 Hz, and
+grows on, oil whip. Untick <i>Nonlinear film</i> to see the linear films' whirl at 3500 rpm grow until a
+journal reaches its clearance.</li>
 </ol>
 
 <h2>Notation</h2>
@@ -1244,6 +1299,7 @@ and the onset rises from 3576 to 4358 rpm. A heavily loaded plain bearing resist
 <tr><td>J</td><td>the matrix that turns x toward y, in each pair of planes</td><td>—</td></tr>
 <tr><td>Z, u, A(Ω), B</td><td>state vector [q, q̇]; the loads; the state and input matrices (16 × 16 and 16 × 8 for a massless shaft)</td><td>—</td></tr>
 <tr><td>h, Φ, Γ<sub>0</sub>, Γ<sub>1</sub></td><td>the time step; the exact update's matrices</td><td>s, —</td></tr>
+<tr><td>r<sub>f</sub>, C<sub>b</sub></td><td>stepping the whole film: the remainder of its force on the journals; the whole uncavitated film's damping, which bounds the film's</td><td>N, N·s/m</td></tr>
 <tr><td>R(φ), q<sub>r</sub></td><td>the rotation to axes turning with the shaft; q in those axes, q = R(φ)q<sub>r</sub></td><td>—, m</td></tr>
 <tr><td>Q<sub>0</sub>, Q<sub>n</sub></td><td>a periodic steady state's mean and its nX harmonic</td><td>m</td></tr>
 <tr><td>Ω<sub>s</sub></td><td>the harmonic spacing of a turning stiffness (2Ω, or Ω for a breathing crack)</td><td>rad/s</td></tr>
@@ -1275,6 +1331,7 @@ and the onset rises from 3576 to 4358 rpm. A heavily loaded plain bearing resist
 <tr><td>S, N</td><td>the Sommerfeld number (μNL<sub>b</sub>D<sub>b</sub>/W)(R<sub>b</sub>/c<sub>r</sub>)²; the speed in rev/s</td><td>—, 1/s</td></tr>
 <tr><td>K̄, C̄</td><td>a bearing's coefficients made dimensionless: K c<sub>r</sub>/W and C c<sub>r</sub>Ω/W</td><td>—</td></tr>
 <tr><td>K<sub>f</sub>, C<sub>f</sub>, q<sub>J</sub>, p</td><td>on the rotor, the films' stiffness and damping; the journals' equilibrium; the films' constant load W + K<sub>f</sub>q<sub>J</sub></td><td>N/m, N·s/m, m, N</td></tr>
+<tr><td>ϑ, ϑ<sub>e</sub>, Ψ</td><td>the whole film: the angle round the bearing from the line of centres, and its eccentric anomaly; the film's dissipation</td><td>rad, rad, W</td></tr>
 <tr><td>m<sub>b</sub>, ω<sub>w</sub>, K<sub>eq</sub></td><td>Lund's rigid rotor: its mass per bearing; its whirl frequency at the threshold; the film's equivalent stiffness</td><td>kg, rad/s, N/m</td></tr>
 </table>
 """

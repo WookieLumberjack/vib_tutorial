@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import cmath
 import math
+import time
 from dataclasses import fields
 
 import numpy as np
@@ -97,6 +98,7 @@ GRAVITY = 9.81  # m/s²
 SAG_SPEEDS = 201  # speeds the static sag is worked out at, with internal damping, and interpolated
 SPECTRUM_FRAMES = 6  # the full spectrum is recomputed every this many frames
 MEASURE_SPEED = 2.0  # × real time, at least, while a balancing measurement runs
+FRAME_BUDGET = 0.012  # s of computing per frame: past it (the films' whole force is slow) the page runs slower
 WATERFALL_FRAMES = 15  # new spectra are drawn at most every this many frames (each repaint fills every line)
 WATERFALL_RANGE = 2.0  # the waterfall keeps frequencies up to this many times the top speed
 CHART_BUDGET = 0.012  # s per frame spent filling in the asymmetry chart while it shows
@@ -261,6 +263,16 @@ FILM_TIP = (
     "<i>Static sag</i> to see them move. Only the journal's mass is left to set.</p><p>Upright, unloaded, "
     "a plain bearing has no direct stiffness, only the swirl's cross-coupling: a vertical rotor in such "
     "bearings whirls at any speed.</p>"
+)
+NONLINEAR_FILM_TIP = (
+    "<p>Step the rotor with the films' whole force, not their linearization about where the journals rest. "
+    "Off centre the film stiffens and damps ever harder toward the wall, so the journals stay inside their "
+    "clearance: through a critical speed, and in oil whirl, which settles to a limit cycle at half the "
+    "speed. In oil whip the shaft's whirl still grows, the films holding the journals but not the shaft's "
+    "bending, until it would rub.</p><p>Only the time response: the Campbell diagram, stability, Bode "
+    "and polar curves are always of the linearized films. Untick to step the linear films, as they "
+    "predict. A shaft that turns its stiffness (asymmetric or cracked) keeps the films linear. The whole "
+    "force is slow to step: past what a frame can compute, the page runs slower than the speed set.</p>"
 )
 SWIRL_TIP = (
     "<p>Fluid swirl ratio λ of a fluid-film bearing: the oil in the clearance is dragged round at λ times the "
@@ -1155,6 +1167,7 @@ class RotorPage(QtWidgets.QWidget):
         # --- loop
         self._clock = QtCore.QElapsedTimer()
         self._last = 0.0
+        self._cost = 1e-9  # s of computing per simulated s (see step)
         self._target_t = 0.0
         self._timer = QtCore.QTimer(self)
         self._timer.setSingleShot(True)
@@ -1475,13 +1488,17 @@ class RotorPage(QtWidgets.QWidget):
             "<p>Untick to give the two bearings different supports. Like an off-centre disc, unequal "
             "supports couple the disc's translation and tilt, so the gyroscopic moment shows.</p>"
         )
-        self.film = QtWidgets.QCheckBox("Oil-film journal bearings (set on the Fluid-film bearing tab)")
+        self.film = QtWidgets.QCheckBox("Oil-film journal bearings")
         self.film.setToolTip(FILM_TIP)
-        for c in (self.isotropic, self.same_bearings, self.film):
+        self.nonlinear_film = QtWidgets.QCheckBox("Nonlinear film")
+        self.nonlinear_film.setChecked(True)
+        self.nonlinear_film.setToolTip(NONLINEAR_FILM_TIP)
+        for c in (self.isotropic, self.same_bearings, self.film, self.nonlinear_film):
             c.toggled.connect(self._on_params)
         grid.addWidget(self.isotropic, 3, 0, 1, 8)
         grid.addWidget(self.same_bearings, 4, 0, 1, 8)
-        grid.addWidget(self.film, 5, 0, 1, 8)
+        grid.addWidget(self.film, 5, 0, 1, 4)
+        grid.addWidget(self.nonlinear_film, 5, 4, 1, 4)
         return box
 
     # ------------------------------------------------------------- parameters
@@ -1502,6 +1519,8 @@ class RotorPage(QtWidgets.QWidget):
                 w.setEnabled(not (same and r == 1) and not (iso and c in (1, 3)) and not (film and c != 4))
         for w in (self.isotropic, self.same_bearings):
             w.setEnabled(not film)
+        # A turning shaft's split time step keeps the films linearized.
+        self.nonlinear_film.setEnabled(film and not self.asymmetry.value() and not self.crack_depth.value())
         oil = self.bearing_panel.bearing(rotor=False) if film else None
         bearings = [Bearing(*(w.value() for w in row), film=oil) for row in self.bearing_rows]
         for w in (self.density, self.elements, self.mass_matrix):
@@ -1535,6 +1554,7 @@ class RotorPage(QtWidgets.QWidget):
             density=self.density.value() if self.shaft_mass.isChecked() else 0.0,
             elements=self.elements.value(),
             lumped=self.mass_matrix.currentIndex() == 1,
+            nonlinear_films=film and self.nonlinear_film.isChecked(),
         ).with_(**(self._hidden or {}))
 
     def _crack(self) -> Crack:
@@ -1552,7 +1572,8 @@ class RotorPage(QtWidgets.QWidget):
                  self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle,
                  self.asymmetry, self.asymmetry_angle, self.crack_depth, self.crack_angle, self.crack_position,
                  self.crack_breathing, self.internal_damping,
-                 self.gravity, self.isotropic, self.same_bearings, self.film, self.shaft_mass, self.density,
+                 self.gravity, self.isotropic, self.same_bearings, self.film, self.nonlinear_film,
+                 self.shaft_mass, self.density,
                  self.elements, self.mass_matrix, *(w for row in self.bearing_rows for w in row))
         for w in boxes:
             w.blockSignals(True)
@@ -1594,6 +1615,7 @@ class RotorPage(QtWidgets.QWidget):
             for w, v in zip(row, (b.kx, b.ky, b.cx, b.cy, b.mass, b.kxy, b.swirl)):
                 w.setValue(v)
         self.film.setChecked(A.film is not None)
+        self.nonlinear_film.setChecked(system.nonlinear_films or A.film is None)
         if A.film is not None:
             self.bearing_panel.set_bearing(A.film, notify=False)
         for w in boxes:
@@ -2249,22 +2271,33 @@ class RotorPage(QtWidgets.QWidget):
         dt = min(now - self._last, 0.1)
         self._last = now
         speed = float(self.sim_speed.currentData())
-        self.step(dt * (max(speed, MEASURE_SPEED) if self.measurement is not None else speed))
+        self.step(dt * (max(speed, MEASURE_SPEED) if self.measurement is not None else speed), FRAME_BUDGET)
         if self.isVisible() and self.running:
             self._timer.start()
 
-    def step(self, duration: float) -> None:
-        """Advance by `duration` s of simulated time and redraw."""
+    def step(self, duration: float, budget: float | None = None) -> None:
+        """Advance by `duration` s of simulated time and redraw.
+
+        With a `budget` (s of computing), advance no further than it allows at the
+        cost seen so far: where the simulation is slow (the films' whole force),
+        the page falls behind real time rather than stalling.
+        """
         self._target_t = min(self._target_t + duration, self.sim.t + 0.1 + duration)
+        if budget is not None and self._target_t - self.sim.t > budget / self._cost:
+            self._target_t = self.sim.t + budget / self._cost
         if self.repeat_taps.isChecked() and self.measurement is None and self.sim.t >= self._next_tap:
             self.tap()
             self._next_tap = self.sim.t + self.tap_every.value()
+        start, began = time.perf_counter(), self.sim.t
         if self.run_up is not None:
             r = self._advance_sweep(self._target_t - self.sim.t)
         elif self.measurement is not None:
             r = self._advance_measurement(self._target_t - self.sim.t)
         else:
             r = self.sim.advance(self._target_t - self.sim.t)
+        if self.sim.t > began:  # s of computing per simulated s, smoothed
+            cost = (time.perf_counter() - start) / (self.sim.t - began)
+            self._cost = 0.8 * self._cost + 0.2 * cost if self._cost > 1e-9 else cost
         if r.t.size:
             # Keep every stride-th sample, continuing the stride across advances.
             first = (self._stride - self._carry - 1) % self._stride
@@ -2373,16 +2406,22 @@ class RotorPage(QtWidgets.QWidget):
             zeta, f, _ = least_damped(sim.system, w)
             if w > 0:
                 grow = -zeta * 2 * math.pi * f / math.sqrt(max(1 - zeta * zeta, 1e-12))
-                parts.append(f"<span style='color:{colors.force}'>unstable: a whirl at {f:.3g} Hz "
+                # With the films' whole force that is only how it starts: oil whirl settles to a limit cycle.
+                what = "linearized, the equilibrium is unstable" if sim.system.whole_films else "unstable"
+                parts.append(f"<span style='color:{colors.force}'>{what}: a whirl at {f:.3g} Hz "
                              f"({2 * math.pi * f / w:.2f}×) grows ×e every {1 / grow:.2g} s</span>")
         if self.rubbed:
             where = (f"journal {self.touched[0]} reached the wall of its bearing, a clearance of "
                      f"{_fmt_len(self.touched[1])} off centre. "
-                     "A real oil film stiffens sharply there and holds the whirl to a limit cycle; the model is "
-                     "linear (about where the journal rests), so it would let it grow for ever. "
+                     "A real oil film stiffens sharply there and keeps the journal off the wall; the film here is "
+                     "linearized (about where the journal rests), so it would let it through. Tick <i>Nonlinear "
+                     "film</i> to step the film's whole force. "
                      if self.touched else
                      f"the whirl passed {_fmt_len(RUB * sim.system.length)} ({RUB:.0%} of the span), where a real "
-                     "rotor would rub its seals or wreck its bearings. The model is linear, so it would grow for ever. ")
+                     "rotor would rub its seals or wreck its bearings. "
+                     + ("The oil films hold the journals inside their clearance, but not the shaft's bending, so "
+                        "oil whip grows on. " if sim.system.whole_films else
+                        "The model is linear, so it would grow for ever. "))
             parts.append(
                 f"<span style='color:{colors.force}'><b>Paused:</b> {where}"
                 + ("Set the target outside the unstable range" if self.onset is not None and math.isfinite(self.onset.end)

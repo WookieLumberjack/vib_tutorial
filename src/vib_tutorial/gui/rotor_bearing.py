@@ -279,7 +279,8 @@ class BearingPanel(QtWidgets.QWidget):
             "the rotor in it." if self.loads is None else
             "Short-bearing (Ocvirk) theory, the film cavitating where its pressure would go below zero "
             "(the π-film). The rotor runs in it: below the speed where ε = 0.9 it takes the film as it is "
-            "there, the journal nearly on its bottom.")
+            "there, the journal nearly on its bottom. With <i>Nonlinear film</i> ticked the time response "
+            "takes the film's whole force; the coefficients here are its linearization.")
         self._show_speed()
 
     # ------------------------------------------------------------- drawing

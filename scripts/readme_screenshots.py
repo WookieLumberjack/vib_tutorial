@@ -491,6 +491,24 @@ def jeffcott_stability():
     save(w, "jeffcott_stability")
 
 
+def jeffcott_oil_whirl():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.load_preset("Oil whirl (vertical rotor)")
+    page._refresh_analysis()
+    page.ramp.setValue(5000.0)
+    page.set_target_rpm(3500.0)
+    for _ in range(500):  # 10 s: the whirl sets in and settles to its limit cycle
+        page.step(0.02)
+    page.tabs.setCurrentWidget(page.spectrum.parentWidget())
+    page._draw()
+    save(w, "jeffcott_oil_whirl")
+
+
 def jeffcott_overhung():
     w = window()
     page = w.rotor_page
@@ -622,7 +640,7 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
-         jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_overhung, jeffcott_waterfall,
+         jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked]
 
 
