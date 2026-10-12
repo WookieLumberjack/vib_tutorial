@@ -495,7 +495,8 @@ the speed ramps to a target.
 
 - **Presets**: the classic Jeffcott rotor, an off-centre disc, anisotropic supports, an
   overhung rotor, a long shaft whose own mass matters, a two-pole rotor with an asymmetric shaft,
-  a cracked shaft, oil swirl at λ = ½, and plain journal bearings, both going into oil whip. Each loads a rotor with a speed range to suit it and a note on what to look for.
+  a cracked shaft, oil swirl at λ = ½, and plain journal bearings, both going into oil whip, and an
+  upright rotor in oil whirl. Each loads a rotor with a speed range to suit it and a note on what to look for.
 - **Shaft mass**: tick it (and set the density) and the shaft gets its mass, its sections'
   rotary inertia and their gyroscopic moment. It is then 2 to 60 Euler–Bernoulli beam elements
   with consistent or lumped mass, reduced Craig–Bampton style to the stations and the shaft's
@@ -594,8 +595,11 @@ the speed ramps to a target.
   bearing goes into oil whirl. Tick *Oil-film journal bearings* and the rotor runs in it at both ends,
   each under its share of the weight: their stiffness and damping change with the speed, the journals
   rest on the locus and rise along it (with *Static sag*), and oil whip comes from the bearing's own
-  cross-coupling. The page pauses when a journal reaches its clearance, where a real film's nonlinearity
-  would hold the whirl.
+  cross-coupling. Tick *Nonlinear film* beside it and the time response takes the films' whole force,
+  in closed form, stepped by Newton's method beside the exact update: the journals stay inside their
+  clearance through the critical, oil whirl settles to a limit cycle at half the speed, and oil whip
+  grows on, the films holding the journals but not the shaft. Linearized, the page pauses when a
+  journal reaches its clearance.
 - **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
   the shaft's beam stiffness (condensed, or with mass reduced to the stations and the shaft's modes), the state matrix A(Ω), and the modes at the current
   speed. G is skew-symmetric: it sits beside C but does no work.
@@ -672,6 +676,13 @@ frequency whatever the speed (oil whip). The *Journal bearings* preset gets the 
 bearings themselves: plain journal bearings, far stiffer than the shaft, put the critical at
 1845 rpm, close to the rigid-bearing 1854 rpm, and their film's cross-coupling drives oil whip from
 3576 rpm, a little below twice that, at 30.5 Hz.
+
+![Oil whirl preset at 3500 rpm, stepped with the oil films' whole force: the upright rotor's whirl has settled to a limit cycle at half the speed, 29.2 Hz on the full spectrum, the journals circling close to their 15 µm clearance and the disc whirling 160 µm about the centre](docs/images/jeffcott_oil_whirl.png)
+
+Stood upright, the same rotor's bearings carry no load, so it whirls at any speed. With the films'
+whole force, below twice its first natural frequency the whirl is oil whirl, at half the speed: the
+film stiffens toward the wall and holds the journals circling close to it, a limit cycle. Past about
+3700 rpm the whirl locks at the natural frequency instead, oil whip, and grows on.
 
 ![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1947 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
 
@@ -1002,6 +1013,12 @@ f, amp = full_spectrum(r.t, r.q[:, [1, 5]])                    # disc orbit: +f 
 two_pole = RotorSystem(asymmetry=0.15, gravity=9.81)            # EI(1 ± 0.15), stiff axis at the mark
 band = stability_onset(two_pole, 300.0)                        # unstable from band.omega to band.end (rad/s)
 q0, q2 = gravity_response(two_pole, np.array([82.2]))           # mean sag, and the 2X whirl near half the critical
+
+from vib_tutorial.core.fluid_bearing import JournalBearing
+
+oil = Bearing(film=JournalBearing())                           # a plain journal bearing (short-bearing theory)
+upright = RotorSystem(bearing_a=oil, bearing_b=oil, nonlinear_films=True)  # stepped with the films' whole force
+JournalBearing().force(5e-6, -8e-6, 0.0, 1e-3, 300.0)          # the whole film's force (N) at any position, velocity
 
 from vib_tutorial.core.rotor_waterfall import Waterfall
 

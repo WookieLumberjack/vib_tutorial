@@ -2146,6 +2146,7 @@ def test_rotor_on_oil_film_bearings(app):
     p._refresh_analysis()
     s = p.sim.system
     assert s.films and p.film.isChecked() and p.preset.currentText() == "Journal bearings (oil whip)"
+    assert s.whole_films and p.nonlinear_film.isChecked() and p.nonlinear_film.isEnabled()
     row = p.bearing_rows[0]
     assert row[4].isEnabled() and not any(row[c].isEnabled() for c in (0, 1, 2, 3, 5, 6))
     assert panel.loads == s.bearing_loads and not panel.load.isEnabled() and panel.which.isVisibleTo(panel)
@@ -2163,7 +2164,15 @@ def test_rotor_on_oil_film_bearings(app):
     assert p.preset.currentText() == CUSTOM
     panel.set_bearing(JournalBearing())
     assert p.preset.currentText() == "Journal bearings (oil whip)"
-    # Past the onset the whirl grows until a journal reaches its clearance, and the page pauses.
+    # A frame's budget caps how far a slow simulation advances: the page falls behind instead.
+    p._cost = 1.0  # s of computing per simulated s
+    t0 = p.sim.t
+    p.step(0.1, budget=0.004)
+    assert 0.0 < p.sim.t - t0 <= 0.004 + 1e-3
+    # Linearized, past the onset the whirl grows until a journal reaches its clearance, and the page pauses.
+    p.nonlinear_film.setChecked(False)
+    assert not p.sim.system.whole_films and p.sim.system.films
+    p.reset()
     p.running = True
     p.ramp.setValue(5000.0)
     p.set_target_rpm(5000.0)
@@ -2172,10 +2181,17 @@ def test_rotor_on_oil_film_bearings(app):
         if not p.running:
             break
     assert p.rubbed and p.touched is not None and p.touched[1] == pytest.approx(15e-6)
-    assert "reached the wall of its bearing" in p.readout.text()
+    assert "reached the wall of its bearing" in p.readout.text() and "Nonlinear film" in p.readout.text()
+    # A turning shaft keeps the films linear.
+    p.nonlinear_film.setChecked(True)
+    p.asymmetry.setValue(5.0)
+    assert not p.nonlinear_film.isEnabled() and not p.sim.system.whole_films
+    p.asymmetry.setValue(0.0)
+    assert p.nonlinear_film.isEnabled() and p.sim.system.whole_films
     # Unticked, the rotor is back on its springs and the tab has its own load again.
     p.film.setChecked(False)
     assert not p.sim.system.films and panel.loads is None and panel.load.isEnabled()
+    assert not p.nonlinear_film.isEnabled()
     assert all(row[c].isEnabled() for c in (0, 2, 4, 5, 6))  # (k_y and c_y follow k_x and c_x: isotropic)
     w.set_theme("Dark")
 

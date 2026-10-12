@@ -1,4 +1,4 @@
-"""Short-bearing (Ocvirk) journal bearing: equilibrium, coefficients and the rigid rotor's threshold."""
+"""Short-bearing (Ocvirk) journal bearing: equilibrium, coefficients, the whole film's force and the rigid rotor's threshold."""
 
 import math
 
@@ -11,6 +11,8 @@ from vib_tutorial.core.fluid_bearing import (
     attitude,
     coefficients,
     eccentricity,
+    full_film_damping,
+    pi_film,
     rigid_threshold,
 )
 
@@ -151,3 +153,65 @@ def test_lunds_whirl_ratio_depends_on_the_eccentricity_alone():
     assert a.eccentricity == pytest.approx(b.eccentricity, rel=1e-9) and a.omega != pytest.approx(b.omega)
     ratio = [math.sqrt(rigid_threshold(s.k, s.c)[1]) / s.omega for s in (a, b)]
     assert ratio[0] == pytest.approx(ratio[1], rel=1e-9)
+
+
+def _states(count, seed, top=0.98):
+    """Random journal positions (ε up to `top`), velocities and speeds for BEARING."""
+    rng = np.random.default_rng(seed)
+    c = BEARING.clearance
+    for _ in range(count):
+        e, a = rng.uniform(0.0, top) * c, rng.uniform(0.0, 2 * math.pi)
+        yield e * math.cos(a), e * math.sin(a), *rng.normal(0.0, 0.02, 2), rng.uniform(10.0, 2000.0)
+
+
+def test_whole_force_matches_the_quadrature():
+    # The closed form against the film's pressure summed round the bearing, cavitation and all, at any
+    # position and velocity: the arc carrying pressure turns with the journal's velocity.
+    b = BEARING
+    for x, y, vx, vy, w in _states(40, 1, top=0.9):
+        f = b.film_force(x, y, vx, vy, w, points=POINTS)
+        np.testing.assert_allclose(b.force(x, y, vx, vy, w), f, atol=1e-7 * np.abs(f).max())
+
+
+def test_whole_force_linearizes_to_the_coefficients():
+    # At the equilibrium the whole force holds the load, and its derivatives are the closed-form K and C.
+    b = BEARING
+    for rpm in (200.0, 3000.0, 20000.0):
+        s = b.state(rpm / RPM)
+        x, y = (v * b.clearance for v in s.position())
+        o = pi_film(b.film_scale, b.clearance, x, y, 0.0, 0.0, s.omega)
+        np.testing.assert_allclose(o[:2], [0.0, b.load], atol=1e-9 * b.load)
+        np.testing.assert_allclose(np.reshape(o[2:6], (2, 2)), s.k, rtol=1e-9)
+        np.testing.assert_allclose([[o[6], o[7]], [o[7], o[8]]], s.c, rtol=1e-9)
+
+
+def test_whole_force_derivatives_and_dissipation():
+    # K and C are minus the force's derivatives; the force is minus the gradient of Ψ in the velocity, so
+    # C is symmetric and positive, and never more than the whole uncavitated film's damping.
+    b = BEARING
+    k, c = b.film_scale, b.clearance
+    for x, y, vx, vy, w in _states(60, 2):
+        o = pi_film(k, c, x, y, vx, vy, w)
+        K, C = np.reshape(o[2:6], (2, 2)), np.array([[o[6], o[7]], [o[7], o[8]]])
+        d, dv = 1e-7 * c, 1e-7 * max(abs(vx), abs(vy), c * w)
+        Kn, Cn, grad = np.zeros((2, 2)), np.zeros((2, 2)), np.zeros(2)
+        for j in range(2):
+            e = np.eye(2)[j]
+            Kn[:, j] = -(b.force(x + d * e[0], y + d * e[1], vx, vy, w) - b.force(x - d * e[0], y - d * e[1], vx, vy, w)) / (2 * d)
+            Cn[:, j] = -(b.force(x, y, vx + dv * e[0], vy + dv * e[1], w) - b.force(x, y, vx - dv * e[0], vy - dv * e[1], w)) / (2 * dv)
+            grad[j] = (pi_film(k, c, x, y, vx + dv * e[0], vy + dv * e[1], w)[9]
+                       - pi_film(k, c, x, y, vx - dv * e[0], vy - dv * e[1], w)[9]) / (2 * dv)
+        np.testing.assert_allclose(K, Kn, atol=1e-5 * np.abs(K).max())
+        np.testing.assert_allclose(C, Cn, atol=1e-5 * np.abs(C).max())
+        np.testing.assert_allclose(grad, -np.array(o[:2]), atol=1e-5 * np.abs(o[:2]).max())
+        cxx, cxy, cyy = full_film_damping(k, c, x, y)
+        assert np.linalg.eigvalsh(C).min() >= -1e-9 * np.abs(C).max()
+        assert np.linalg.eigvalsh(np.array([[cxx, cxy], [cxy, cyy]]) - C).min() >= -1e-9 * cxx
+
+
+def test_whole_force_vanishes_at_half_speed_whirl():
+    # A centred-orbit whirl at exactly half the speed leaves the film nothing to squeeze or drag: no force.
+    b = BEARING
+    w, e = 300.0, 0.6 * b.clearance
+    assert np.abs(b.force(e, 0.0, 0.0, 0.5 * w * e, w)).max() < 1e-9 * b.load
+    assert b.force(e, 0.0, 0.0, 0.0, w)[1] > 0.0  # still, it pushes the journal ahead of it
