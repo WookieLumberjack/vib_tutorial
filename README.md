@@ -888,7 +888,16 @@ $F_f$ times the distance slid, so the energy balance still closes.
   stepper that follows a speed ramp. An asymmetric shaft's turning stiffness: its Floquet modes
   (in axes turning with the shaft, or by Hill's method), its steady states by harmonic balance
   (`harmonic_response`, `gravity_response`), and a split time step with the turning stiffness as
-  a mid-step kick.
+  a mid-step kick. A cracked shaft (`Crack`): a hinge at the crack, breathing open under the
+  weight, its 1X–3X steady state (`steady_harmonics`). Oil films linearized about each
+  journal's equilibrium, or stepped with their whole force (`nonlinear_films`), and magnetic
+  bearings with their controllers' states in the state vector.
+- `core/fluid_bearing.py`: the plain journal bearing by short-bearing (Ocvirk) theory: its
+  equilibrium, the eight stiffness and damping coefficients in closed form, and the film's whole
+  force, in closed form (`force`) and by quadrature (`film_force`) to check it.
+- `core/magnetic_bearing.py`: the active magnetic bearing: the magnets' negative stiffness and
+  current gain, the PID with a filtered derivative behind a first-order amplifier, its transfer
+  function (`gain`) and its state space.
 - `core/rotor_sweep.py`: run-up and coast-down: the steady-state 1X (and gravity's 2X) vectors at each station,
   once-per-revolution tracking of the 1X and 2X vectors and peak (`RevolutionTracker`), and
   `RunUpCoastDown`, which drives the stepper through a sweep and records each leg.
@@ -1040,6 +1049,15 @@ from vib_tutorial.core.fluid_bearing import JournalBearing
 oil = Bearing(film=JournalBearing())                           # a plain journal bearing (short-bearing theory)
 upright = RotorSystem(bearing_a=oil, bearing_b=oil, nonlinear_films=True)  # stepped with the films' whole force
 JournalBearing().force(5e-6, -8e-6, 0.0, 1e-3, 300.0)          # the whole film's force (N) at any position, velocity
+
+from vib_tutorial.core.magnetic_bearing import MagneticBearing
+from vib_tutorial.core.rotor import Crack, steady_harmonics
+
+floating = RotorSystem(bearing_a=Bearing(magnet=MagneticBearing()), bearing_b=Bearing(magnet=MagneticBearing()))
+floating.n_states                                              # 2 n_dof + the controllers' states
+MagneticBearing().dynamic_stiffness(2j * np.pi * 50.0)         # k_i G(s) - k_m at 50 Hz (N/m, complex)
+cracked = RotorSystem(crack=Crack(position=0.5, depth=0.4), gravity=9.81, unbalance=5e-6)
+q0, v = steady_harmonics(cracked, np.array([400 / RPM]))       # mean sag, and the 1X, 2X, 3X vectors
 
 from vib_tutorial.core.rotor_waterfall import Waterfall
 
