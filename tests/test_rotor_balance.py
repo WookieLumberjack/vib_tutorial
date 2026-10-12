@@ -92,6 +92,21 @@ def test_a_bowed_rotor_balances_at_every_speed_only_with_the_slow_roll_taken_out
     assert abs(reading(raw, 1590.0, DISC)) > 0.3 * abs(reading(s, 1590.0, DISC))
 
 
+def test_theory_slow_roll_taken_too_fast():
+    # The Theory's bowed rotor (20 µm at 90°), read at the disc and balanced at 1200 rpm: judged by the
+    # motion beyond the runout, a 300 rpm slow roll leaves far more than a 100 rpm one, though the
+    # total reading at the critical looks better.
+    s = RotorSystem(bow=20e-6, bow_angle=math.radians(90.0))
+    runout = reading(s, 1.0, DISC)
+    out = {}
+    for slow_rpm in (100.0, 300.0):
+        v0, v1 = reading(s, 1200.0, DISC), reading(s.with_(weights=(TRIAL,)), 1200.0, DISC)
+        w = correction(v0, influence(v0, v1, TRIAL), reading(s, slow_rpm, DISC))
+        v = reading(s.with_(weights=(w,)), 1584.0, DISC)
+        out[slow_rpm] = (round(abs(w) / 0.02 * 1e3, 2), round(abs(v) * 1e6, 1), round(abs(v - runout) * 1e6, 1))
+    assert out == {100.0: (1.41, 19.5, 0.9), 300.0: (1.37, 16.6, 8.6)}
+
+
 def test_one_plane_cannot_cancel_a_couple_unbalance_at_every_speed():
     s = RotorSystem(position=0.3, unbalance=0.0, skew=math.radians(0.2))
     fixed = balance(s, 1200.0, weight(0.5e-3, 0.02, 0.0))

@@ -518,7 +518,7 @@ the speed ramps to a target.
 - **Bode and polar plots**: the steady-state 1X (or 2X) amplitude and phase lag against speed at
   either bearing, the disc or midspan, read by an x or a y probe or as the orbit's major axis,
   with the tracked sweeps over it and a marker at the current speed. On the polar plot the
-  steady-state vector traces its circle through each critical speed.
+  steady-state vector traces a near-circle through each critical speed.
 - **Bent shaft and skewed disc**: two more sources that turn with the shaft. The bow, a set
   bend δ<sub>b</sub> at the disc at an angle to the heavy spot, drives the rotor with a force
   kδ<sub>b</sub> that does not grow with speed: the probes read it at slow roll, the polar curve
@@ -588,7 +588,8 @@ the speed ramps to a target.
   diameter, length, clearance, oil viscosity and load: the Sommerfeld number, the journal's
   eccentricity and attitude angle, its locus in the clearance circle as the speed rises, and the
   eight linearized stiffness and damping coefficients against the speed or (dimensionless, as on a
-  design chart) the Sommerfeld number, read at the rotor's speed now. Their skew part is exactly the
+  design chart) S(L/D)², the modified Sommerfeld number, on which a short bearing depends alone,
+  read at the rotor's speed now. Their skew part is exactly the
   λ = ½ swirl of the bearing table, and Lund's formula gives the speed at which a rigid rotor on the
   bearing goes into oil whirl. Tick *Oil-film journal bearings* and the rotor runs in it at both ends,
   each under its share of the weight: their stiffness and damping change with the speed, the journals
@@ -666,8 +667,9 @@ gyroscopic moment; only that forward crossing is driven by the unbalance. The *O
 λ = ½* preset turns the cross-coupling up with speed instead: the rotor goes
 unstable at 3136 rpm, twice its first natural frequency, and above that whirls at that
 frequency whatever the speed (oil whip). The *Journal bearings* preset gets the same from the
-bearings themselves: plain journal bearings, far stiffer than the shaft, put the critical at the
-rigid-bearing 1845 rpm, and their film's cross-coupling drives oil whip from 3576 rpm, at 30.5 Hz.
+bearings themselves: plain journal bearings, far stiffer than the shaft, put the critical at
+1845 rpm, close to the rigid-bearing 1854 rpm, and their film's cross-coupling drives oil whip from
+3576 rpm, a little below twice that, at 30.5 Hz.
 
 ![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1947 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
 

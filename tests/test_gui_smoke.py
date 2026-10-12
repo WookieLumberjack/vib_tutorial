@@ -2114,10 +2114,10 @@ def test_rotor_fluid_film_bearing(app):
     panel.set_bearing(JournalBearing(clearance=60e-6))
     p.set_top_rpm(20_000.0)
     assert panel.unstable_path.getData()[0].size and "whirls unstably" in panel.readout.text()
-    # Against the Sommerfeld number: log scales, dashed negative parts, the speed line at log10(S).
+    # Against S(L/D)²: log scales, dashed negative parts, the speed line at log10(S(L/D)²).
     panel.against.setCurrentIndex(1)
     assert panel.k_plot.ctrl.logXCheck.isChecked()
-    s = panel.bearing().sommerfeld(3000.0 / 60.0 * 2.0 * 3.141592653589793)
+    s = panel.bearing().sommerfeld(3000.0 / 60.0 * 2.0 * 3.141592653589793) * 0.5**2
     assert panel.speed_lines[1].value() == pytest.approx(math.log10(s))
     pos, neg = panel.k_curves[2]  # k_yx: negative throughout
     assert np.isnan(pos.getData()[1]).all() and np.isfinite(neg.getData()[1]).all()

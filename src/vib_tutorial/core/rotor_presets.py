@@ -101,8 +101,9 @@ def rotor_presets() -> list[RotorPreset]:
             "Journal bearings (oil whip)",
             RotorSystem(bearing_a=JOURNAL_BEARING, bearing_b=JOURNAL_BEARING, gravity=9.81),
             10_000.0, 2500.0,
-            "Horizontal, in plain journal bearings: the oil film is stiff, so the critical is the rigid-"
-            "bearing one, 1845 rpm, and the journals rise along the bearing's locus as the speed rises. Past "
-            "twice that, 3576 rpm, the film's own cross-coupling drives oil whip at 30.5 Hz.",
+            "Horizontal, in plain journal bearings: the oil film is stiff, so the critical, 1845 rpm, is "
+            "close to the rigid-bearing one (1854 rpm), and the journals rise along the bearing's locus as "
+            "the speed rises. A little below twice the critical, at 3576 rpm, the film's own cross-coupling "
+            "drives oil whip at 30.5 Hz (0.51×).",
         ),
     ]
