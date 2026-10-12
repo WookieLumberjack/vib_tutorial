@@ -187,6 +187,18 @@ def test_passing_the_critical_peaks_and_the_phase_lags_by_180():
     assert lag[0] < 20 and 60 < lag[1] < 120 and lag[2] > 150
 
 
+def test_theory_lag_and_peak_come_just_after_the_critical():
+    # The Theory: 88° of lag at the 1584 rpm critical, 90° at 1586 rpm, the 217 µm peak at 1589 rpm.
+    rpm = np.arange(1570.0, 1600.0, 0.25)
+    v = synchronous_response(RotorSystem(), rpm / RPM)[:, XD]
+    lag = -np.degrees(np.angle(v))
+    assert np.interp(1584.0, rpm, lag) == pytest.approx(88.4, abs=0.05)
+    assert round(float(np.interp(90.0, lag, rpm))) == 1586
+    assert rpm[np.abs(v).argmax()] == pytest.approx(1589.0, abs=0.5) and np.abs(v).max() * 1e6 == pytest.approx(217, abs=0.5)
+    far = synchronous_response(RotorSystem(), [3000.0 / RPM])[0, XD]
+    assert abs(far) * 1e6 == pytest.approx(28, abs=0.5)  # Things to try #1: toward the 20 µm eccentricity
+
+
 def test_the_bow_loads_only_the_shaft_and_shows_as_slow_roll():
     s = RotorSystem(position=0.35, unbalance=0.0, bow=50e-6, bow_angle=math.radians(60.0))
     f = s.shaft_stiffness() @ s.bow_shape()
@@ -292,3 +304,10 @@ def test_overhung_disc_separates_the_forward_and_backward_criticals():
     # Without it (no polar inertia) both meet 1X at the frequency at rest.
     plain = [w for w, _, z in campbell(s.with_(ip=1e-9), 5000.0 / RPM, n_modes=4).criticals if z < 0.3]
     assert [w * RPM for w in plain[:2]] == pytest.approx([at_rest, at_rest], rel=1e-3)
+
+
+def test_the_ramps_gyroscopic_term_is_small():
+    # The Theory leaves out I_p Ω' θ: at 5000 rpm/s it is about 0.03% of the disc's tilt stiffness.
+    s = RotorSystem()
+    tilt = s.stiffness(0.0)[TX, TX]
+    assert s.ip * 5000.0 / RPM / tilt == pytest.approx(0.0003, abs=0.00005)

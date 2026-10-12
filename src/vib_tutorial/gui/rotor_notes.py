@@ -400,7 +400,13 @@ displaced most) by a phase lag that goes from 0° well below the critical speed,
 180° well above it. Above the critical speed the shaft deflects away from the heavy spot, and as
 r → ∞ the disc spins about its own centre of mass: the shaft's centre whirls on a circle of radius e,
 the <b>self-centring</b> that lets machines run supercritically. With the defaults (e = 20 µm):
-2.2 µm at 500 rpm (lag 2°), 217 µm at the critical speed (lag 88°), 28 µm at 3000 rpm (lag 176°).</p>
+2.2 µm at 500 rpm (lag 2°), 88° of lag at the 1584 rpm critical, a peak of 217 µm at 1589 rpm, and
+28 µm at 3000 rpm (lag 176°).</p>
+<p>The lag reaches 90° at 1586 rpm, not quite at the critical, and the peak comes later still. The
+peak is late even for one mass on a spring: an unbalance response peaks at r = 1/√(1 − 2ζ²), just
+above the critical. The lag is late because the damping is at the supports, in series with the
+shaft, not at the disc. As the speed rises the dampers stiffen the supports a little, so the rotor is
+not quite the one-mass oscillator above.</p>
 
 <h3>The gyroscopic effect</h3>
 <p>A spinning disc has angular momentum I<sub>p</sub>Ω along its axis. When the disc tilts as it
@@ -589,12 +595,16 @@ the rotor at every speed, since unbalance and weight both make forces growing as
 <p><b>Why the slow roll is subtracted.</b> Take the defaults with a bow of 20 µm at 90°, read at the
 disc, balancing at 1200 rpm. The disc reads 20 µm at 100 rpm, 52 µm at 1200 rpm and 293 µm at the
 critical. Subtracting the slow roll, the correction is 1.41 g at 20 mm, 225°: it cancels both the
-unbalance and the bow's mδ<sub>b</sub>, and from then on the disc reads 20 µm at every speed, the runout
-alone, with no force behind it. Balanced on the raw reading instead, the weight (1.95 g at 243°) zeroes
+unbalance and the bow's mδ<sub>b</sub>, and from then on the disc reads about 20 µm at every speed, the
+runout alone, with no force behind it. Balanced on the raw reading instead, the weight (1.95 g at 243°) zeroes
 the reading at 1200 rpm by leaving the rotor out of balance: 162 µm at the critical, 41 µm at
-3000 rpm. A bowed rotor cannot be made to read zero at every speed with one weight. Taking the slow roll
-too fast spoils it a little: at 300 rpm it already holds some unbalance response, and 16 µm is left at
-the critical instead of 19.4.</p>
+3000 rpm. A bowed rotor cannot be made to read zero at every speed with one weight.</p>
+<p>Taking the slow roll too fast spoils the balance. At 300 rpm the reading already holds some
+unbalance response, so the weight comes out a little light (1.37 g instead of 1.41 g). At the critical
+the disc then moves 8.6 µm beyond its runout, against 0.9 µm with the slow roll taken at 100 rpm. The
+total readings there hide this: 16.6 µm looks better than 19.5 µm only because the leftover
+unbalance's response happens to partly cancel the runout. Judge a balance by the motion beyond the
+slow roll, |V − S|, not by the total.</p>
 <p><b>What one plane cannot do.</b> A weight in the disc's plane makes a force; a skewed disc makes a
 moment. Off centre, both move the disc, so a single weight can cancel the reading at the balancing speed
 but not at every speed: with a/L = 0.3 and a skew of 0.5°, balanced at 1200 rpm, 72 µm at the critical
@@ -645,18 +655,25 @@ fluid is dragged round by the shaft, so pushing the journal in x raises the pres
 pushes it in y too: f<sub>x</sub> = −k<sub>xy</sub>y, f<sub>y</sub> = +k<sub>xy</sub>x. On a circular
 forward orbit that force always points along the orbit, the way the journal moves: it does work on the
 whirl, 2πk<sub>xy</sub>r² per cycle, where a damper c takes out 2πcωr². So the forward modes lose
-damping and the backward ones gain it, and once k<sub>xy</sub> passes cω the forward mode grows. With the
-defaults the threshold is k<sub>xy</sub> = 16,400 N/m at both bearings, close to cω = 16,600 N/m for
-their 100 N·s/m at the 26.4 Hz whirl (ζ of the forward mode
-0.046 → 0.033 → 0.019 → 0.004 at 0, 5,000, 10,000 and 15,000 N/m).</p>
+damping and the backward ones gain it, and once k<sub>xy</sub> passes cω the forward mode grows. When
+all the damping is at the bearings, as here, and the orbits are circles, this balance is exact, with ω
+the whirl frequency at the onset. As k<sub>xy</sub> rises the forward mode's ζ falls,
+0.046 → 0.033 → 0.019 → 0.004 at 0, 5,000, 10,000 and 15,000 N/m, and its frequency slips from
+26.4 Hz to 26.13 Hz. The threshold with the defaults is k<sub>xy</sub> = 16,419 N/m at both bearings,
+exactly cω for their 100 N·s/m at 26.13 Hz.</p>
 <p><b>Oil whirl and oil whip.</b> In a real fluid-film bearing k<sub>xy</sub> is not constant: the oil
-film is dragged round at a fraction λ of the shaft's speed (λ ≈ 0.5 in a plain journal bearing, the
-fluid sticking to the turning journal and to the still bearing), and the cross-coupling grows with it,
-k<sub>xy</sub> = λcΩ for a bearing of damping c. The energy balance above then reads λcΩ against cω:
+film is dragged round at a fraction λ of the shaft's speed, and the cross-coupling grows with it,
+k<sub>xy</sub> = λcΩ for a bearing of damping c. The oil sticks to the turning journal and to the
+still bearing, so λ is about ½: exactly ½ in short-bearing theory, just under it (about 0.42 to 0.48)
+in real plain bearings. If a bearing's dampers differ in x and y, the page takes c as their mean. That
+is exact for equal dampers. In general the consistent form, damping acting on the journal's motion
+relative to the swirling oil, gives a cross-coupling λΩ times the damping matrix turned through 90°. The energy balance above then reads λcΩ against cω:
 the forward whirl at ω grows once <b>λΩ &gt; ω</b>, the oil's swirl outrunning the whirl, whatever the
 damping. With λ = 0.5 the rotor goes unstable at <b>twice its first natural frequency</b>. Set λ in the
 bearing table, or load the <i>Oil swirl λ = ½</i> preset: the onset is 3136 rpm, twice the forward
-whirl's 26.1 Hz, and just there the whirl is at exactly ½X. Faster, it stays locked at the natural
+whirl's 26.1 Hz, and just there the whirl is at exactly ½X. In this linear model the whirl turns
+straight into whip at the onset. On real machines <i>oil whirl</i> often comes first, a limit cycle
+near 0.45X that follows the speed up, and locks into whip once it reaches the natural frequency. Faster, it stays locked at the natural
 frequency (26.3 Hz, 0.32×, at 5000 rpm, growing by e every 0.22 s): <i>oil whip</i>, the ratio to the
 speed falling as the speed rises. Raising the damping does not help, since it raises the cross-coupling
 with it; real machines use bearings that break up the swirl (tilting pads, pressure dams) or lower λ
@@ -676,6 +693,9 @@ c<sub>e</sub> at the disc,</p>
 <p>always above the critical speed, and with no external damping exactly at it. (On flexible supports
 only the shaft's share of the motion is damped internally, so the onset rises further.) This was the
 cause of the supercritical whirl of early built-up rotors, studied by Kimball and Newkirk in the 1920s.
+The model makes the internal damping viscous, a force in proportion to the bending rate. Real material
+damping is closer to hysteretic, a fixed loss per cycle whatever the rate, and the onset speed depends
+on which is assumed.
 With the defaults and c<sub>i</sub> = 20 N·s/m the rotor is stable up to 3,910 rpm; 10 N·s/m moves the
 onset up to 6,220 rpm, 40 N·s/m down to 2,760 rpm. Below the critical, internal damping helps: at rest the
 first mode's ζ rises from 0.046 to 0.078 with c<sub>i</sub> = 20 N·s/m.</p>
@@ -703,9 +723,10 @@ cavitates instead, so only the half of the film that narrows carries load (the �
 <p>At rest the journal lies on the bottom of its clearance. As the speed rises the film lifts it, and,
 since the film's pressure peaks ahead of the thinnest point, it pushes the journal <b>sideways</b>, in
 the direction of spin, as well as up. The journal settles off the load line by the <b>attitude angle</b>
-at an <b>eccentricity</b> ε = e/c that depends only on the Sommerfeld number
-S = (μNLD/W)(R/c)², N in rev/s: the more speed and viscosity, or the less load, the larger S, and the
-closer the journal to the centre, at nearly 90° to the load. On the <i>Fluid-film bearing</i> tab, the
+at an <b>eccentricity</b> ε = e/c set by the Sommerfeld number S = (μNLD/W)(R/c)², N in rev/s, and
+the bearing's proportions. In short-bearing theory ε depends only on S(L/D)², the modified Sommerfeld
+number: at S = 1, halving L moves ε from 0.32 to 0.60. The more speed and viscosity, or the less load,
+the larger S, and the closer the journal to the centre, at nearly 90° to the load. On the <i>Fluid-film bearing</i> tab, the
 default bearing (D = 10 mm, L = 5 mm, c = 15 µm, oil of 30 mPa·s, 5 N) has ε = 0.80 at 100 rpm, 0.44 at
 1,000 rpm and 0.22 at 3,000 rpm, its thinnest film 11.7 µm there. Every short bearing travels the same
 path, the <b>locus</b>, only at a different pace.</p>
@@ -721,11 +742,12 @@ cross-coupling grows with it while the direct stiffness and damping level off.</
 K<sub>eq</sub> = (k<sub>xx</sub>c<sub>yy</sub> + k<sub>yy</sub>c<sub>xx</sub> − k<sub>xy</sub>c<sub>yx</sub>
 − k<sub>yx</sub>c<sub>xy</sub>)/(c<sub>xx</sub> + c<sub>yy</sub>). Lightly loaded, ν is half the speed:
 <b>oil whirl</b>. With the default bearing carrying its load as weight (0.51 kg), the rotor goes unstable
-at 21,324 rpm and whirls at 0.50×. Heavily loaded bearings (ε above 0.756) are stable at any speed,
+at 21,324 rpm and whirls at 0.50×. Heavily loaded bearings (ε above 0.756) are stable at any speed (a
+result of short-bearing theory with the π-film; other bearings and film models put the limit elsewhere),
 which is one reason a lightly loaded bearing is the one that whirls. A flexible rotor goes unstable much
 sooner, near twice its first critical speed, which is the oil whip of the <i>Stability</i> section.</p>
 <p>The tab draws the locus, with the page's speed range solid and the speed now as a dot, and the
-coefficients against the speed, or made dimensionless against S on log scales (dashed where negative),
+coefficients against the speed, or made dimensionless against S(L/D)² on log scales (dashed where negative),
 as on a bearing designer's chart.</p>
 <p><b>On the rotor.</b> Tick <i>Oil-film journal bearings</i> under the bearing supports and both journals
 run in the tab's bearing, on rigid housings, in place of the springs and dampers. Each carries its share of
@@ -737,9 +759,14 @@ joins its loads, so the rotor rests with its journals on the locus and, with <i>
 bearings' orbits rise along it as the speed rises. Below the speed where ε = 0.9 the journal is nearly on
 its bottom (mixed lubrication), and the film is taken as it is there. The <i>Journal bearings</i> preset
 is the default rotor laid horizontal on the default bearing. The film, 1 MN/m or so, is far stiffer than
-the shaft (38 kN/m at the disc), so the critical speed is the rigid-bearing one, 1845 rpm, and the film
-damps it little: the journals hardly move. Past twice that, 3576 rpm, the forward whirl grows at 30.5 Hz
-(0.51×): oil whip from the bearing itself, not from a chosen λ, and locked at 30.7 Hz at 5000 rpm (0.37×),
+the shaft (38 kN/m at the disc), so the critical speed is close to the rigid-bearing one: 1845 rpm,
+against 1854 rpm on rigid bearings. The film damps it little (ζ = 0.007). The film is not isotropic, so
+the backward whirl crosses 1X too, at 1853 rpm, and it is even more lightly damped (ζ = 0.002). The
+unbalance excites both, and through the pair the disc's orbit is an ellipse. The film is linearized,
+so nothing holds the response inside the clearance: at the critical the journals' 1X orbits reach
+about 28 µm (their half-length), almost twice the 15 µm clearance. A real journal would touch the
+bearing long before that, so read them as the linear model's prediction only. A little below twice the
+critical, at 3576 rpm, the forward whirl grows at 30.5 Hz (0.51×): oil whip from the bearing itself, not from a chosen λ, and locked at 30.7 Hz at 5000 rpm (0.37×),
 growing by e every 0.85 s. Long before it reaches the size of the disc's whirl it fills the 15 µm
 clearance, where a real film stiffens sharply and holds it to a limit cycle; the linear model cannot, so
 the page pauses there. A vertical rotor's bearings carry no load, and an unloaded plain bearing has no
@@ -792,6 +819,11 @@ the turning stiffness ties each harmonic k to k ± 2, which closes at once on is
 1X; the sag gives a forward 2X) and is cut at ±6X otherwise. The time stepping splits each step: half a
 step of the rest (the exact update), the kick of the turning stiffness at mid-step on the velocities,
 and the other half step. It agrees with the harmonic balance to about 10<sup>−5</sup>.</p>
+<p>A Floquet mode's frequency is defined only up to a multiple of the stiffness's harmonic spacing
+Ω<sub>s</sub> (2Ω here, Ω for a breathing crack): the same mode can be listed at μ + ikΩ<sub>s</sub>
+for any whole k, and its ζ changes with the k chosen. Its growth rate, Re μ, does not. So on the stability map of a shaft whose stiffness
+turns, the onset (ζ = 0) holds whichever harmonic is listed, but read the size of ζ away from zero as
+a growth rate.</p>
 
 <h3>The cracked shaft</h3>
 <p>A fatigue crack grows across a shaft from its surface, often where the bending stress is highest,
@@ -805,6 +837,9 @@ add up the energy each releases as the crack grows, (1 − ν²)K<sub>I</sub>²/
 mouth open (the moment along the crack's front) loads every strip; bending across it loads one half in
 tension and the other in compression. So it gives far more one way: for a/D = 0.4 in the 10 mm shaft,
 c<sub>o</sub> = 1.45 × 10<sup>−4</sup> rad/(N·m) opening it, c<sub>a</sub> = 0.60 × 10<sup>−4</sup> across.
+The figure across counts the strips on the compressed half too, as though open. That holds only while
+the bending that opens the crack (on the rotor, the weight's) keeps the whole front in tension, the
+vibration's smaller bending only adding to it on one side and taking from it on the other.
 On the shaft the hinge is condensed out exactly, with everything else, onto the stations: it takes
 b b<sup>T</sup> c/(1 + c s) off their stiffness, b the moment at the crack that the stations' displacements
 make and s the shaft's stiffness against the jump. Open, it is an asymmetric shaft, its two axes along
@@ -866,7 +901,8 @@ their gyroscopic moment). Its shape is then no longer set by the stations alone,
 slope in each plane.</p>
 <p>A light shaft changes little. The defaults' steel shaft weighs 0.31 kg beside the 1 kg disc, and
 takes the first critical speed from 1584 to 1458 rpm. The old rule adds 17/35 of a simply supported
-shaft's mass to the disc (Rayleigh's method, with the shaft's static deflected shape), which gives 1477
+shaft's mass to the disc (Rayleigh's method, taking the shaft's shape as its static deflection under a
+load at the disc), which gives 1477
 rpm. But a shaft has bending modes of its own, and a heavier one brings them down into the speed range.
 In the <i>Long shaft</i> preset (a 2 kg disc on a 1 m, 20 mm shaft of 2.47 kg) the critical speeds
 are 1589 and 6582 rpm. The massless model puts the first at 2146 rpm, 35% high, and has no second:
@@ -889,19 +925,22 @@ element model's below 500 Hz, and within 1% up to 1000 Hz (60,000 rpm, the top o
 With a massless shaft there are no such modes, and the reduction is exactly the Jeffcott model.</p>
 
 <h3>Why state space</h3>
-<p>Undamped modes and modal superposition need symmetric M, C and K, and real modes that do not change.
+<p>Real modes and modal superposition need symmetric M and K, damping in proportion to them, and modes
+that do not change with the speed.
 Here ΩG is skew-symmetric and changes with the speed, and support damping is not proportional, so the
 modes are complex and speed-dependent. The first-order form z' = A(Ω)z + Bu handles all of it: the
 eigenvalues of A give each mode's frequency, damping and whirl direction, and the time response is
 stepped exactly. As on the other pages, each step is the exact first-order-hold matrix-exponential
 update, z<sub>k+1</sub> = Φz<sub>k</sub> + Γ<sub>0</sub>u<sub>k</sub> + Γ<sub>1</sub>u<sub>k+1</sub>,
 Φ = e<sup>Ah</sup>, stable however stiff the shaft. While the speed ramps, A(Ω) is updated every 2 ms of
-simulated time and the unbalance force follows the exact angle φ, including the Ω' term.</p>
+simulated time and the unbalance force follows the exact angle φ, including the Ω' term. The ramp's
+gyroscopic term I<sub>p</sub>Ω'θ is left out: at 5000 rpm/s it is about 0.03% of the disc's tilt
+stiffness.</p>
 
 <h3>Things to try</h3>
 <ol>
 <li>Ramp from 1000 to 3000 rpm at 500 rpm/s and watch the disc's orbit grow through 1584 rpm and shrink
-again to about the 20 µm eccentricity, while the heavy spot swings round to the opposite side of the
+again toward the 20 µm eccentricity (28 µm at 3000 rpm), while the heavy spot swings round to the opposite side of the
 orbit. Then try 5000 rpm/s: the whirl has no time to build, and the peak is much lower.</li>
 <li>Run up and coast down from 800 to 2400 rpm at 500 rpm/s, then again at 5000 rpm/s with <i>Hold
 earlier sweeps</i> ticked, and compare them with the steady-state curve on the Bode and polar plots.

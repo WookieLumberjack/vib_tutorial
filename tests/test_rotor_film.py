@@ -149,6 +149,23 @@ def test_journal_bearing_preset():
     assert q[YD] < q[YA]  # the disc sags below the journals
 
 
+def test_journal_bearing_preset_splits_its_critical():
+    # The Theory: the anisotropic film adds a backward crossing, more lightly damped than the forward one.
+    p = next(p for p in rotor_presets() if p.name == "Journal bearings (oil whip)")
+    c = campbell(p.system, p.top_rpm / RPM)
+    lightly = sorted((round(w * RPM), r > 0, round(z, 3)) for w, r, z in c.criticals if z < 0.3)
+    assert lightly == [(1845, True, 0.007), (1853, False, 0.002)]
+    # The linear response ignores the clearance: the journals' orbits peak at about 28 µm, beyond 15 µm.
+    rpm = np.arange(1800.0, 1900.0, 0.25)
+    q = synchronous_response(p.system, rpm / RPM)
+    half_length = (np.abs(q[:, XA] + 1j * q[:, YA]) + np.abs(q[:, XA] - 1j * q[:, YA])) / 2
+    assert rpm[half_length.argmax()] == pytest.approx(1845.0, abs=0.5)
+    assert half_length.max() * 1e6 == pytest.approx(28, abs=0.5) and half_length.max() > p.system.bearing_a.film.clearance
+    rigid = Bearing(kx=1e12, ky=1e12, cx=0.0, cy=0.0, mass=1e-3)
+    on_rigid = campbell(p.system.with_(bearing_a=rigid, bearing_b=rigid), p.top_rpm / RPM)
+    assert min(round(w * RPM) for w, r, _ in on_rigid.criticals if r > 0) == 1854
+
+
 def test_heavier_loaded_films_whirl_later():
     # The Theory's Things to try: a looser bearing with thinner oil sinks lower and holds off oil whip.
     loose = Bearing(film=JournalBearing(clearance=30e-6, viscosity=0.01))

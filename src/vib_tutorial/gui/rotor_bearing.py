@@ -30,11 +30,11 @@ LOCUS_POINTS = 200
 LOCUS_SIZE = 230  # px
 AXIS_WIDTH = 56  # px, the coefficient plots' left axes
 LABEL_GAP = 0.14  # of the clearance: speed labels on the locus are at least this far apart
-SOMMERFELD_RANGE = (0.003, 30.0)  # the dimensionless chart's span of S
+SHORT_RANGE = (0.001, 10.0)  # the dimensionless chart's span of S(L/D)²
 LOW_SPEED = 0.02  # of the top speed: the speed plot's range is scaled to the curves above this
 SHORT_LIMIT = 0.5  # L/D past which short-bearing theory is stretched
 THRESHOLD_TOP = 60_000.0  # rpm: the rigid rotor's threshold is looked for up to this (the page's widest range)
-AGAINST = ("Speed (N/m, N·s/m)", "Sommerfeld number (dimensionless)")
+AGAINST = ("Speed (N/m, N·s/m)", "S(L/D)² (dimensionless)")
 # The coefficients drawn: (row, column) in K or C, label, colour index into colors.mode.
 STIFFNESS = (((0, 0), "k<sub>xx</sub>", 0), ((0, 1), "k<sub>xy</sub>", 1), ((1, 0), "k<sub>yx</sub>", 3),
              ((1, 1), "k<sub>yy</sub>", 5))
@@ -57,9 +57,10 @@ COEFF_TIP = (
     "<p>K is not symmetric: k<sub>xy</sub> and k<sub>yx</sub> have opposite signs, and that skew part "
     "pushes a forward whirl along its path, as the rotor's k<sub>xy</sub> does. It grows with the speed "
     "while the direct damping levels off, so past some speed the film feeds a whirl faster than it damps "
-    "it: oil whirl.</p><p>Against the Sommerfeld number the coefficients are made dimensionless, "
-    "K c / W and C c Ω / W, and are the same for every short bearing: the scale is log, and dashed "
-    "curves are negative.</p>"
+    "it: oil whirl.</p><p>Made dimensionless, K c / W and C c Ω / W, the coefficients of a short bearing "
+    "depend only on S(L/D)², the Sommerfeld number S times the square of the length-to-diameter ratio "
+    "(the modified Sommerfeld number), so against it the curves are the same for every short bearing. "
+    "Against S alone they would move with L/D. The scales are log, and dashed curves are negative.</p>"
 )
 INPUT_TIPS = {
     "diameter": "Journal diameter D",
@@ -184,7 +185,7 @@ class BearingPanel(QtWidgets.QWidget):
             line = pg.InfiniteLine(angle=90)
             p.addItem(line)
             self.speed_lines.append(line)
-        self.range_band = pg.LinearRegionItem(movable=False)  # the page's speeds, on the Sommerfeld chart
+        self.range_band = pg.LinearRegionItem(movable=False)  # the page's speeds, on the dimensionless chart
         self.range_band.setZValue(-10)
         self.k_plot.addItem(self.range_band)
         self.note = QtWidgets.QLabel()
@@ -350,9 +351,8 @@ class BearingPanel(QtWidgets.QWidget):
         if dimensionless and not loaded:
             b = b.with_load(1.0)  # the dimensionless curves are every bearing's: draw them at any load
         if dimensionless:
-            s = np.geomspace(*SOMMERFELD_RANGE, SPEEDS)
-            omega = np.asarray(b.omega_at(s))
-            x = s
+            x = np.geomspace(*SHORT_RANGE, SPEEDS)
+            omega = np.asarray(b.omega_at(x / _aspect2(b)))
         else:
             top = self.top_rpm / RPM
             omega = np.linspace(top / SPEEDS, top, SPEEDS)
@@ -371,7 +371,7 @@ class BearingPanel(QtWidgets.QWidget):
                                                                              ("Damping", "N·s/m"))
         for p, (label, unit) in zip((self.k_plot, self.c_plot), units):
             p.setLabel("left", label, units=unit)
-        self.c_plot.setLabel("bottom", "Sommerfeld number S" if dimensionless else "Spin speed (rpm)")
+        self.c_plot.setLabel("bottom", "S(L/D)²" if dimensionless else "Spin speed (rpm)")
         for curves, spec, values in ((self.k_curves, STIFFNESS, k), (self.c_curves, DAMPING, c)):
             for (pos, neg), ((i, j), _, color) in zip(curves, spec):
                 v = values[:, i, j]
@@ -388,7 +388,7 @@ class BearingPanel(QtWidgets.QWidget):
             if dimensionless:
                 v = np.abs(values).reshape(-1)
                 v = np.log10(v[v > 0.0])
-                p.setRange(xRange=np.log10(SOMMERFELD_RANGE), yRange=(max(float(v.min()), -3.0), float(v.max())),
+                p.setRange(xRange=np.log10(SHORT_RANGE), yRange=(max(float(v.min()), -3.0), float(v.max())),
                            padding=0.04)
             else:
                 # Scale to the curves above the lowest speeds, where the film's stiffness climbs without bound.
@@ -398,7 +398,8 @@ class BearingPanel(QtWidgets.QWidget):
                 pad = 0.06 * (hi - lo)
                 p.setRange(xRange=(0.0, self.top_rpm), yRange=(lo - pad, hi + pad), padding=0)
         if dimensionless:
-            lo, hi = b.sommerfeld(LOW_SPEED * self.top_rpm / RPM), b.sommerfeld(self.top_rpm / RPM)
+            lo, hi = (_short_sommerfeld(b, LOW_SPEED * self.top_rpm / RPM),
+                      _short_sommerfeld(b, self.top_rpm / RPM))
             self.range_band.setRegion((math.log10(lo), math.log10(hi)))
         self.range_band.setVisible(dimensionless and loaded)
         self._place_speed_lines()
@@ -407,7 +408,7 @@ class BearingPanel(QtWidgets.QWidget):
         dimensionless = self.against.currentIndex() == 1
         b = self.bearing()
         if dimensionless and b.load > 0.0:
-            value = math.log10(max(float(b.sommerfeld(self.rpm / RPM)), 1e-12))
+            value = math.log10(max(_short_sommerfeld(b, self.rpm / RPM), 1e-12))
         else:
             value = self.rpm
         for line in self.speed_lines:
@@ -437,7 +438,8 @@ class BearingPanel(QtWidgets.QWidget):
                                  ((1, 0), "k<sub>yx</sub>"), ((1, 1), "k<sub>yy</sub>")))
         self.readout.setText(
             f"<p><b>At {self.rpm:,.0f} rpm</b>: Sommerfeld number "
-            + (f"S = {b.sommerfeld(omega):.3g}, " if b.load > 0.0 else "S = ∞ (no load: a vertical rotor), ")
+            + (f"S = {b.sommerfeld(omega):.3g} (S(L/D)² = {_short_sommerfeld(b, omega):.3g}), " if b.load > 0.0
+               else "S = ∞ (no load: a vertical rotor), ")
             + f"eccentricity ε = {s.eccentricity:.3f}, attitude angle {math.degrees(s.attitude):.1f}°, "
             f"thinnest film {b.clearance * (1.0 - s.eccentricity) * 1e6:.1f} µm.</p>"
             f"<table cellspacing='0' cellpadding='1'>{rows}</table>"
@@ -477,6 +479,16 @@ class BearingPanel(QtWidgets.QWidget):
 def _round_speeds(top: float) -> list[float]:
     """1, 2, 5 times powers of ten (rpm) up to `top`, from 100 rpm."""
     return [m * 10.0**d for d in range(2, 6) for m in (1, 2, 5) if m * 10.0**d <= top]
+
+
+def _aspect2(b: JournalBearing) -> float:
+    """(L/D)²: S times it is what a short bearing's state depends on."""
+    return (b.length / b.diameter) ** 2
+
+
+def _short_sommerfeld(b: JournalBearing, omega: float) -> float:
+    """S(L/D)² at the speed `omega` (rad/s), the dimensionless chart's x."""
+    return float(b.sommerfeld(omega)) * _aspect2(b)
 
 
 def _locus(eps: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

@@ -121,3 +121,18 @@ def test_theory_numbers():
     t = b.state(omega)
     assert math.sqrt(rigid_threshold(t.k, t.c)[1]) / omega == pytest.approx(0.50, abs=0.005)
     assert nu2(0.7555) > 0.0 > nu2(0.7565)
+
+
+def test_short_bearing_depends_on_s_times_l_over_d_squared():
+    # Made dimensionless, a short bearing's state is the same at the same S(L/D)², not at the same S.
+    wide, narrow = JournalBearing(), JournalBearing(length=2.5e-3)
+    a, b = wide.state(wide.omega_at(1.0)), narrow.state(narrow.omega_at(4.0))
+    assert a.eccentricity == pytest.approx(b.eccentricity, rel=1e-9)
+    def dimensionless(bearing, s):
+        return s.k * bearing.clearance / bearing.load, s.c * bearing.clearance * s.omega / bearing.load
+
+    for x, y in zip(dimensionless(wide, a), dimensionless(narrow, b)):
+        np.testing.assert_allclose(x, y, rtol=1e-9)
+    # At the same S = 1, halving L moves ε from 0.32 to 0.60 (the Theory).
+    assert round(wide.state(wide.omega_at(1.0)).eccentricity, 2) == 0.32
+    assert round(narrow.state(narrow.omega_at(1.0)).eccentricity, 2) == 0.60

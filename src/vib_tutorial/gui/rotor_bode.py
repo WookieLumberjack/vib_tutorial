@@ -39,8 +39,9 @@ BODE_TIP = (
 POLAR_TIP = (
     "<p>The same 1X vector drawn as a point: its length is the amplitude, and the angle clockwise from "
     "the right is the phase lag (the direction of rotation is counterclockwise). As the speed passes a "
-    "critical, the steady-state vector traces a circle (exactly one, for a single lightly damped mode); "
-    "the critical speed is at the bottom of the circle, where the lag is 90°.</p>"
+    "critical, the steady-state vector traces a loop: very nearly a circle for a single lightly damped "
+    "mode, though not exactly one (the mobility, velocity over force, would be). The lag is 90° at the "
+    "bottom of the loop, close to the critical speed.</p>"
     "<p>The labelled dots on the steady-state curve mark the speed in rpm.</p>"
 )
 

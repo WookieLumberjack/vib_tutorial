@@ -92,6 +92,17 @@ def test_cross_coupling_moves_damping_from_forward_to_backward_and_has_a_thresho
     assert onset is not None and onset.omega == 0.0 and onset.whirl > 0.9 and math.isinf(onset.order)
 
 
+def test_cross_coupling_threshold_is_exactly_c_omega_at_the_onset_whirl():
+    # The Theory: all the damping at the bearings and circular orbits make the energy balance exact.
+    from scipy.optimize import brentq
+
+    k = brentq(lambda k: least_damped(cross_coupled(k), 0.0)[0], 1e4, 2e4, xtol=1e-6)
+    _, f, _ = least_damped(cross_coupled(k), 0.0)
+    assert round(k) == 16_419 and round(f, 2) == 26.13
+    assert k == pytest.approx(Bearing().cx * 2 * math.pi * f, rel=1e-9)
+    assert whirl_modes(RotorSystem(), 0.0).freq_hz[0] == pytest.approx(26.4, abs=0.005)
+
+
 def test_steady_synchronous_response_matches_the_simulation_with_both_terms():
     s = RotorSystem(position=0.4, bearing_a=Bearing(kxy=4e3), internal_damping=10.0)
     w = 1200.0 / RPM
