@@ -762,7 +762,10 @@ is the default rotor laid horizontal on the default bearing. The film, 1 MN/m or
 the shaft (38 kN/m at the disc), so the critical speed is close to the rigid-bearing one: 1845 rpm,
 against 1854 rpm on rigid bearings. The film damps it little (ζ = 0.007). The film is not isotropic, so
 the backward whirl crosses 1X too, at 1853 rpm, and it is even more lightly damped (ζ = 0.002). The
-unbalance excites both, and through the pair the disc's orbit is an ellipse. A little below twice the
+unbalance excites both, and through the pair the disc's orbit is an ellipse. The film is linearized,
+so nothing holds the response inside the clearance: at the critical the journals' 1X orbits reach
+about 28 µm (their half-length), almost twice the 15 µm clearance. A real journal would touch the
+bearing long before that, so read them as the linear model's prediction only. A little below twice the
 critical, at 3576 rpm, the forward whirl grows at 30.5 Hz (0.51×): oil whip from the bearing itself, not from a chosen λ, and locked at 30.7 Hz at 5000 rpm (0.37×),
 growing by e every 0.85 s. Long before it reaches the size of the disc's whirl it fills the 15 µm
 clearance, where a real film stiffens sharply and holds it to a limit cycle; the linear model cannot, so
