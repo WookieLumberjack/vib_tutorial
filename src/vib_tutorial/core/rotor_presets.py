@@ -44,8 +44,9 @@ def rotor_presets() -> list[RotorPreset]:
         ),
         RotorPreset(
             "Off-centre disc", RotorSystem(position=0.3), 10_000.0, 1000.0,
-            "At a/L = 0.3 the disc tilts as it whirls. The first critical barely splits (1731 and 1737 rpm), "
-            "but the disc's tilting mode does, from 360 Hz at rest to 289 and 465 Hz at 6000 rpm.",
+            "At a/L = 0.3 the disc tilts as it whirls. The first critical splits only slightly (1731 and "
+            "1737 rpm), but the disc's tilting mode splits strongly, from 360 Hz at rest to 289 and 465 Hz at "
+            "6000 rpm.",
         ),
         RotorPreset(
             "Anisotropic supports",

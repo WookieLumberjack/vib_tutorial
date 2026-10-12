@@ -36,7 +36,7 @@ ILL_CONDITIONED = 20.0  # cond(α) above which the planes are hard to tell apart
 # The ways to balance: one weight on the disc, two in planes on the disc's faces, or two on the shaft.
 MODES = ("One plane: the disc", "Two planes: the disc's faces", "Two planes on the shaft")
 # Each reading: its symbol and the colour it is drawn in (an attribute of colors, or an index into colors.mode).
-READINGS = (("slow", "S", "grey"), ("found", "V₀", 1), ("trial", "V₁", 3), ("trial2", "V₂", 4),
+READINGS = (("slow", "Vₛ", "grey"), ("found", "V₀", 1), ("trial", "V₁", 3), ("trial2", "V₂", 4),
             ("verify", "V₂", "strong"))
 TRIALS = ("trial", "trial2")  # the readings with a trial weight in plane 1, plane 2
 SECOND = "′"  # marks the second probe's readings
@@ -369,7 +369,7 @@ class BalancingPanel(QtWidgets.QWidget):
         return influence_matrix(v0, np.array(runs), np.full(len(keys), self.trial))
 
     def correction_weights(self) -> np.ndarray | None:
-        """W = -α⁻¹ (V₀ - S), one weight (kg·m) per plane, or None until the trial runs are in."""
+        """W_c = -α⁻¹ (V₀ - V_s), one weight (kg·m) per plane, or None until the trial runs are in."""
         alpha = self.influence()
         if alpha is None:
             return None
@@ -537,14 +537,14 @@ class BalancingPanel(QtWidgets.QWidget):
                 out += (f"Trial {mass * 1e3:.3g} g at {math.degrees(angle):.0f}°: influence coefficient "
                         f"α = (V₁ − V₀)/T = {_per_weight(a)}<br>")
             w = self.correction_weights()
-            less = "(V₀ − S)" if subtract else "V₀"
+            less = "(V₀ − V<sub>s</sub>)" if subtract else "V₀"
             if w is None:
                 out += "The trial runs cannot tell the planes apart: try planes further apart."
             elif two:
-                parts = [f"W<sub>{j + 1}</sub> = {_weight(x, r)}" for j, x in enumerate(w)]
-                out += f"<b>Correction</b> W = −α<sup>−1</sup>{less}: <b>{'; '.join(parts)}</b> (trials off)"
+                parts = [f"W<sub>c{j + 1}</sub> = {_weight(x, r)}" for j, x in enumerate(w)]
+                out += f"<b>Correction</b> W<sub>c</sub> = −α<sup>−1</sup>{less}: <b>{'; '.join(parts)}</b> (trials off)"
             else:
-                out += f"<b>Correction</b> W = −{less}/α: <b>{_weight(complex(w[0]), r)}</b> from the mark (trial off)"
+                out += f"<b>Correction</b> W<sub>c</sub> = −{less}/α: <b>{_weight(complex(w[0]), r)}</b> from the mark (trial off)"
         v2 = values["verify"]
         if v2 is not None and v0_ok(values["found"], runout):
             v0 = values["found"]

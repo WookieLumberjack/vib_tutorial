@@ -520,7 +520,7 @@ the speed ramps to a target.
   with the tracked sweeps over it and a marker at the current speed. On the polar plot the
   steady-state vector traces a near-circle through each critical speed.
 - **Bent shaft and skewed disc**: two more sources that turn with the shaft. The bow, a set
-  bend δ<sub>b</sub> at the disc at an angle to the heavy spot, drives the rotor with a force
+  bend δ<sub>b</sub> at the disc at an angle from the keyphasor mark, drives the rotor with a force
   kδ<sub>b</sub> that does not grow with speed: the probes read it at slow roll, the polar curve
   starts from it, and well above the critical the disc settles on the bearings' axis. Against
   the unbalance it adds or cancels, depending on its angle. The skew τ is a couple unbalance,
@@ -588,7 +588,7 @@ the speed ramps to a target.
   diameter, length, clearance, oil viscosity and load: the Sommerfeld number, the journal's
   eccentricity and attitude angle, its locus in the clearance circle as the speed rises, and the
   eight linearized stiffness and damping coefficients against the speed or (dimensionless, as on a
-  design chart) S(L/D)², the modified Sommerfeld number, on which a short bearing depends alone,
+  design chart) S(L<sub>b</sub>/D<sub>b</sub>)², the modified Sommerfeld number, on which a short bearing depends alone,
   read at the rotor's speed now. Their skew part is exactly the
   λ = ½ swirl of the bearing table, and Lund's formula gives the speed at which a rigid rotor on the
   bearing goes into oil whirl. Tick *Oil-film journal bearings* and the rotor runs in it at both ends,
@@ -601,7 +601,7 @@ the speed ramps to a target.
   speed. G is skew-symmetric: it sits beside C but does no work.
 - **Theory**: the classic case, heavy and high spot, the gyroscopic effect, the overhung
   rotor, forward and backward whirl, 2X and ½X excitations, anisotropic supports, run-ups through a critical speed (why a fast ramp
-  peaks lower and later, beating, and the dimensionless ramp rate α/ω<sub>c</sub>²), the bent
+  peaks lower and later, beating, and the dimensionless ramp rate Ω'/ω<sub>c</sub>²), the bent
   shaft (slow-roll runout, why it is subtracted before balancing), the couple unbalance,
   gravity's static sag, the asymmetric shaft (its unstable band, the gravity critical and the
   unbalance angle), the breathing crack (its compliance, 2X and 3X, and its 1X),
@@ -626,7 +626,7 @@ with backward whirl between them.
 A ramp through a critical speed gives the whirl no time to build up to its steady-state peak.
 The faster the ramp, the lower the peak, and the further past the critical speed it comes: after
 it on a run-up, before it on a coast-down. Whether a ramp counts as slow depends on
-α/ω<sub>c</sub>² against ζ². Once past the critical, the free vibration left over at the natural
+Ω'/ω<sub>c</sub>² against ζ². Once past the critical, the free vibration left over at the natural
 frequency beats with the 1X response.
 
 ![Polar plot of the disc's 1X response with a 10 µm shaft bow set against the 20 g·mm unbalance (at 180°): the steady-state curve starts from the bow, -10 µm at slow roll, shrinks to 1.3 µm at 1116 rpm, where the two cancel, then loops through the 1596 rpm critical (110 µm), with a 500 rpm/s run-up and coast-down over it](docs/images/jeffcott_bow.png)
