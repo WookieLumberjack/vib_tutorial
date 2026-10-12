@@ -14,7 +14,7 @@ keyphasor mark in the direction of spin.
 A reading at slow roll (S), turning too slowly for any unbalance to matter, is
 runout: a bowed shaft, or on a real machine a scratch or a magnetic spot on the
 probe's track. It does not come from unbalance, so it is subtracted first:
-W = -(V0 - S) / α. A bow does respond to speed, though, so a bowed rotor
+W = -(V0 - Vs) / α. A bow does respond to speed, though, so a bowed rotor
 balanced at one speed is left out of balance at others; and a weight in one
 plane cannot cancel a couple unbalance (a skewed disc) at every speed either.
 
@@ -24,7 +24,7 @@ matrix,
 
     α[:, j] = (V_j - V0) / T_j,
 
-and the weights W = -α⁻¹ (V0 - S) cancel both readings. A disc's unbalance is
+and the weights W = -α⁻¹ (V0 - Vs) cancel both readings. A disc's unbalance is
 a force and a couple, so two weights in planes on the disc can cancel both,
 and then the rotor is balanced at every speed. Planes elsewhere on a flexible
 shaft cancel the readings only at the balancing speed. Planes close together
@@ -68,7 +68,7 @@ def influence(as_found: complex, trial_run: complex, trial: complex) -> complex:
 
 
 def correction(as_found: complex, alpha: complex, slow_roll: complex = 0j) -> complex:
-    """W = -(V0 - S) / α: the weight (kg·m) that cancels the reading less its slow-roll runout."""
+    """W = -(V0 - Vs) / α: the weight (kg·m) that cancels the reading less its slow-roll runout."""
     if alpha == 0:
         raise ValueError("the trial weight changed nothing: no influence coefficient")
     return -(as_found - slow_roll) / alpha
@@ -86,7 +86,7 @@ def influence_matrix(as_found: np.ndarray, trial_runs: np.ndarray, trials: np.nd
 
 
 def corrections(as_found: np.ndarray, alpha: np.ndarray, slow_roll: np.ndarray | complex = 0j) -> np.ndarray:
-    """W = -α⁻¹ (V0 - S): the weights (kg·m), one per plane, that cancel the readings less their runout.
+    """W = -α⁻¹ (V0 - Vs): the weights (kg·m), one per plane, that cancel the readings less their runout.
 
     With more probes than planes, the least-squares weights.
     """

@@ -120,6 +120,12 @@ def test_theory_numbers():
     assert round(omega * RPM) == 21_324
     t = b.state(omega)
     assert math.sqrt(rigid_threshold(t.k, t.c)[1]) / omega == pytest.approx(0.50, abs=0.005)
+    # The search: the heaviest rotor the film holds, K_eq/ω_w², falls fast as the speed rises.
+    for rpm, eps, ratio, mass in ((1000, 0.44, 0.52, 195.0), (5000, 0.14, 0.51, 9.0)):
+        s = b.state(rpm / RPM)
+        k_eq, w2 = rigid_threshold(s.k, s.c)
+        assert (round(s.eccentricity, 2), round(math.sqrt(w2) / s.omega, 2)) == (eps, ratio)
+        assert round(k_eq / w2, 1 if mass < 100 else 0) == mass
     assert nu2(0.7555) > 0.0 > nu2(0.7565)
 
 
@@ -136,3 +142,12 @@ def test_short_bearing_depends_on_s_times_l_over_d_squared():
     # At the same S = 1, halving L moves ε from 0.32 to 0.60 (the Theory).
     assert round(wide.state(wide.omega_at(1.0)).eccentricity, 2) == 0.32
     assert round(narrow.state(narrow.omega_at(1.0)).eccentricity, 2) == 0.60
+
+
+def test_lunds_whirl_ratio_depends_on_the_eccentricity_alone():
+    # K scales as W/c and C as W/(cΩ), so ω_w/Ω is the same wherever ε is, whatever the load or speed.
+    light, heavy = JournalBearing(), JournalBearing(load=20.0, clearance=30e-6)
+    a, b = light.state(light.omega_at(0.3)), heavy.state(heavy.omega_at(0.3))
+    assert a.eccentricity == pytest.approx(b.eccentricity, rel=1e-9) and a.omega != pytest.approx(b.omega)
+    ratio = [math.sqrt(rigid_threshold(s.k, s.c)[1]) / s.omega for s in (a, b)]
+    assert ratio[0] == pytest.approx(ratio[1], rel=1e-9)

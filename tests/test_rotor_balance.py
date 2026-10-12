@@ -107,6 +107,58 @@ def test_theory_slow_roll_taken_too_fast():
     assert out == {100.0: (1.41, 19.5, 0.9), 300.0: (1.37, 16.6, 8.6)}
 
 
+def test_theory_off_centre_bow_leaves_only_a_skew():
+    # Off centre the bow tilts the disc too: its inertia on that tilt is a skew, (I_d - I_p)θ_b Ω²,
+    # which one weight cannot cancel at every speed. Tiny on the defaults' disc, nothing with I_d = I_p.
+    speeds = np.linspace(500.0, 6000.0, 111)
+
+    def left(s: RotorSystem) -> float:
+        runout = reading(s, 1.0, DISC)
+        v0, v1 = reading(s, 1200.0, DISC), reading(s.with_(weights=(TRIAL,)), 1200.0, DISC)
+        fixed = s.with_(weights=(correction(v0, influence(v0, v1, TRIAL), runout),))
+        return max(abs(reading(fixed, r, DISC) - reading(fixed, 1.0, DISC)) for r in speeds)
+
+    bowed = RotorSystem(position=0.3, bow=20e-6, bow_angle=math.radians(90.0))
+    assert 0.06e-6 < left(bowed) < 0.085e-6
+    assert left(bowed.with_(ip=1e-3, id=1e-3)) < 1e-3 * left(bowed)
+    assert left(RotorSystem(bow=20e-6, bow_angle=math.radians(90.0))) < 0.15 * left(bowed)
+
+
+def test_theory_asymmetric_shaft_needs_two_trials():
+    # The Theory's Δ = 0.10 rotor, heavy spot at 45°, read at the disc and balanced at 1200 rpm.
+    # Its readings are V = α₊U + α₋Ū: one trial gets the weight wrong, two at right angles get it exactly.
+    s = RotorSystem(asymmetry=0.10, unbalance_angle=math.radians(45.0))
+    trial2 = weight(0.5e-3, 0.02, math.pi / 2)
+    slow, v0 = reading(s, 100.0, DISC), reading(s, 1200.0, DISC)
+    v1, v2 = (reading(s.with_(weights=(t,)), 1200.0, DISC) for t in (TRIAL, trial2))
+    speeds = np.linspace(1400.0, 1800.0, 401)
+
+    def peak(rotor: RotorSystem) -> float:
+        return max(abs(reading(rotor, r, DISC, "orbit")) for r in speeds)
+
+    one = correction(v0, influence(v0, v1, TRIAL), slow)
+    mass, angle = weight_parts(one, 0.02)
+    assert (round(mass * 1e3, 2), round(math.degrees(angle))) == (1.18, 237)
+    assert abs(reading(s.with_(weights=(one,)), 1200.0, DISC)) == pytest.approx(9.3e-6, abs=0.1e-6)
+    assert (round(peak(s) * 1e6), round(peak(s.with_(weights=(one,))) * 1e6)) == (201, 283)
+
+    plus = ((v1 - v0) - 1j * (v2 - v0)) / (2 * TRIAL)
+    minus = ((v1 - v0) + 1j * (v2 - v0)) / (2 * np.conj(TRIAL))
+    # The two coefficients predict a third weight's effect exactly.
+    other = weight(0.7e-3, 0.02, math.radians(130.0))
+    assert reading(s.with_(weights=(other,)), 1200.0, DISC) - v0 == pytest.approx(
+        plus * other + minus * np.conj(other), abs=1e-15)
+    r = v0 - slow
+    two = (minus * np.conj(r) - np.conj(plus) * r) / (abs(plus) ** 2 - abs(minus) ** 2)
+    mass, angle = weight_parts(two, 0.02)
+    assert (round(mass * 1e3, 2), round(math.degrees(angle))) == (1.00, 225)
+    assert round(peak(s.with_(weights=(two,))) * 1e6, 1) == 0.7
+    # A trial in line with the heavy spot happens to work on its own.
+    in_line = weight(0.5e-3, 0.02, math.radians(45.0))
+    w = correction(v0, influence(v0, reading(s.with_(weights=(in_line,)), 1200.0, DISC), in_line))
+    assert w == pytest.approx(-s.mass_unbalance)
+
+
 def test_one_plane_cannot_cancel_a_couple_unbalance_at_every_speed():
     s = RotorSystem(position=0.3, unbalance=0.0, skew=math.radians(0.2))
     fixed = balance(s, 1200.0, weight(0.5e-3, 0.02, 0.0))
