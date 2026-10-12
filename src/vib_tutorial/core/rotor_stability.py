@@ -55,8 +55,14 @@ class Onset:
 
 
 def least_damped(system: RotorSystem, omega: float) -> tuple[float, float, float]:
-    """(ζ, frequency in Hz, whirl ratio) of the least damped mode at speed Ω."""
+    """(ζ, frequency in Hz, whirl ratio) of the least damped mode at speed Ω.
+
+    A root that grows without oscillating (a magnetic bearing too weak for its
+    magnets) is ζ = -1 at 0 Hz.
+    """
     m = whirl_modes(system, omega)
+    if m.drift > 0.0:
+        return -1.0, 0.0, 0.0
     if not m.zeta.size:
         return math.inf, 0.0, 0.0
     i = int(np.argmin(m.zeta))
@@ -109,7 +115,7 @@ def growth_rate(system: RotorSystem, omega: float) -> float:
         return float(np.linalg.eigvals(rotating_state_matrix(system, omega)).real.max())
     m = whirl_modes(system, omega)
     lam = -m.zeta * 2.0 * math.pi * m.freq_hz / np.sqrt(np.maximum(1.0 - m.zeta**2, 1e-12))
-    return float(lam.max()) if lam.size else -math.inf
+    return max(float(lam.max()) if lam.size else -math.inf, m.drift)
 
 
 class AsymmetryChart:

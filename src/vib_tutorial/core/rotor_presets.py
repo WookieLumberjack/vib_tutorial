@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .fluid_bearing import JournalBearing
+from .magnetic_bearing import MagneticBearing
 from .rotor import STEEL, Bearing, Crack, RotorSystem
 
 # The overhung rotor: a 3 kg disc of radius 150 mm (I_p = m R²/2, I_d = m R²/4), 100 mm past
@@ -20,6 +21,8 @@ OVERHUNG_BEARING = Bearing(kx=2e5, ky=2e5, cx=400.0, cy=400.0)
 LONG_MASS = 2.0  # kg
 LONG_RADIUS = 0.08  # m
 LONG_BEARING = Bearing(kx=1e6, ky=1e6, cx=200.0, cy=200.0, mass=0.5)
+# Magnetic bearings: the Magnetic bearing tab's default, with a slower amplifier.
+MAGNETIC_BEARING = Bearing(magnet=MagneticBearing(amplifier_hz=400.0))
 # Journal bearings: the Fluid-film bearing tab's default, D = 10 mm, L = 5 mm, c = 15 µm, 30 mPa·s oil.
 JOURNAL_BEARING = Bearing(film=JournalBearing())
 
@@ -117,5 +120,15 @@ def rotor_presets() -> list[RotorPreset]:
             "stiffening toward the wall, hold it to a limit cycle with the journals circling past ε = 0.9. "
             "Past twice the first natural frequency, about 3700 rpm, the whirl locks at 30.8 Hz: oil whip, "
             "growing on.",
+        ),
+        RotorPreset(
+            "Magnetic bearings",
+            RotorSystem(position=1.15, bearing_a=MAGNETIC_BEARING, bearing_b=MAGNETIC_BEARING, gravity=9.81),
+            20_000.0, 6000.0,
+            "The disc overhung past B, horizontal, floating in active magnetic bearings: the integral holds "
+            "both journals at the centre, and the shaft alone sags. The forward critical, 1542 rpm, is well "
+            "damped (ζ = 0.054). The disc's forward tilting mode rises with the speed, and at 8894 rpm it "
+            "reaches 739 Hz, where the amplifier's lag turns the bearings' damping negative: past it the "
+            "whirl grows.",
         ),
     ]

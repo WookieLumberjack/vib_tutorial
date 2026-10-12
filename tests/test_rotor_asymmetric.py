@@ -96,7 +96,7 @@ def test_rotating_frame_and_hill_agree_on_isotropic_supports():
     s = RotorSystem(asymmetry=0.2, asymmetry_angle=0.3, position=0.4)
     for w in (30.0, 150.0, 170.0, 300.0):
         exact, _ = rotor._rotating_modes(s, w)
-        hill, _ = rotor._hill_modes(s, w)
+        hill, _, _ = rotor._hill_modes(s, w)
         # Hill's copies of a mode locked to 1X are evenly split; it may keep one fewer of those.
         for lam in hill:
             assert np.abs(exact - lam).min() < 1e-6 * abs(lam)
@@ -106,9 +106,9 @@ def test_rotating_frame_and_hill_agree_on_isotropic_supports():
 def test_hill_is_converged_on_anisotropic_supports(monkeypatch):
     s = RotorSystem(asymmetry=0.2, bearing_a=ANISO, bearing_b=ANISO)
     for w in (80.0, 160.0, 170.0):
-        lam3, _ = rotor._hill_modes(s, w)
+        lam3, _, _ = rotor._hill_modes(s, w)
         monkeypatch.setattr(rotor, "HILL_ORDER", 6)
-        lam6, _ = rotor._hill_modes(s, w)
+        lam6, _, _ = rotor._hill_modes(s, w)
         monkeypatch.setattr(rotor, "HILL_ORDER", 3)
         assert lam3.size == lam6.size
         np.testing.assert_allclose(np.sort(lam3.imag), np.sort(lam6.imag), rtol=1e-6)
