@@ -2178,3 +2178,29 @@ def test_rotor_on_oil_film_bearings(app):
     assert not p.sim.system.films and panel.loads is None and panel.load.isEnabled()
     assert all(row[c].isEnabled() for c in (0, 2, 4, 5, 6))  # (k_y and c_y follow k_x and c_x: isotropic)
     w.set_theme("Dark")
+
+
+def test_rotor_theory_figures_follow_the_theme(app):
+    # The Theory's figures are SVG drawn from the theme's colours, rendered as the notes are laid out.
+    from PySide6 import QtCore, QtGui
+
+    from vib_tutorial.gui import rotor_figures, style
+    from vib_tutorial.gui.rotor_notes import THEORY_HTML
+
+    assert all(f'src="{name}"' in THEORY_HTML for name in rotor_figures.FIGURES)
+    browser = rotor_figures.FigureBrowser()
+    before = style.THEMES[style.colors.name]
+    try:
+        for theme in style.THEMES.values():
+            style.set_theme(theme)
+            for name, build in rotor_figures.FIGURES.items():
+                svg = build()
+                assert theme.background in svg and theme.foreground in svg and theme.mass[0] in svg
+                image = browser.loadResource(QtGui.QTextDocument.ResourceType.ImageResource, QtCore.QUrl(name))
+                assert isinstance(image, QtGui.QImage) and not image.isNull()
+                assert image.deviceIndependentSize().width() > 400
+                # Drawn, not blank: the background's colour and others.
+                assert len({image.pixel(x, y) for x in range(0, image.width(), 7) for y in range(0, image.height(), 7)}) > 5
+    finally:
+        style.set_theme(before)
+        browser.deleteLater()

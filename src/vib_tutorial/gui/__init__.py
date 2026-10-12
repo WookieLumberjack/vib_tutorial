@@ -114,6 +114,10 @@ def run() -> int:
     preload = threading.Thread(target=_preload_scipy, name="preload-scipy", daemon=True)
     QtCore.QTimer.singleShot(0, preload.start)  # after the first paint
     if "--smoke-test" in sys.argv:  # release builds check the packaged app starts, then quit
+        from .rotor_figures import FIGURES, render  # the rotor page is built lazily: check QtSvg is packaged
+
+        if any(render(build()).isNull() for build in FIGURES.values()):
+            return 1
         QtCore.QTimer.singleShot(2000, app.quit)
     code = app.exec()
     close_graphics(window)

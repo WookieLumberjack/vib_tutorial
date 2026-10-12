@@ -434,6 +434,10 @@ displaced most) by a phase lag. The lag is 0° well below the critical speed, ab
 well above it. Above the critical speed the shaft deflects away from the heavy spot. As r → ∞ the disc
 spins about its own centre of mass, and the shaft's centre whirls on a circle of radius e. This
 <b>self-centring</b> is what lets machines run supercritically.</p>
+<table align='center' width='440' cellspacing='0' cellpadding='0'>
+<tr><td align='center'><img src="fig:spots" width="440" height="330"></td></tr>
+<tr><td><i>The disc seen end on, from beyond bearing B (z toward you), whirling about the bearings' centre O. The keyphasor mark is at φ from +x, with the heavy spot at it here (in general at ψ from it). The high spot, the rim's point farthest from O, lags the heavy spot: here by 60°, below the critical speed.</i></td></tr>
+</table>
 <p>With the defaults (e = 20 µm) the disc whirls 2.2 µm at 500 rpm, with 2° of lag. At the 1584 rpm
 critical the lag is 88°, and the peak, 217 µm, comes at 1589 rpm. At 3000 rpm the whirl is 28 µm, with
 176° of lag. At r = 1 the equation gives X = e/(2iζ): a lag of 90° and a whirl of e/(2ζ). The first mode's
@@ -479,6 +483,10 @@ crosses the 1X line, the unbalance drives that mode at its own natural frequency
 speed</b>. In an isotropic rotor the unbalance is a purely forward rotating force, so it drives only the
 forward branches. The backward crossings are critical only for an anisotropic rotor, or for other
 excitations.</p>
+<table align='center' width='540' cellspacing='0' cellpadding='0'>
+<tr><td align='center'><img src="fig:campbell" width="540" height="330"></td></tr>
+<tr><td><i>A schematic Campbell diagram. Spinning, a mode splits into a forward branch and a backward one. The unbalance drives the forward crossing of the 1X line, the critical speed. The backward crossing matters only on an anisotropic rotor. <i>Also draw</i> adds the 2X, 3X and ½X lines.</i></td></tr>
+</table>
 <p>Other excitations come at other multiples of the speed:</p>
 <ul>
 <li><b>2X</b>: a shaft stiffer one way than the other (a keyway, a crack) flexes twice per revolution
@@ -1010,6 +1018,10 @@ proportions set ε. In short-bearing theory ε depends only on S(L<sub>b</sub>/D
 Sommerfeld number: at S = 1, halving L<sub>b</sub> moves ε from 0.32 to 0.60. The more speed and
 viscosity, or the less load, the larger S, and the closer the journal to the centre, at nearly 90° to
 the load. Every short bearing travels the same path, the <b>locus</b>, only at a different pace.</p>
+<table align='center' width='560' cellspacing='0' cellpadding='0'>
+<tr><td align='center'><img src="fig:attitude" width="560" height="330"></td></tr>
+<tr><td><i>A plain journal bearing, its clearance much exaggerated. The load W pushes the journal down and the film pushes it sideways, the way it spins. It settles on the locus at the eccentricity ε, at the attitude angle χ from the load line. The film is thinnest along the line of centres.</i></td></tr>
+</table>
 <p>The default bearing (D<sub>b</sub> = 10 mm, L<sub>b</sub> = 5 mm, c<sub>r</sub> = 15 µm, oil of
 30 mPa·s, 5 N) has ε = 0.80 at 100 rpm, 0.44 at 1,000 rpm and 0.22 at 3,000 rpm, its thinnest film
 11.7 µm there.</p>
