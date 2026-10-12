@@ -2133,7 +2133,7 @@ def test_rotor_on_oil_film_bearings(app):
     from vib_tutorial.core.fluid_bearing import JournalBearing
     from vib_tutorial.core.rotor import RPM
     from vib_tutorial.gui.main_window import MainWindow
-    from vib_tutorial.gui.rotor import CUSTOM
+    from vib_tutorial.gui.rotor import CUSTOM, FILMS, SPRINGS
 
     w = MainWindow()
     p = w.rotor_page
@@ -2145,7 +2145,7 @@ def test_rotor_on_oil_film_bearings(app):
     p.load_preset("Journal bearings (oil whip)")
     p._refresh_analysis()
     s = p.sim.system
-    assert s.films and p.film.isChecked() and p.preset.currentText() == "Journal bearings (oil whip)"
+    assert s.films and p.supports.currentIndex() == FILMS and p.preset.currentText() == "Journal bearings (oil whip)"
     assert s.whole_films and p.nonlinear_film.isChecked() and p.nonlinear_film.isEnabled()
     row = p.bearing_rows[0]
     assert row[4].isEnabled() and not any(row[c].isEnabled() for c in (0, 1, 2, 3, 5, 6))
@@ -2189,10 +2189,80 @@ def test_rotor_on_oil_film_bearings(app):
     p.asymmetry.setValue(0.0)
     assert p.nonlinear_film.isEnabled() and p.sim.system.whole_films
     # Unticked, the rotor is back on its springs and the tab has its own load again.
-    p.film.setChecked(False)
+    p.supports.setCurrentIndex(SPRINGS)
     assert not p.sim.system.films and panel.loads is None and panel.load.isEnabled()
-    assert not p.nonlinear_film.isEnabled()
+    assert not p.nonlinear_film.isEnabled() and not p.nonlinear_film.isVisibleTo(p)
     assert all(row[c].isEnabled() for c in (0, 2, 4, 5, 6))  # (k_y and c_y follow k_x and c_x: isotropic)
+    w.set_theme("Dark")
+
+
+def test_rotor_on_magnetic_bearings(app):
+    from dataclasses import replace
+
+    from vib_tutorial.core.magnetic_bearing import MagneticBearing
+    from vib_tutorial.core.rotor import RPM, XA, XB, YA, YB
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.rotor import CUSTOM, MAGNETS, SPRINGS
+    from vib_tutorial.gui.rotor_notes import matrices_html
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    p.running = False
+    panel = p.magnet_panel
+    assert panel.bearing() == MagneticBearing() and panel.system is None
+    assert "Choose <i>Magnetic bearings</i>" in panel.note.text()
+    # The preset floats on the tab's bearing (its amplifier slowed), the journals held at the centre.
+    p.load_preset("Magnetic bearings")
+    p._refresh_analysis()
+    s = p.sim.system
+    assert s.magnets and p.supports.currentIndex() == MAGNETS and p.preset.currentText() == "Magnetic bearings"
+    assert panel.bearing() == s.bearing_a.magnet and panel.amplifier.value() == 400.0
+    assert not p.nonlinear_film.isVisibleTo(p)
+    row = p.bearing_rows[0]
+    assert row[4].isEnabled() and not any(row[c].isEnabled() for c in (0, 1, 2, 3, 5, 6))
+    assert abs(p.sim.q[[XA, YA, XB, YB]]).max() < 1e-12 and p.sim.control.size == s.n_control
+    assert panel.onset is not None and round(panel.onset.omega * RPM) == 8894
+    p.tabs.setCurrentWidget(panel)
+    p._draw()
+    text = panel.readout.text()
+    assert "goes unstable at <b>8,894 rpm</b>" in text and "0.61 A at B" in text and "61% of the bias" in text
+    assert "It damps from 15.7 to 739.2 Hz" in text
+    assert len(panel.mode_lines[0]) == len(panel.mode_lines[1]) >= 6  # the rotor's modes at rest
+    assert sum(b.isVisible() for b in panel.bands) == 4  # below and above the band, on both plots
+    assert "magnetic bearings" in p._stability_note()
+    html = matrices_html(p.sim.system, p.sim.omega)
+    assert "The magnetic bearings" in html and "F<sub>c</sub>" in html and "journals at the centre" in html
+    assert "the journals at (0, 0) µm vertically" in html
+    # Changing the bearing on the tab changes the rotor's (and makes it the user's own rotor).
+    panel.amplifier.setValue(1000.0)
+    assert p.sim.system.bearing_a.magnet.amplifier_hz == 1000.0 and p.preset.currentText() == CUSTOM
+    p._refresh_analysis()
+    assert panel.onset is None and "stays stable up to 20,000 rpm" in panel.readout.text()
+    panel.set_bearing(replace(MagneticBearing(), amplifier_hz=400.0))
+    assert p.preset.currentText() == "Magnetic bearings"
+    # Too weak a magnet: flagged on the tab.
+    panel.kp.setValue(900.0)
+    assert "the magnets outpull the controller" in panel.readout.text()
+    panel.kp.setValue(MagneticBearing().kp)
+    # Past the onset the forward tilting mode grows until a journal lands on its backup bearing, and the page pauses.
+    p._refresh_analysis()
+    p.reset()
+    p.running = True
+    p.ramp.setValue(5000.0)
+    p.set_target_rpm(12_000.0)
+    p.tap()
+    for _ in range(600):
+        p.step(0.1)
+        if not p.running:
+            break
+    assert p.rubbed and p.touched is not None and p.touched[1] == pytest.approx(0.5e-3)
+    assert "landed on its backup bearing" in p.readout.text()
+    # Back on springs: the tab forgets the rotor.
+    p.supports.setCurrentIndex(SPRINGS)
+    assert not p.sim.system.magnets and panel.system is None and p.sim.control.size == 0
+    assert all(row[c].isEnabled() for c in (0, 2, 4, 5, 6))
     w.set_theme("Dark")
 
 

@@ -146,16 +146,16 @@ def test_a_vanishing_crack_is_the_round_shaft():
 def test_hill_is_converged_and_matches_the_rotating_frame(monkeypatch):
     s = CRACKED.with_(crack=Crack(position=0.4, depth=0.5, angle=0.3), bearing_a=ANISO, bearing_b=ANISO)
     for w in (500.0 / RPM, 1560.0 / RPM, 3000.0 / RPM):
-        lam3, _ = rotor._hill_modes(s, w)
+        lam3, _, _ = rotor._hill_modes(s, w)
         monkeypatch.setattr(rotor, "HILL_ORDER", 6)
-        lam6, _ = rotor._hill_modes(s, w)
+        lam6, _, _ = rotor._hill_modes(s, w)
         monkeypatch.setattr(rotor, "HILL_ORDER", 3)
         np.testing.assert_allclose(np.sort_complex(lam3)[:4], np.sort_complex(lam6)[:4], atol=1e-3)
     # An open crack turns with the shaft: on isotropic supports its modes are exact in the rotating frame.
     o = RotorSystem(crack=Crack(position=0.4, depth=0.5, angle=0.3, breathing=False))
     for w in (800.0 / RPM, 1550.0 / RPM):
         exact, _ = rotor._rotating_modes(o, w)
-        hill, _ = rotor._hill_modes(o, w)
+        hill, _, _ = rotor._hill_modes(o, w)
         np.testing.assert_allclose(np.sort_complex(exact)[:4], np.sort_complex(hill)[:4], atol=1e-6)
 
 

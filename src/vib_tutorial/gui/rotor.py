@@ -51,6 +51,7 @@ from ..core.rotor_sweep import (
     station_motion,
 )
 from ..core.fluid_bearing import JournalBearing
+from ..core.magnetic_bearing import MagneticBearing
 from ..core.rotor_balance import SteadyMeasurement
 from ..core.rotor_presets import rotor_presets
 from ..core.rotor_stability import AsymmetryChart, Onset, full_spectrum, least_damped, stability_onset
@@ -59,6 +60,7 @@ from .cms_time import SampleBuffer
 from .panels import spin
 from .rotor_balance import BalancingPanel
 from .rotor_bearing import BearingPanel
+from .rotor_magnet import MagnetPanel
 from .rotor_bode import SWEEP_COLORS, BodePlots, PolarPlot, SweepPlots, nice_marks
 from .rotor_figures import FigureBrowser
 from .rotor_notes import THEORY_HTML, matrices_html, whirl_name
@@ -87,6 +89,9 @@ SHAFT_DOT = 0.1  # display units: how far off the shaft's centre line a weight o
 CRACK_TICK = 0.22  # display units: the longest tick a crack is drawn as, from the shaft's centre line
 GROUND = 1.1  # display units from the shaft's axis to the supports
 HOUSING = 0.16  # display units: an oil-film bearing's housing, drawn round the bearing's axis
+STATOR = 0.22  # display units: a magnetic bearing's stator ring, round the bearing's axis
+SUPPORTS = ("Springs and dampers", "Oil-film journal bearings", "Magnetic bearings")
+SPRINGS, FILMS, MAGNETS = range(len(SUPPORTS))
 DAMPED = 0.3  # modes with more damping than this are drawn hollow and are not called critical
 DASH = QtCore.Qt.PenStyle.DashLine
 DOT = QtCore.Qt.PenStyle.DotLine
@@ -263,6 +268,15 @@ FILM_TIP = (
     "<i>Static sag</i> to see them move. Only the journal's mass is left to set.</p><p>Upright, unloaded, "
     "a plain bearing has no direct stiffness, only the swirl's cross-coupling: a vertical rotor in such "
     "bearings whirls at any speed.</p>"
+)
+MAGNET_TIP = (
+    "<p>Float both journals in active magnetic bearings, set on the <i>Magnetic bearing</i> tab: on each "
+    "axis a pair of electromagnets, whose pull grows as the journal comes nearer (a negative stiffness), "
+    "and a PID controller that sets their current from the journal's position. The bearing's stiffness "
+    "and damping come from the gains, and change with the frequency: the controller's lag makes the "
+    "damping negative at high frequencies, and a mode that gets there grows.</p><p>With the integral, "
+    "gravity cannot move the journals: they stay centred, and the shaft alone sags. Only the journal's "
+    "mass is left to set.</p>"
 )
 NONLINEAR_FILM_TIP = (
     "<p>Step the rotor with the films' whole force, not their linearization about where the journals rest. "
@@ -518,11 +532,21 @@ class RotorView(pg.PlotWidget):
             self.crack_mark.setData([], [])
 
         # Supports: a spring and a damper to ground below (y) and to the side wall (x) at each bearing;
-        # or an oil film's housing round the bearing's axis, on a pedestal.
+        # or an oil film's housing round the bearing's axis, on a pedestal; or a magnetic bearing's
+        # stator ring with its four poles (a magnet pair on each axis), on a pedestal.
         parts = []
         ring = np.linspace(0.0, 2.0 * math.pi, 49)
         for station, bearing in ((0, s.bearing_a), (3, s.bearing_b)):
             j = here[station]
+            if bearing.magnet is not None:
+                zb = np.full_like(ring, j[2])
+                parts.append(np.column_stack([STATOR * np.cos(ring), STATOR * np.sin(ring), zb]))
+                for a in np.arange(4) * 0.5 * math.pi:
+                    for side in (-0.25, 0.25):  # each pole a pair of lines toward the journal
+                        u = np.array([math.cos(a + side * 0.6), math.sin(a + side * 0.6)])
+                        parts.append(np.array([[*(STATOR * u), j[2]], [*(0.55 * STATOR * u), j[2]]]))
+                parts.append(np.array([[0.0, -STATOR, j[2]], [0.0, -GROUND, j[2]]]))
+                continue
             if bearing.film is not None:
                 zb = np.full_like(ring, j[2])
                 parts.append(np.column_stack([HOUSING * np.cos(ring), HOUSING * np.sin(ring), zb]))
@@ -1137,7 +1161,10 @@ class RotorPage(QtWidgets.QWidget):
         self.balancing = BalancingPanel(self)
         self.bearing_panel = BearingPanel()
         self.bearing_panel.set_top_rpm(self.top_rpm)
-        self.bearing_panel.changed.connect(self._on_film)
+        self.bearing_panel.changed.connect(lambda: self._on_bearing_tab(FILMS))
+        self.magnet_panel = MagnetPanel()
+        self.magnet_panel.set_top_rpm(self.top_rpm)
+        self.magnet_panel.changed.connect(lambda: self._on_bearing_tab(MAGNETS))
         self.matrices = QtWidgets.QTextBrowser()
         self.theory = FigureBrowser()
         self.theory.setHtml(THEORY_HTML)
@@ -1149,6 +1176,7 @@ class RotorPage(QtWidgets.QWidget):
         self.tabs.addTab(waterfall_tab, "Waterfall")
         self.tabs.addTab(self.balancing, "Balancing")
         self.tabs.addTab(self.bearing_panel, "Fluid-film bearing")
+        self.tabs.addTab(self.magnet_panel, "Magnetic bearing")
         self.tabs.addTab(self.matrices, "Equations && matrices")
         self.tabs.addTab(self.theory, "Theory")
         self.tabs.currentChanged.connect(lambda _: self._refresh_matrices())
@@ -1488,23 +1516,30 @@ class RotorPage(QtWidgets.QWidget):
             "<p>Untick to give the two bearings different supports. Like an off-centre disc, unequal "
             "supports couple the disc's translation and tilt, so the gyroscopic moment shows.</p>"
         )
-        self.film = QtWidgets.QCheckBox("Oil-film journal bearings")
-        self.film.setToolTip(FILM_TIP)
+        self.supports = QtWidgets.QComboBox()
+        self.supports.addItems(SUPPORTS)
+        self.supports.setToolTip("<p>What holds the journals: the springs and dampers in the table, or "
+                                 "these bearings at both ends.</p>")
+        self.supports.setItemData(FILMS, FILM_TIP, QtCore.Qt.ItemDataRole.ToolTipRole)
+        self.supports.setItemData(MAGNETS, MAGNET_TIP, QtCore.Qt.ItemDataRole.ToolTipRole)
+        self.supports.currentIndexChanged.connect(lambda _: self._on_params())
         self.nonlinear_film = QtWidgets.QCheckBox("Nonlinear film")
         self.nonlinear_film.setChecked(True)
         self.nonlinear_film.setToolTip(NONLINEAR_FILM_TIP)
-        for c in (self.isotropic, self.same_bearings, self.film, self.nonlinear_film):
+        for c in (self.isotropic, self.same_bearings, self.nonlinear_film):
             c.toggled.connect(self._on_params)
         grid.addWidget(self.isotropic, 3, 0, 1, 8)
         grid.addWidget(self.same_bearings, 4, 0, 1, 8)
-        grid.addWidget(self.film, 5, 0, 1, 4)
-        grid.addWidget(self.nonlinear_film, 5, 4, 1, 4)
+        grid.addWidget(self.supports, 5, 0, 1, 5)
+        grid.addWidget(self.nonlinear_film, 5, 5, 1, 3)
         return box
 
     # ------------------------------------------------------------- parameters
     def system(self) -> RotorSystem:
         """The rotor described by the panels, after applying the isotropic and same-as-A ties."""
-        iso, same, film = self.isotropic.isChecked(), self.same_bearings.isChecked(), self.film.isChecked()
+        iso, same = self.isotropic.isChecked(), self.same_bearings.isChecked()
+        kind = self.supports.currentIndex()
+        film = kind != SPRINGS  # a film or a magnet holds the journal
         for r, row in enumerate(self.bearing_rows):
             src = self.bearing_rows[0] if same and r == 1 else row
             for c, w in enumerate(row):
@@ -1515,14 +1550,16 @@ class RotorPage(QtWidgets.QWidget):
                     w.blockSignals(True)
                     w.setValue(value)
                     w.blockSignals(False)
-                # A film holds the journal in place of the springs: only its mass is left to set.
+                # A film or a magnet holds the journal in place of the springs: only its mass is left to set.
                 w.setEnabled(not (same and r == 1) and not (iso and c in (1, 3)) and not (film and c != 4))
         for w in (self.isotropic, self.same_bearings):
             w.setEnabled(not film)
         # A turning shaft's split time step keeps the films linearized.
-        self.nonlinear_film.setEnabled(film and not self.asymmetry.value() and not self.crack_depth.value())
-        oil = self.bearing_panel.bearing(rotor=False) if film else None
-        bearings = [Bearing(*(w.value() for w in row), film=oil) for row in self.bearing_rows]
+        self.nonlinear_film.setEnabled(kind == FILMS and not self.asymmetry.value() and not self.crack_depth.value())
+        self.nonlinear_film.setVisible(kind == FILMS)
+        oil = self.bearing_panel.bearing(rotor=False) if kind == FILMS else None
+        magnet = self.magnet_panel.bearing() if kind == MAGNETS else None
+        bearings = [Bearing(*(w.value() for w in row), film=oil, magnet=magnet) for row in self.bearing_rows]
         for w in (self.density, self.elements, self.mass_matrix):
             w.setEnabled(self.shaft_mass.isChecked())
         cracked = self.crack_depth.value() > 0.0
@@ -1554,7 +1591,7 @@ class RotorPage(QtWidgets.QWidget):
             density=self.density.value() if self.shaft_mass.isChecked() else 0.0,
             elements=self.elements.value(),
             lumped=self.mass_matrix.currentIndex() == 1,
-            nonlinear_films=film and self.nonlinear_film.isChecked(),
+            nonlinear_films=kind == FILMS and self.nonlinear_film.isChecked(),
         ).with_(**(self._hidden or {}))
 
     def _crack(self) -> Crack:
@@ -1572,7 +1609,7 @@ class RotorPage(QtWidgets.QWidget):
                  self.unbalance, self.unbalance_angle, self.bow, self.bow_angle, self.skew, self.skew_angle,
                  self.asymmetry, self.asymmetry_angle, self.crack_depth, self.crack_angle, self.crack_position,
                  self.crack_breathing, self.internal_damping,
-                 self.gravity, self.isotropic, self.same_bearings, self.film, self.nonlinear_film,
+                 self.gravity, self.isotropic, self.same_bearings, self.supports, self.nonlinear_film,
                  self.shaft_mass, self.density,
                  self.elements, self.mass_matrix, *(w for row in self.bearing_rows for w in row))
         for w in boxes:
@@ -1614,10 +1651,12 @@ class RotorPage(QtWidgets.QWidget):
         for row, b in zip(self.bearing_rows, (A, B)):
             for w, v in zip(row, (b.kx, b.ky, b.cx, b.cy, b.mass, b.kxy, b.swirl)):
                 w.setValue(v)
-        self.film.setChecked(A.film is not None)
+        self.supports.setCurrentIndex(FILMS if A.film is not None else MAGNETS if A.magnet is not None else SPRINGS)
         self.nonlinear_film.setChecked(system.nonlinear_films or A.film is None)
         if A.film is not None:
             self.bearing_panel.set_bearing(A.film, notify=False)
+        if A.magnet is not None:
+            self.magnet_panel.set_bearing(A.magnet, notify=False)
         for w in boxes:
             w.blockSignals(False)
         self._on_params()
@@ -1714,6 +1753,7 @@ class RotorPage(QtWidgets.QWidget):
         self.cancel_measurement()
         self.sim.set_system(system)
         self.bearing_panel.set_rotor(system.bearing_loads if system.films else None)
+        self.magnet_panel.set_rotor(system if system.magnets else None)
         self._show_preset(system)
         self.view.set_system(system)
         self.orbits.set_midspan_shown(abs(system.position - 0.5) > 1e-9)
@@ -1777,6 +1817,7 @@ class RotorPage(QtWidgets.QWidget):
         massless = campbell(system.with_(density=0.0), top / RPM, n_modes=8) if system.density else None
         self.onset = stability_onset(system, top / RPM)
         self.bearing_panel.set_onset(self.onset if system.films else None)
+        self.magnet_panel.set_onset(self.onset if system.magnets else None)
         iso = _isotropic(system)
         self.campbell_plot.set_result(self.campbell, top, iso, self.onset)
         self.campbell_plot.set_reference(massless)
@@ -1836,6 +1877,8 @@ class RotorPage(QtWidgets.QWidget):
         coupled += [f"swirl λ = {b.swirl:g} at {n}" for n, b in bearings if b.swirling]
         if s.films:
             coupled.append("oil-film bearings (their oil swirling at half the speed)")
+        if s.magnets:
+            coupled.append("magnetic bearings (their controllers' lag)")
         if s.internal_damping:
             coupled.append(f"internal damping c<sub>i</sub> = {s.internal_damping:g} N·s/m")
         if s.asymmetry:
@@ -1904,13 +1947,15 @@ class RotorPage(QtWidgets.QWidget):
         self.balancing.rotor_changed()
         self.balancing.refresh()
 
-    def _on_film(self) -> None:
-        if self.film.isChecked():
+    def _on_bearing_tab(self, kind: int) -> None:
+        if self.supports.currentIndex() == kind:
             self._on_params()  # the rotor's bearings are the tab's
 
     def _show_bearing_speed(self) -> None:
         if self.tabs.currentWidget() is self.bearing_panel:
             self.bearing_panel.set_speed(self.sim.omega * RPM)
+        elif self.tabs.currentWidget() is self.magnet_panel:
+            self.magnet_panel.set_speed(self.sim.omega * RPM)
 
     def _refresh_matrices(self) -> None:
         rpm = self.sim.omega * RPM
@@ -1934,6 +1979,7 @@ class RotorPage(QtWidgets.QWidget):
         self.sweep_plots.apply_theme()
         self.balancing.apply_theme()
         self.bearing_panel.apply_theme()
+        self.magnet_panel.apply_theme()
         self._draw_tracking(full=True)
         scroll = self.theory.verticalScrollBar().value()
         self.theory.setHtml(THEORY_HTML)
@@ -1955,6 +2001,7 @@ class RotorPage(QtWidgets.QWidget):
         self._set_sag(self.sim.system)
         self._new_waterfall()
         self.bearing_panel.set_top_rpm(rpm)
+        self.magnet_panel.set_top_rpm(rpm)
         self._analysis_timer.start()
 
     def _on_orders(self) -> None:
@@ -2321,11 +2368,14 @@ class RotorPage(QtWidgets.QWidget):
         self._refresh_matrices()
 
     def _journal_touched(self) -> tuple[str, float] | None:
-        """The journal ("A" or "B") that has moved its oil film's whole clearance off centre, and the clearance."""
+        """The journal ("A" or "B") that has moved its oil film's whole clearance off centre, or onto its
+        magnetic bearing's backup bearing, and that clearance."""
         q, s = self.sim.q, self.sim.system
         for name, (jx, jy), b in (("A", (XA, YA), s.bearing_a), ("B", (XB, YB), s.bearing_b)):
-            if b.film is not None and math.hypot(q[jx], q[jy]) >= b.film.clearance:
-                return name, b.film.clearance
+            clearance = (b.film.clearance if b.film is not None else
+                         b.magnet.touchdown if b.magnet is not None else math.inf)
+            if math.hypot(q[jx], q[jy]) >= clearance:
+                return name, clearance
         return None
 
     def _columns(self, q: np.ndarray, phase: np.ndarray, omega: np.ndarray) -> np.ndarray:
@@ -2404,14 +2454,21 @@ class RotorPage(QtWidgets.QWidget):
             parts.append(f"heavy spot leads the high spot by {lag:.0f}°")
         if growing:
             zeta, f, _ = least_damped(sim.system, w)
-            if w > 0:
+            if f == 0.0:  # a magnetic bearing too weak for its magnets
+                parts.append(f"<span style='color:{colors.force}'>unstable: the journals fall toward the "
+                             "magnets</span>")
+            elif w > 0:
                 grow = -zeta * 2 * math.pi * f / math.sqrt(max(1 - zeta * zeta, 1e-12))
                 # With the films' whole force that is only how it starts: oil whirl settles to a limit cycle.
                 what = "linearized, the equilibrium is unstable" if sim.system.whole_films else "unstable"
                 parts.append(f"<span style='color:{colors.force}'>{what}: a whirl at {f:.3g} Hz "
                              f"({2 * math.pi * f / w:.2f}×) grows ×e every {1 / grow:.2g} s</span>")
         if self.rubbed:
-            where = (f"journal {self.touched[0]} reached the wall of its bearing, a clearance of "
+            where = (f"journal {self.touched[0]} landed on its backup bearing, {_fmt_len(self.touched[1])} off "
+                     "centre (half the magnets' air gap). A real machine drops onto these when its magnetic "
+                     "bearings lose control; the model here is linear, and has no contact. "
+                     if self.touched and sim.system.magnets else
+                     f"journal {self.touched[0]} reached the wall of its bearing, a clearance of "
                      f"{_fmt_len(self.touched[1])} off centre. "
                      "A real oil film stiffens sharply there and keeps the journal off the wall; the film here is "
                      "linearized (about where the journal rests), so it would let it through. Tick <i>Nonlinear "
@@ -2535,7 +2592,15 @@ def critical_speeds(result: Campbell, isotropic: bool) -> list[tuple[float, floa
 
 
 def _isotropic(system: RotorSystem) -> bool:
-    return system.isotropic_supports
+    """True if the supports act alike in x and y, so that unbalance drives only forward whirl.
+
+    A magnetic bearing does (the same controller on both axes), though its controller's
+    states keep the rotor from being time-invariant in the rotating frame (isotropic_supports).
+    """
+    if not system.magnets:
+        return system.isotropic_supports
+    plain = [Bearing(mass=b.mass) if b.magnet is not None else b for b in (system.bearing_a, system.bearing_b)]
+    return system.with_(bearing_a=plain[0], bearing_b=plain[1]).isotropic_supports
 
 
 def _grouped(crits: list[tuple[float, float]]) -> list[tuple[float, list[str]]]:
@@ -2579,7 +2644,7 @@ def _same_rotor(a: RotorSystem, b: RotorSystem) -> bool:
     def close(u, v) -> bool:
         if u is None or v is None:
             return u is v
-        if isinstance(u, (Bearing, JournalBearing, Crack)):
+        if isinstance(u, (Bearing, JournalBearing, MagneticBearing, Crack)):
             # A film's own load is not used on the rotor: each bearing carries its share of the weight.
             return type(u) is type(v) and all(close(getattr(u, f.name), getattr(v, f.name)) for f in fields(u)
                                               if not (isinstance(u, JournalBearing) and f.name == "load"))

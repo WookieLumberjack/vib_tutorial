@@ -485,7 +485,8 @@ exact modes:
 ### Jeffcott rotor
 
 The **Jeffcott rotor** page spins a disc on a flexible shaft, between two bearings
-or overhung past one, each bearing on springs and dampers to ground, horizontally and vertically. The disc has a mass,
+or overhung past one, each bearing on springs and dampers to ground, horizontally and vertically (or in an oil film,
+or floating in an active magnetic bearing). The disc has a mass,
 polar and diametral moments of inertia, and a mass unbalance; the disc can also be skewed on
 the shaft, the shaft bent (bowed), made stiffer about one axis than the other (asymmetric), and cracked. With the Jeffcott model's massless shaft the model has 8 DOFs: in each
 plane, both journals, the disc, and the shaft's slope at the disc. Give the shaft its mass and
@@ -495,8 +496,9 @@ the speed ramps to a target.
 
 - **Presets**: the classic Jeffcott rotor, an off-centre disc, anisotropic supports, an
   overhung rotor, a long shaft whose own mass matters, a two-pole rotor with an asymmetric shaft,
-  a cracked shaft, oil swirl at λ = ½, and plain journal bearings, both going into oil whip, and an
-  upright rotor in oil whirl. Each loads a rotor with a speed range to suit it and a note on what to look for.
+  a cracked shaft, oil swirl at λ = ½, and plain journal bearings, both going into oil whip, an
+  upright rotor in oil whirl, and an overhung rotor on magnetic bearings that its controller's lag
+  makes unstable. Each loads a rotor with a speed range to suit it and a note on what to look for.
 - **Shaft mass**: tick it (and set the density) and the shaft gets its mass, its sections'
   rotary inertia and their gyroscopic moment. It is then 2 to 60 Euler–Bernoulli beam elements
   with consistent or lumped mass, reduced Craig–Bampton style to the stations and the shaft's
@@ -592,7 +594,7 @@ the speed ramps to a target.
   design chart) S(L<sub>b</sub>/D<sub>b</sub>)², the modified Sommerfeld number, on which a short bearing depends alone,
   read at the rotor's speed now. Their skew part is exactly the
   λ = ½ swirl of the bearing table, and Lund's formula gives the speed at which a rigid rotor on the
-  bearing goes into oil whirl. Tick *Oil-film journal bearings* and the rotor runs in it at both ends,
+  bearing goes into oil whirl. Choose *Oil-film journal bearings* under the bearing supports and the rotor runs in it at both ends,
   each under its share of the weight: their stiffness and damping change with the speed, the journals
   rest on the locus and rise along it (with *Static sag*), and oil whip comes from the bearing's own
   cross-coupling. Tick *Nonlinear film* beside it and the time response takes the films' whole force,
@@ -600,6 +602,16 @@ the speed ramps to a target.
   clearance through the critical, oil whirl settles to a limit cycle at half the speed, and oil whip
   grows on, the films holding the journals but not the shaft. Linearized, the page pauses when a
   journal reaches its clearance.
+- **Magnetic bearing**: an active magnetic bearing, a pair of electromagnets on each axis under PID
+  control. From the air gap, bias current, pole area and turns come the magnets' negative stiffness,
+  the current gain and the load capacity; from the gains, the derivative's filter and the amplifier's
+  bandwidth, the bearing's equivalent stiffness and damping against frequency, shaded where the
+  damping is negative (the controller's lag), with the rotor's modes at the speed now drawn across
+  them. Choose *Magnetic bearings* under the bearing supports and the rotor floats in it at both ends:
+  the controllers' states join the rotor's (the exact update still steps them), the integral holds
+  the journals at the centre under gravity, and a mode that moves out of the damped band, such as a
+  forward tilting mode rising with the speed, grows. The page pauses when a journal lands on its
+  backup bearing.
 - **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
   the shaft's beam stiffness (condensed, or with mass reduced to the stations and the shaft's modes), the state matrix A(Ω), and the modes at the current
   speed. G is skew-symmetric: it sits beside C but does no work.
@@ -614,7 +626,9 @@ the speed ramps to a target.
   close together need large weights: the influence matrix's condition number),
   stability (why a skew stiffness feeds a forward whirl, the onset ω<sub>n</sub>(1 +
   c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whirl and whip at λΩ = ω), the
-  fluid-film bearing (the film's sideways push, the locus, the coefficients and the threshold), waterfall and
+  fluid-film bearing (the film's sideways push, the locus, the coefficients and the threshold), active
+  magnetic bearings (the negative stiffness, the PID's frequency-dependent stiffness and damping, and
+  phase-lag instability), waterfall and
   cascade plots (a measured Campbell diagram; block length against ramp rate), the shaft's own mass
   (beam elements, consistent against lumped mass, the reduction), and why the solution uses state
   space. Three figures, drawn in the current theme, show the heavy and high spots, a schematic
@@ -683,6 +697,13 @@ Stood upright, the same rotor's bearings carry no load, so it whirls at any spee
 whole force, below twice its first natural frequency the whirl is oil whirl, at half the speed: the
 film stiffens toward the wall and holds the journals circling close to it, a limit cycle. Past about
 3700 rpm the whirl locks at the natural frequency instead, oil whip, and grows on.
+
+![Magnetic bearings preset at 12,000 rpm, past its 8894 rpm onset: the Magnetic bearing tab plots the bearings' equivalent stiffness and damping against frequency, the damping positive only from 15.7 to 739 Hz (shaded outside), and the disc's forward tilting mode, risen to 778 Hz, sits in the shaded band and grows by e every 0.41 s, the journals held at the centre by the integral](docs/images/jeffcott_magnetic.png)
+
+On magnetic bearings the stiffness and damping come from a controller, and they change with the
+frequency. In the *Magnetic bearings* preset the amplifier's lag turns the damping negative above
+739 Hz. The disc's forward tilting mode rises with the speed, and at 8894 rpm it crosses into that band
+and goes unstable, exactly where the bearings' damping changes sign.
 
 ![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1947 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
 

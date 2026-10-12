@@ -509,6 +509,28 @@ def jeffcott_oil_whirl():
     save(w, "jeffcott_oil_whirl")
 
 
+def jeffcott_magnetic():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.load_preset("Magnetic bearings")
+    page._refresh_analysis()
+    page.ramp.setValue(5000.0)
+    page.set_target_rpm(12_000.0)
+    for _ in range(130):  # 2.6 s: up to speed
+        page.step(0.02)
+    page.tap()
+    for _ in range(75):  # 1.5 s: the forward tilting mode grows from the tap
+        page.step(0.02)
+    page.tabs.setCurrentWidget(page.magnet_panel)
+    page._draw()
+    print(page.readout.text())
+    save(w, "jeffcott_magnetic")
+
+
 def jeffcott_overhung():
     w = window()
     page = w.rotor_page
@@ -640,7 +662,7 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
-         jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_overhung, jeffcott_waterfall,
+         jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked]
 
 

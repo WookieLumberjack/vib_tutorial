@@ -275,7 +275,7 @@ class BearingPanel(QtWidgets.QWidget):
             f"L<sub>b</sub>/D<sub>b</sub> = {ratio:.2g}: past {SHORT_LIMIT:g} short-bearing theory underrates the film's load capacity, "
             "and a finite-length solution is needed." if ratio > SHORT_LIMIT else
             "Short-bearing (Ocvirk) theory, the film cavitating where its pressure would go below zero "
-            "(the π-film). Tick <i>Oil-film journal bearings</i> under the rotor's bearing supports to run "
+            "(the π-film). Choose <i>Oil-film journal bearings</i> under the rotor's bearing supports to run "
             "the rotor in it." if self.loads is None else
             "Short-bearing (Ocvirk) theory, the film cavitating where its pressure would go below zero "
             "(the π-film). The rotor runs in it: below the speed where ε = 0.9 it takes the film as it is "

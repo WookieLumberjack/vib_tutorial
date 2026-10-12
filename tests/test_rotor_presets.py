@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from vib_tutorial.core.rotor import RPM, campbell, whirl_modes
+from vib_tutorial.core.rotor import RPM, XA, XB, YA, YB, campbell, whirl_modes
 from vib_tutorial.core.rotor_presets import rotor_presets
 from vib_tutorial.core.rotor_stability import least_damped, stability_onset
 
@@ -18,7 +18,7 @@ def criticals(name: str, forward: bool | None = None) -> list[int]:
 
 
 def test_every_preset_is_a_valid_rotor_with_its_target_in_range():
-    assert len(PRESETS) == 10
+    assert len(PRESETS) == 11
     for p in PRESETS.values():
         assert 0 < p.target_rpm < p.top_rpm and p.note
 
@@ -87,3 +87,21 @@ def test_cracked_shaft():
         peaks.append((round(v[i] * 1e6, 1), round(w[i] * RPM)))
     assert round(peaks[0][0]) == 164 and peaks[1:] == [(37.6, 783), (18.6, 522)]
     assert p.target_rpm == 783.0
+
+
+def test_magnetic_bearings():
+    import numpy as np
+
+    p = PRESETS["Magnetic bearings"]
+    s, m = p.system, p.system.bearing_a.magnet
+    assert m is not None and s.bearing_b.magnet == m and s.position == 1.15 and s.gravity > 0
+    q = s.static_deflection(0.0)
+    assert np.abs(q[[XA, YA, XB, YB]]).max() < 1e-15  # the integral holds the journals at the centre
+    assert abs(s.bearing_loads[1]) / m.capacity < 1.0  # inside the linearized magnets' reach
+    assert criticals("Magnetic bearings", forward=True) == [1542]
+    assert [round(z, 3) for w, r, z in campbell(s, p.top_rpm / RPM, n_modes=8).criticals
+            if r > 0.1 and z < 0.3] == [0.054]
+    onset = stability_onset(s, p.top_rpm / RPM)
+    assert round(onset.omega * RPM) == 8894 and round(onset.freq_hz) == 739 and onset.whirl > 0.9
+    assert onset.freq_hz == pytest.approx(m.damped_band()[1], rel=1e-4)
+    assert least_damped(s, p.target_rpm / RPM)[0] > 0  # it starts out stable

@@ -8,7 +8,7 @@ from collections.abc import Collection
 
 import numpy as np
 
-from ..core.rotor import DOF_NAMES, MODE_LIMIT, RPM, XD, YD, RotorSystem, periodic_steady, whirl_modes
+from ..core.rotor import DOF_NAMES, MODE_LIMIT, RPM, XD, YA, YB, YD, RotorSystem, periodic_steady, whirl_modes
 from .cms_notes import fmt
 from .style import colors
 
@@ -76,8 +76,9 @@ def _labels(system: RotorSystem) -> tuple[list[str], list[str]]:
 
 
 def _coupling(s: RotorSystem) -> str:
-    """Each bearing's constant k_xy, or that its coupling is an oil film's."""
-    return " and ".join("the oil film's (below) at " + n if b.film is not None else f"{fmt(b.kxy, 1.0)} N/m at {n}"
+    """Each bearing's constant k_xy, or that its coupling is an oil film's, or none (a magnet)."""
+    return " and ".join("the oil film's (below) at " + n if b.film is not None else
+                        "none (a magnetic bearing) at " + n if b.magnet is not None else f"{fmt(b.kxy, 1.0)} N/m at {n}"
                         for n, b in (("A", s.bearing_a), ("B", s.bearing_b)))
 
 
@@ -115,6 +116,58 @@ def _films_html(s: RotorSystem, omega: float) -> str:
     )
 
 
+def _um(x: float) -> str:
+    """x (m) in µm to three figures, round-off (below a picometre) as 0."""
+    return "0" if abs(x) < 1e-12 else f"{x * 1e6:.3g}"
+
+
+def _state_space(s: RotorSystem) -> str:
+    """The state-space form: Z = [q, q̇], or with magnetic bearings their controllers' states too."""
+    if not s.magnets:
+        return ("<p>With Z = [q, q̇] the equations become Z' = A(Ω) Z + B u, u = f the force (or moment) on each "
+                "DOF, B = [0 ; M<sup>−1</sup>]:</p><p align='center'>A(Ω) = [ 0 &nbsp; I ; "
+                "−M<sup>−1</sup>(K + ΩH) &nbsp; −M<sup>−1</sup>(C + ΩG) ]</p>")
+    return ("<p>With Z = [q, q̇, x<sub>c</sub>], the magnets' controllers' states last "
+            f"({s.n_control} of them), the equations become Z' = A(Ω) Z + B u, u = f the force (or moment) on each "
+            "DOF, B = [0 ; M<sup>−1</sup> ; 0]:</p><p align='center'>A(Ω) = [ 0 &nbsp; I &nbsp; 0 ; "
+            "−M<sup>−1</sup>(K + ΩH) &nbsp; −M<sup>−1</sup>(C + ΩG) &nbsp; M<sup>−1</sup>F<sub>c</sub> ; "
+            "B<sub>c</sub> &nbsp; 0 &nbsp; A<sub>c</sub> ]</p><p>B<sub>c</sub> gives each controller its journal's "
+            "displacement, A<sub>c</sub> holds their equations (above) and F<sub>c</sub> = −k<sub>i</sub> puts each "
+            "current back on its journal. The filters and amplifiers are fast and do not oscillate, so their roots "
+            "are left out of the modes below.</p>")
+
+
+def _magnets_html(s: RotorSystem) -> str:
+    """The magnetic bearings' paragraph: the actuator, the controller's states and the push at the modes."""
+    if not s.magnets:
+        return ""
+    magnets = [(n, b.magnet) for n, b in (("A", s.bearing_a), ("B", s.bearing_b)) if b.magnet is not None]
+    _, m = magnets[0]
+    which = "both bearings" if len(magnets) == 2 and magnets[0][1] == magnets[1][1] else f"bearing {magnets[0][0]}"
+    lo, hi = m.damped_band()
+    band = (f"It damps from {lo:.3g} to {hi:,.4g} Hz; outside that band c<sub>b</sub> &lt; 0 and it feeds a mode."
+            if math.isfinite(lo) else "It damps nowhere: c<sub>b</sub> &lt; 0 at every frequency.")
+    states = ", ".join((["∫x"] if m.integral else []) + (["x<sub>d</sub>"] if m.kd > 0.0 else []) + ["i"])
+    return (
+        "<h4>The magnetic bearings</h4><p>The journals float in active magnetic bearings (the <i>Magnetic "
+        "bearing</i> tab) in place of the springs and dampers. On each axis a pair of magnets pulls the journal "
+        f"toward the nearer one with k<sub>m</sub>x, here (at {which}) k<sub>m</sub> = {fmt(m.negative_stiffness, 1.0)} "
+        "N/m: that is the −k<sub>m</sub> on the journals' diagonal in K below, a negative stiffness. The rest of "
+        f"the push is the control current's, −k<sub>i</sub>i (k<sub>i</sub> = {m.current_gain:.4g} N/A), set by a "
+        f"PID behind the amplifier, i = G(s)x with G(s) = (k<sub>p</sub> + k<sub>I</sub>/s + "
+        f"k<sub>d</sub>s/(1 + s/ω<sub>d</sub>)) / (1 + s/ω<sub>a</sub>): k<sub>p</sub> = {m.kp:,.4g} A/m, "
+        f"k<sub>I</sub> = {m.ki:,.4g} A/(m·s), k<sub>d</sub> = {m.kd:.4g} A·s/m, f<sub>d</sub> = {m.filter_hz:,.4g} Hz, "
+        f"f<sub>a</sub> = {m.amplifier_hz:,.4g} Hz. Each axis's controller has {m.n_states} state"
+        f"{'s' if m.n_states > 1 else ''} of its own, x<sub>c</sub> = [{states}]:</p>"
+        "<p align='center'>(∫x)' = x, &nbsp; x<sub>d</sub>' = ω<sub>d</sub>(x − x<sub>d</sub>), &nbsp; i' = "
+        "ω<sub>a</sub>(k<sub>p</sub>x + k<sub>I</sub>∫x + k<sub>d</sub>ω<sub>d</sub>(x − x<sub>d</sub>) − i)</p>"
+        "<p>At a frequency ω the bearing pushes back as a spring and a damper, K<sub>b</sub>(iω) = "
+        "k<sub>i</sub>G(iω) − k<sub>m</sub> = k<sub>b</sub> + iωc<sub>b</sub>. " + band + " The steady states "
+        "(Bode and polar plots, harmonic balance) take K<sub>b</sub> at each harmonic; with the integral it is "
+        "infinite at 0 Hz, and a steady load cannot move the journals.</p>"
+    )
+
+
 def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = ()) -> str:
     """The equations of motion, every matrix with the current numbers, and the modes at speed Ω.
 
@@ -125,7 +178,7 @@ def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = (
     H = system.circulatory()
     s = system
     labels, groups = _labels(s)
-    films = _films_html(s, omega)
+    films = _films_html(s, omega) + _magnets_html(s)
     if s.films:
         Kf, Cf, _ = s._film_terms(omega)
         K, C = K + Kf, C + Cf
@@ -245,6 +298,21 @@ def matrices_html(system: RotorSystem, omega: float, hidden: Collection[str] = (
                f"2X, {abs(qk[1, XD]) * 1e6:.4g} µm in x and {abs(qk[1, YD]) * 1e6:.4g} µm in y at this speed, "
                "most where 2Ω meets a natural frequency: the gravity critical.") + "</p>"
         )
+    elif s.gravity and s.magnets:
+        qs = s.static_deflection(omega)
+        gravity = (
+            f"<h4>Gravity</h4><p>On a horizontal rotor f also holds the weights, constant: "
+            f"−m<sub>A</sub>g, −mg and −m<sub>B</sub>g on y<sub>A</sub>, y<sub>D</sub> and y<sub>B</sub> "
+            f"(here {fmt(s.disc_mass * s.gravity, 1.0)} N on the disc)"
+            + (f", and the shaft's own weight, {fmt(s.shaft_mass * s.gravity, 1.0)} N" if s.density else "")
+            + ". They hold the rotor still where A Z + B f<sub>g</sub> = 0, the controllers' states included"
+            + (": with the integral the magnets hold their journals at the centre, the current growing until "
+               "they are back, so the shaft alone sags" if any(b.magnet is not None and b.magnet.integral
+                                                              for b in (s.bearing_a, s.bearing_b)) else "")
+            + f". Here the disc is at ({qs[XD] * 1e6:.4g}, {qs[YD] * 1e6:.4g}) µm and the journals at "
+            f"({_um(qs[YA])}, {_um(qs[YB])}) µm vertically; the rotor vibrates about that as without "
+            "gravity.</p>"
+        )
     elif s.gravity:
         qs = s.static_deflection(omega)
         gravity = (
@@ -337,10 +405,8 @@ and past the onset the whirl grows.</p>
 {cracked}
 
 <h4>State space</h4>
-<p>With Z = [q, q̇] the equations become Z' = A(Ω) Z + B u, u = f the force (or moment) on each
-DOF, B = [0 ; M<sup>−1</sup>]:</p>
-<p align='center'>A(Ω) = [ 0 &nbsp; I ; −M<sup>−1</sup>(K + ΩH) &nbsp; −M<sup>−1</sup>(C + ΩG) ]</p>
-<p>A is {2 * s.n_dof} × {2 * s.n_dof} and not symmetric, and its eigenvalues s = −ζω<sub>n</sub> ± iω<sub>d</sub> come in
+{_state_space(s)}
+<p>A is {s.n_states} × {s.n_states} and not symmetric, and its eigenvalues s = −ζω<sub>n</sub> ± iω<sub>d</sub> come in
 conjugate pairs. The modes at this speed, lowest first:</p>
 <table border='1' cellspacing='0' cellpadding='3'>
 <tr><th>Mode</th><th>s [1/s]</th><th>f<sub>d</sub> [Hz]</th><th>f<sub>d</sub> [rpm]</th><th>ζ</th>
@@ -1103,10 +1169,55 @@ disc about 0.16 mm off centre. At 5000 rpm it is locked at 30.8 Hz instead: oil 
 <p><b>On the page.</b> The <i>Fluid-film bearing</i> tab draws the locus, with the page's speed range
 solid and the speed now as a dot. It plots the coefficients against the speed, or dimensionless against
 S(L<sub>b</sub>/D<sub>b</sub>)² on log scales (dashed where negative), as on a bearing designer's chart.
-Tick <i>Oil-film journal bearings</i> under the bearing supports to run both journals in the tab's
+Choose <i>Oil-film journal bearings</i> under the bearing supports to run both journals in the tab's
 bearing, on rigid housings, in place of the springs and dampers, and <i>Nonlinear film</i> beside it to
 step their whole force. With <i>Static sag</i> ticked, the bearings' orbits rise along the locus as the
 speed rises.</p>
+
+<h3>Active magnetic bearings</h3>
+<p>An active magnetic bearing holds the journal with no contact at all. On each axis two electromagnets
+face each other across the journal, each an air gap s<sub>0</sub> from it. A magnet pulls with
+k i²/s², k = μ<sub>0</sub>N²A/4 for N turns and pole faces of area A, so the nearer the journal, the
+harder it pulls. Both coils carry a bias current i<sub>0</sub>, and the control current i is added to one
+and taken from the other. For small motions the pair's force is</p>
+<p align='center'>f = k<sub>i</sub> i + k<sub>m</sub> x, &nbsp; k<sub>i</sub> = 4k i<sub>0</sub>/s<sub>0</sub>²,
+&nbsp; k<sub>m</sub> = 4k i<sub>0</sub>²/s<sub>0</sub>³</p>
+<p>k<sub>m</sub> is a <b>negative stiffness</b>: left alone, the journal falls onto a magnet. The force
+can reach k<sub>i</sub>i<sub>0</sub> = k<sub>m</sub>s<sub>0</sub>, where one magnet's current runs out:
+that is the bearing's load capacity. The default bearing (s<sub>0</sub> = 1 mm, i<sub>0</sub> = 1 A,
+A = 400 mm², N = 200) has k<sub>m</sub> = 20.1 kN/m, k<sub>i</sub> = 20.1 N/A and a capacity of 20.1 N.</p>
+<p>A sensor reads x, and a controller sets i = −G(s)x through a power amplifier:
+G(s) = (k<sub>p</sub> + k<sub>I</sub>/s + k<sub>d</sub>s/(1 + s/ω<sub>d</sub>))/(1 + s/ω<sub>a</sub>), a PID
+with its derivative filtered at ω<sub>d</sub> and the amplifier's bandwidth ω<sub>a</sub>. The bearing then
+pushes back with −K<sub>b</sub>(s)x, K<sub>b</sub> = k<sub>i</sub>G(s) − k<sub>m</sub>. The proportional
+gain has to beat the magnets first: k<sub>i</sub>k<sub>p</sub> − k<sub>m</sub> is what is left as
+stiffness, 50.3 kN/m by default, and the derivative gives k<sub>i</sub>k<sub>d</sub> = 101 N·s/m of
+damping. The integral makes the stiffness infinite at 0 Hz: under a steady load the current keeps
+growing until the journal is back at the centre. On a horizontal rotor the journals stay centred and the
+shaft alone sags.</p>
+<p>So the bearing's stiffness and damping are not constants but depend on the frequency. At ω,
+K<sub>b</sub>(iω) = k<sub>b</sub> + iωc<sub>b</sub>: the spring and damper that would push the same.
+Where the controller leads the motion, c<sub>b</sub> &gt; 0. The integral lags it at low frequency, and
+the derivative's filter and the amplifier lag it at high frequency, so c<sub>b</sub> is positive only in
+a band: 14.1 to 1297 Hz for the default bearing. Outside it the bearing feeds a mode. A mode that sits
+out there unstable, or moves out there as the speed changes, grows.</p>
+<p>That is how a controller's <b>phase lag</b> destabilizes a rotor. A gyroscopic rotor's forward
+modes rise with the speed. On the <i>Magnetic bearings</i> preset (the disc overhung past B, the
+amplifier slowed to 400 Hz, which brings the band's top down to 739 Hz) the disc's forward tilting mode
+reaches 739 Hz at 8894 rpm, 4.99× the speed, and is unstable past it: at 12,000 rpm it whirls at 778 Hz
+and grows by e every 0.41 s. The onset is exactly where the mode crosses the band's edge. A faster
+amplifier (1000 Hz) keeps the rotor stable to 20,000 rpm; a slower one (300 Hz) leaves the mode outside
+the band even at rest. Backward modes fall with the speed, toward the integral's lag at the bottom.</p>
+<p>The controller has states of its own (the integral, the filter, the current), so the rotor's state
+grows past [q, q̇] by three per axis. The time stepping is still the exact update, with them in A; the
+steady states take K<sub>b</sub> at each harmonic. The model is linearized about the centred journal and
+the bias current, with the sensor at the journal. A real bearing also saturates (the current cannot
+pass i<sub>0</sub> one way), and its rotor drops onto backup bearings, at half the air gap, when control
+is lost. The page pauses there.</p>
+<p><b>On the page.</b> Choose <i>Magnetic bearings</i> under the bearing supports to float both
+journals in the <i>Magnetic bearing</i> tab's bearing. The tab plots k<sub>b</sub> and c<sub>b</sub>
+against frequency, shades where c<sub>b</sub> &lt; 0, and draws the rotor's modes at the speed now
+(dashed backward).</p>
 
 <h2>6. Numerics</h2>
 
@@ -1269,6 +1380,14 @@ speed sets in and grows until the journals circle close to the wall, where it ho
 shows it at +½X. Set the target to 5000 rpm: the whirl stays at the natural frequency, 30.8 Hz, and
 grows on, oil whip. Untick <i>Nonlinear film</i> to see the linear films' whirl at 3500 rpm grow until a
 journal reaches its clearance.</li>
+<li>Load the <i>Magnetic bearings</i> preset, tick <i>Static sag</i> and open the <i>Magnetic bearing</i>
+tab: the journals stay centred and the shaft sags, bearing B holding 12.3 N with 0.61 A of control
+current. Set the target to 12,000 rpm and watch the solid line of the forward tilting mode cross into the
+shaded band past 739 Hz: the whirl grows at 778 Hz until journal B lands on its backup bearing. Raise the
+amplifier's bandwidth to 1000 Hz, Reset and run again: it stays stable. Then set k<sub>I</sub> to 0: the
+journals sag instead, B by 244 µm. Set k<sub>p</sub> below 1000 A/m and the magnets win: the rotor is
+unstable at rest. Ten times the integral gain (350,000) pushes the band's bottom up to 49.7 Hz, past the
+first mode at 25 Hz, which then grows.</li>
 </ol>
 
 <h2>Notation</h2>
@@ -1297,7 +1416,7 @@ journal reaches its clearance.</li>
 <tr><td colspan="3"><b>Equations</b></td></tr>
 <tr><td>M, C, G, K, H</td><td>mass, damping, gyroscopic, stiffness and circulatory matrices (8 × 8 for a massless shaft); H is the skew stiffness per unit speed, from internal damping and fluid swirl</td><td>—</td></tr>
 <tr><td>J</td><td>the matrix that turns x toward y, in each pair of planes</td><td>—</td></tr>
-<tr><td>Z, u, A(Ω), B</td><td>state vector [q, q̇]; the loads; the state and input matrices (16 × 16 and 16 × 8 for a massless shaft)</td><td>—</td></tr>
+<tr><td>Z, u, A(Ω), B</td><td>state vector [q, q̇] (and x<sub>c</sub> with magnetic bearings); the loads; the state and input matrices (16 × 16 and 16 × 8 for a massless shaft)</td><td>—</td></tr>
 <tr><td>h, Φ, Γ<sub>0</sub>, Γ<sub>1</sub></td><td>the time step; the exact update's matrices</td><td>s, —</td></tr>
 <tr><td>r<sub>f</sub>, C<sub>b</sub></td><td>stepping the whole film: the remainder of its force on the journals; the whole uncavitated film's damping, which bounds the film's</td><td>N, N·s/m</td></tr>
 <tr><td>R(φ), q<sub>r</sub></td><td>the rotation to axes turning with the shaft; q in those axes, q = R(φ)q<sub>r</sub></td><td>—, m</td></tr>
@@ -1333,6 +1452,12 @@ journal reaches its clearance.</li>
 <tr><td>K<sub>f</sub>, C<sub>f</sub>, q<sub>J</sub>, p</td><td>on the rotor, the films' stiffness and damping; the journals' equilibrium; the films' constant load W + K<sub>f</sub>q<sub>J</sub></td><td>N/m, N·s/m, m, N</td></tr>
 <tr><td>ϑ, ϑ<sub>e</sub>, Ψ</td><td>the whole film: the angle round the bearing from the line of centres, and its eccentric anomaly; the film's dissipation</td><td>rad, rad, W</td></tr>
 <tr><td>m<sub>b</sub>, ω<sub>w</sub>, K<sub>eq</sub></td><td>Lund's rigid rotor: its mass per bearing; its whirl frequency at the threshold; the film's equivalent stiffness</td><td>kg, rad/s, N/m</td></tr>
+<tr><td colspan="3"><b>The magnetic bearing</b></td></tr>
+<tr><td>s<sub>0</sub>, i<sub>0</sub>, i, A, N</td><td>a magnet's air gap with the journal centred; the bias current; the control current; a pole face's area; the coil's turns</td><td>m, A, A, m², —</td></tr>
+<tr><td>k<sub>m</sub>, k<sub>i</sub></td><td>a magnet pair's negative stiffness 4ki<sub>0</sub>²/s<sub>0</sub>³ and current gain 4ki<sub>0</sub>/s<sub>0</sub>², k = μ<sub>0</sub>N²A/4</td><td>N/m, N/A</td></tr>
+<tr><td>k<sub>p</sub>, k<sub>I</sub>, k<sub>d</sub>; ω<sub>d</sub>, ω<sub>a</sub></td><td>the controller's proportional, integral and derivative gains; the derivative's filter and the amplifier's bandwidth</td><td>A/m, A/(m·s), A·s/m; rad/s (Hz)</td></tr>
+<tr><td>G(s), K<sub>b</sub>(s); k<sub>b</sub>(ω), c<sub>b</sub>(ω)</td><td>the controller, i = −G(s)x; the bearing's push back, −K<sub>b</sub>x, K<sub>b</sub> = k<sub>i</sub>G − k<sub>m</sub>; its equivalent spring and damper at ω, K<sub>b</sub>(iω) = k<sub>b</sub> + iωc<sub>b</sub></td><td>A/m, N/m; N/m, N·s/m</td></tr>
+<tr><td>x<sub>c</sub>, A<sub>c</sub>, B<sub>c</sub>, F<sub>c</sub></td><td>the controllers' states; their equations, x<sub>c</sub>' = A<sub>c</sub>x<sub>c</sub> + B<sub>c</sub>q; their push on q, F<sub>c</sub>x<sub>c</sub></td><td>—</td></tr>
 </table>
 """
 

@@ -26,6 +26,13 @@ and change with the speed. The film is linearized about where its journal
 settles, so with gravity it also adds a constant load that holds the journal
 there (`_film_terms`): the rotor rests with its journals on the film's locus.
 So in general the stiffness and the damping are K(Ω) and C(Ω), not only K + ΩH.
+Or it floats in an active magnetic bearing (core/magnetic_bearing.py): the
+magnets' negative stiffness -k_m is in K, and a PID controller behind an
+amplifier sets the current that holds the journal. The controllers have states
+of their own, x_c, after q and q' in the state (n_states long); the steady
+states take the bearings' dynamic stiffness k_i G(s) at each harmonic instead
+(support_stiffness), and with integral action a steady load cannot move the
+journals at all.
 The disc has mass m, polar moment of inertia Ip (about the spin axis) and
 diametral moment Id (about a diameter).
 
@@ -155,6 +162,7 @@ import numpy as np
 import scipy.linalg
 
 from .fluid_bearing import BearingState, JournalBearing, full_film_damping, pi_film
+from .magnetic_bearing import MagneticBearing
 from .simulator import MAX_STEP, MAX_STEPS_PER_ADVANCE, STEPS_PER_PERIOD, foh_discretize
 
 N_DOF = 8  # the stations' DOFs, the first of q (a shaft with mass adds its modal coordinates after them)
@@ -172,6 +180,7 @@ MIN_GAP = 1e-3  # of the span: the closest the disc may come to a bearing
 POISSON = 0.3  # the shaft's Poisson's ratio, for a crack's compliance
 CRACK_DEPTH_MAX = 0.5  # a / D: the strip model's crack compliance holds to half the shaft's diameter
 # Nonlinear oil films (RotorSystem.nonlinear_films) in the time step, see RotorSimulator._film_steps:
+OVERDAMPED = 0.05  # a root with |Im λ| below this times |Re λ| (ζ > 0.9987) is taken as not oscillating
 FILM_MODE_STEPS = 10  # steps per period of the fastest mode (the spin keeps STEPS_PER_PERIOD)
 FILM_DRIFT = 0.3  # the films' damping bound is taken afresh once it has moved this much (of its largest term)
 FILM_TOL = 1e-7  # Newton stops when the remainder's residual is this small, over (1 N + the largest load)
@@ -236,14 +245,16 @@ class Crack:
 
 @dataclass(frozen=True)
 class Bearing:
-    """A bearing journal on its support: springs and dampers to ground in x and y, or an oil film.
+    """A bearing journal on its support: springs and dampers to ground in x and y, an oil film or a magnet.
 
     The support pushes back on the journal with f = -K [x, y] - C [x', y'], K =
     [[kx, k_xy], [k_yx, ky]] and C = [[cx, c_xy], [c_yx, cy]]. With a `film` the
     journal runs in a plain journal bearing on a rigid housing instead: K and C
     are then the film's, at the speed and under the bearing's share of the
     rotor's weight (the film's own `load` is not used), and the springs, dampers
-    and swirl are left out.
+    and swirl are left out. With a `magnet` it floats in an active magnetic
+    bearing (core/magnetic_bearing.py): K is then the magnets' negative stiffness
+    -k_m, and the rest of the push comes from the controller's states.
     """
 
     kx: float = 5e4  # N/m
@@ -257,6 +268,11 @@ class Bearing:
     cxy: float = 0.0  # N·s/m: f_x = -c_xy y'
     cyx: float = 0.0  # N·s/m: f_y = -c_yx x'
     film: JournalBearing | None = None  # an oil film in place of the springs and dampers
+    magnet: MagneticBearing | None = None  # or an active magnetic bearing
+
+    def __post_init__(self) -> None:
+        if self.film is not None and self.magnet is not None:
+            raise ValueError("a bearing is an oil film or a magnet, not both")
 
     @property
     def damping(self) -> float:
@@ -269,13 +285,15 @@ class Bearing:
 
     @property
     def swirling(self) -> bool:
-        """True if the springs' cross-coupling grows with the speed (λ c ≠ 0, and no film)."""
-        return self.film is None and bool(self.swirl * self.damping)
+        """True if the springs' cross-coupling grows with the speed (λ c ≠ 0, and no film or magnet)."""
+        return self.film is None and self.magnet is None and bool(self.swirl * self.damping)
 
     def springs(self) -> tuple[np.ndarray, np.ndarray]:
-        """(K, C), each 2 x 2: the springs and dampers at rest (none with a film)."""
+        """(K, C), each 2 x 2: the springs and dampers at rest (none with a film; a magnet's -k_m)."""
         if self.film is not None:
             return np.zeros((2, 2)), np.zeros((2, 2))
+        if self.magnet is not None:
+            return -self.magnet.negative_stiffness * np.eye(2), np.zeros((2, 2))
         return (np.array([[self.kx, self.kxy], [self.k_yx, self.ky]]),
                 np.array([[self.cx, self.cxy], [self.cyx, self.cy]]))
 
@@ -725,6 +743,9 @@ class RotorSystem:
     def static_deflection(self, omega: float | np.ndarray = 0.0) -> np.ndarray:
         """q_s = (K + ΩH)^{-1} f_g: where gravity holds the rotor, (n_dof,) or (len(omega), n_dof).
 
+        On magnets, from the whole state (static_state): with integral action they hold
+        their journals at the centre.
+
         Unless the stiffness depends on the speed (speed_dependent), neither does this.
         With an asymmetric or cracked shaft the rotor never holds still under
         gravity: q_s is then the mean of its periodic response (gravity_response),
@@ -736,6 +757,12 @@ class RotorSystem:
             return np.zeros(omega.shape + (n,))
         if self.periodic:
             return gravity_response(self, omega.ravel())[0].real.reshape(omega.shape + (n,))
+        if self.magnets:  # the magnets' push has states of their own
+            if not self.speed_dependent or omega.ndim == 0:
+                q = self.static_state(float(omega) if omega.ndim == 0 else 0.0)[:n]
+                return q if omega.ndim == 0 else np.broadcast_to(q, omega.shape + (n,)).copy()
+            out = np.array([self.static_state(w)[:n] for w in omega.ravel()])
+            return out.reshape(omega.shape + (n,))
         if not self.speed_dependent or omega.ndim == 0:
             w = float(omega) if omega.ndim == 0 else 0.0
             q = np.linalg.solve(self.stiffness(w), self.gravity_load(w))
@@ -760,7 +787,7 @@ class RotorSystem:
         """
         if not self.gravity or not self.periodic:
             return self.static_deflection(0.0)
-        return np.linalg.solve(self.stiffness_at(0.0, phase), self.gravity_load(0.0))
+        return self.static_state(0.0, phase)[:self.n_dof]
 
     def bow_displacement(self, phase: float) -> np.ndarray:
         """q_bow (n_dof,): the bow at shaft angle φ, as displacements in fixed coordinates."""
@@ -1035,12 +1062,13 @@ class RotorSystem:
         """True if both bearings have the same stiffness and damping in x as in y, and turn alike.
 
         Their cross terms then have to be a pure turn (k_yx = -k_xy, no c_xy), and
-        no film (whose stiffness depends on the load's direction).
+        no film (whose stiffness depends on the load's direction) nor magnet (whose
+        controller's states the rotating frame does not turn).
 
         Then an asymmetric shaft is time-invariant in coordinates turning with it,
         so a few harmonics give its response and modes exactly (rotating_frame).
         """
-        return all(b.film is None and b.kx == b.ky and b.cx == b.cy and b.cxy == b.cyx == 0.0
+        return all(b.film is None and b.magnet is None and b.kx == b.ky and b.cx == b.cy and b.cxy == b.cyx == 0.0
                    and b.k_yx == -b.kxy for b in (self.bearing_a, self.bearing_b))
 
     def axis_system(self, stiff: bool) -> RotorSystem:
@@ -1073,23 +1101,109 @@ class RotorSystem:
             return np.diag(1.0 / np.diag(M))
         return np.linalg.inv(M)
 
+    # ------------------------------------------------------------- magnetic bearings
+    @property
+    def magnets(self) -> bool:
+        """True if either bearing is an active magnetic bearing."""
+        return self.bearing_a.magnet is not None or self.bearing_b.magnet is not None
+
+    @cached_property
+    def _axes(self) -> list[tuple[int, MagneticBearing]]:
+        """Each magnet's axes: (the journal's DOF in q, its bearing), x then y, A then B."""
+        return [(d, b.magnet) for j, b in ((XA, self.bearing_a), (XB, self.bearing_b)) if b.magnet is not None
+                for d in (j, j + 4)]
+
+    @property
+    def n_control(self) -> int:
+        """The controllers' states, after q and q' in the state: 0 without magnets."""
+        return sum(m.n_states for _, m in self._axes)
+
+    @property
+    def n_states(self) -> int:
+        """The length of the state z = [q, q', the controllers' states]."""
+        return 2 * self.n_dof + self.n_control
+
+    @cached_property
+    def _control(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """(A_c, B_c, F_c): the controllers' x_c' = A_c x_c + B_c q, and their push on q, F_c x_c.
+
+        Each axis's journal displacement drives its controller (a, b, c); its current
+        pushes the journal back by -k_i c x_c (the magnets' -k_m x is in K).
+        """
+        n, nc = self.n_dof, self.n_control
+        Ac, Bc, Fc = np.zeros((nc, nc)), np.zeros((nc, n)), np.zeros((n, nc))
+        k = 0
+        for d, m in self._axes:
+            a, b, c = m.state_space()
+            sl = slice(k, k + b.size)
+            Ac[sl, sl], Bc[sl, d], Fc[d, sl] = a, b, -m.current_gain * c
+            k += b.size
+        return Ac, Bc, Fc
+
+    def support_stiffness(self, s: complex) -> tuple[np.ndarray, list[int]]:
+        """(D, pinned): the magnets' controlled push at s (on top of K's -k_m), -D(s) q, n_dof square.
+
+        D(s) = k_i G(s) on each axis. With integral action it is infinite at s = 0: a
+        steady load cannot move the journal there, so those DOFs are `pinned`, held
+        at 0 (their equation's unknown is then the force the magnet takes).
+        """
+        n = self.n_dof
+        D, pinned = np.zeros((n, n), dtype=complex), []
+        for d, m in self._axes:
+            if s == 0 and m.integral:
+                pinned.append(d)
+            else:
+                D[d, d] = m.current_gain * m.gain(s)
+        return D, pinned
+
+    def dynamic_solve(self, Z: np.ndarray, f: np.ndarray, s: complex) -> np.ndarray:
+        """Q from (Z + D(s)) Q = f: Z the rest of the dynamic stiffness at s, D the magnets' (support_stiffness)."""
+        if not self.magnets:
+            return np.linalg.solve(Z, f)
+        D, pinned = self.support_stiffness(s)
+        Z = Z + D
+        f = np.array(f, dtype=Z.dtype)
+        Z[pinned] = 0.0
+        Z[pinned, pinned] = 1.0
+        f[pinned] = 0.0
+        return np.linalg.solve(Z, f)
+
     def state_matrix(self, omega: float) -> np.ndarray:
-        """A(Ω) (2n x 2n) for z = [q, q']: z' = A z + B u."""
+        """A(Ω) (n_states square) for z = [q, q', x_c]: z' = A z + B u."""
         G = self._matrices[2]
         Minv = self.mass_inverse
         n = self.n_dof
-        A = np.zeros((2 * n, 2 * n))
-        A[:n, n:] = np.eye(n)
-        A[n:, :n] = -Minv @ self.stiffness(omega)
-        A[n:, n:] = -Minv @ (self.damping(omega) + omega * G)
+        A = np.zeros((self.n_states, self.n_states))
+        A[:n, n:2 * n] = np.eye(n)
+        A[n:2 * n, :n] = -Minv @ self.stiffness(omega)
+        A[n:2 * n, n:2 * n] = -Minv @ (self.damping(omega) + omega * G)
+        if self.magnets:
+            Ac, Bc, Fc = self._control
+            A[n:2 * n, 2 * n:] = Minv @ Fc
+            A[2 * n:, :n], A[2 * n:, 2 * n:] = Bc, Ac
         return A
 
     def input_matrix(self) -> np.ndarray:
-        """B (2n x n): the inputs u = f (n,), a force or moment on each DOF."""
+        """B (n_states x n): the inputs u = f (n,), a force or moment on each DOF."""
         n = self.n_dof
-        B = np.zeros((2 * n, n))
-        B[n:] = self.mass_inverse
+        B = np.zeros((self.n_states, n))
+        B[n:2 * n] = self.mass_inverse
         return B
+
+    def static_state(self, omega: float = 0.0, phase: float | None = None) -> np.ndarray:
+        """The state z (n_states,) where gravity alone holds the rotor still at speed Ω: A z + B f_g = 0.
+
+        Its q is static_deflection's (rest_deflection's, at shaft angle `phase`); its
+        controllers' states hold the weight on the magnets. With an asymmetric or
+        cracked shaft turning, q is not still: use static_deflection for its mean.
+        """
+        if not self.gravity:
+            return np.zeros(self.n_states)
+        A = self.state_matrix(omega)
+        if phase is not None:
+            n = self.n_dof
+            A[n:2 * n, :n] = -self.mass_inverse @ self.stiffness_at(omega, phase)
+        return np.linalg.solve(A, -self.input_matrix() @ self.gravity_load(omega))
 
     # ------------------------------------------------------------- checks
     def jeffcott_speed(self) -> float:
@@ -1201,6 +1315,7 @@ class WhirlModes:
     zeta: np.ndarray  # damping ratios, -Re λ / |λ|
     whirl: np.ndarray  # whirl ratios (see whirl_ratio): > 0 forward, < 0 backward
     shapes: np.ndarray  # (n, n_dof) complex displacement shapes, largest station entry 1
+    drift: float = -math.inf  # 1/s, the fastest growth of a root that does not oscillate (> 0: it diverges)
 
     @property
     def forward(self) -> np.ndarray:
@@ -1210,19 +1325,27 @@ class WhirlModes:
 def whirl_modes(system: RotorSystem, omega: float) -> WhirlModes:
     """Eigen-solution of A(Ω): the oscillatory modes (Im λ > 0), lowest first.
 
+    A root that does not oscillate is left out, but the fastest growth among them
+    is kept (`drift`): a magnetic bearing too weak for its magnets lets its journal
+    fall away without oscillating.
+
     An asymmetric or cracked shaft's stiffness turns with it, so A depends on
     time and its modes are Floquet's: e^{λt} times a motion periodic in φ. Each is
     listed by the harmonic of it that carries the most kinetic energy (see
     _rotating_modes and _hill_modes): that is its frequency here, and its shape
     and whirl are that harmonic's.
     """
+    drift = -math.inf
     if system.periodic:
-        lam, vec = _rotating_modes(system, omega) if system.rotating_frame else _hill_modes(system, omega)
+        if system.rotating_frame:
+            lam, vec = _rotating_modes(system, omega)
+        else:
+            lam, vec, drift = _hill_modes(system, omega)
         order = np.argsort(lam.imag)
         lam, vec = lam[order], vec[:, order]
     else:
         lam, vec = np.linalg.eig(system.state_matrix(omega))
-        keep = lam.imag > _oscillating(lam)
+        keep, drift = _oscillation(lam)
         lam, vec = lam[keep], vec[:system.n_dof, keep]
         order = np.argsort(lam.imag)
         lam, vec = lam[order], vec[:, order]
@@ -1238,7 +1361,20 @@ def whirl_modes(system: RotorSystem, omega: float) -> WhirlModes:
         zeta=-lam.real / np.abs(lam),
         whirl=whirl_ratio(system, shapes),
         shapes=shapes,
+        drift=drift,
     )
+
+
+def _oscillation(lam: np.ndarray) -> tuple[np.ndarray, float]:
+    """(Im λ > 0 and oscillating, the fastest growth of the roots that do not oscillate (-inf if none)).
+
+    A magnet's controller has repeated slow real roots (its integrals), which the
+    solver and the gyroscopic coupling split by a hair: a root this overdamped
+    (|Im λ| < OVERDAMPED |Re λ|, ζ > 0.9987) does not oscillate.
+    """
+    limit = np.maximum(_oscillating(lam), OVERDAMPED * np.abs(lam.real))
+    real = np.abs(lam.imag) <= limit
+    return lam.imag > limit, float(lam.real[real].max()) if real.any() else -math.inf
 
 
 def _oscillating(lam: np.ndarray) -> float:
@@ -1304,8 +1440,8 @@ def _rotating_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.n
     return lam[keep], shapes[:, keep]
 
 
-def _hill_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.ndarray]:
-    """A turning shaft's modes, by Hill's method: (λ, shapes (n_dof, k)), Im λ > 0.
+def _hill_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.ndarray, float]:
+    """A turning shaft's modes, by Hill's method: (λ, shapes (n_dof, k), drift), Im λ > 0.
 
     A(t) = A_0 + Σ_k A_k e^{ikφ}, k = ±p, ±2p, ... (p = spacing: 2 for an
     asymmetric shaft, 1 for a breathing crack); a Floquet mode z = e^{λt} Σ c_j
@@ -1316,11 +1452,12 @@ def _hill_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.ndarr
     a harmonic (the copies near the truncation are the inaccurate ones, and their
     energy is off at the edges). A whirl locked to pX/2 has its energy split
     evenly between two harmonics, so two of its copies sit on that edge; turned
-    to Im λ > 0 they are one λ, kept once. Its shape is c_0.
+    to Im λ > 0 they are one λ, kept once. Its shape is c_0. drift is as
+    whirl_modes's, from the roots that do not oscillate.
     """
     n, p, H = system.n_dof, system.spacing, HILL_ORDER
     A0 = system.state_matrix(omega).astype(complex)
-    size, blocks = 2 * n, 2 * H + 1
+    size, blocks = A0.shape[0], 2 * H + 1
     big = np.zeros((blocks * size, blocks * size), dtype=complex)
     for i in range(blocks):
         d = slice(i * size, (i + 1) * size)
@@ -1329,8 +1466,8 @@ def _hill_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.ndarr
         Ak = -system.mass_inverse @ e
         for i in range(blocks - k // p):  # A_k takes c_j to c_{j + k/p}, its conjugate back
             lo, hi = slice(i * size, (i + 1) * size), slice((i + k // p) * size, (i + k // p + 1) * size)
-            big[hi, lo][n:, :n] = Ak
-            big[lo, hi][n:, :n] = Ak.conj()
+            big[hi, lo][n:2 * n, :n] = Ak
+            big[lo, hi][n:2 * n, :n] = Ak.conj()
     lam, vec = np.linalg.eig(big)
     disp = vec.reshape(blocks, size, -1)[:, :n]  # (harmonic, DOF, mode)
     M = system._matrices[0]
@@ -1340,7 +1477,7 @@ def _hill_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.ndarr
     lam, shapes = lam[keep], disp[H][:, keep]
     flip = lam.imag < 0
     lam[flip], shapes[:, flip] = lam[flip].conj(), shapes[:, flip].conj()
-    keep = lam.imag > _oscillating(lam)
+    keep, drift = _oscillation(lam)
     lam, shapes, flip = lam[keep], shapes[:, keep], flip[keep]
     # A mode and its conjugate (turned) are one: pair each turned copy with an unturned one of the same λ. A
     # double root (a round rotor's two whirls) has two of each, and stays double.
@@ -1353,7 +1490,7 @@ def _hill_modes(system: RotorSystem, omega: float) -> tuple[np.ndarray, np.ndarr
             single.append(i)
         else:
             paired.add(mate)
-    return lam[single], shapes[:, single]
+    return lam[single], shapes[:, single], drift
 
 
 @dataclass
@@ -1447,7 +1584,8 @@ def synchronous_response(system: RotorSystem, omegas: np.ndarray) -> np.ndarray:
         F[:, _index(orders, 1)], F[:, _index(orders, -1)] = 0.5 * f, 0.5 * f.conj()
         return 2.0 * harmonic_response(system, omegas, orders, F)[:, _index(orders, 1)]
     for i, w in enumerate(omegas):
-        out[i] = np.linalg.solve(system.stiffness(w) - w * w * M + 1j * w * (system.damping(w) + w * G), f[i])
+        Z = system.stiffness(w) - w * w * M + 1j * w * (system.damping(w) + w * G)
+        out[i] = system.dynamic_solve(Z, f[i], 1j * w)
     return out
 
 
@@ -1489,7 +1627,9 @@ def harmonic_response(system: RotorSystem, omega: float | np.ndarray, orders: np
     (len(omega), m, n_dof) for several (loads then one set for all, or one per
     speed). Row k reads (K(Ω) - k²Ω²M + ikΩ(C(Ω) + ΩG)) Q_k + Σ_j E_j Q_{k-j} =
     F_k, the turning stiffness being Σ_j E_j e^{ijφ} (E_{-j} = conj(E_j));
-    harmonics past the ends are taken as zero.
+    harmonics past the ends are taken as zero. Magnetic bearings add their push
+    D(ikΩ) to row k (support_stiffness); at k = 0 with integral action their
+    journals are held at the centre.
     """
     M, C, G, K = system._matrices
     H = system._circulatory if system.speed_dependent else np.zeros_like(K)
@@ -1515,7 +1655,17 @@ def harmonic_response(system: RotorSystem, omega: float | np.ndarray, orders: np
                 gap = int(k - kj)
                 if gap and abs(gap) in E:
                     A[:, d, j * n:(j + 1) * n] = E[gap] if gap > 0 else E[-gap].conj()
-        out[c:c + chunk] = np.linalg.solve(A, F[c:c + chunk, :, None])[..., 0]
+        Fc = F[c:c + chunk].copy()
+        if system.magnets:
+            for i, k in enumerate(orders):
+                for j, x in enumerate(wc[:, 0, 0]):
+                    D, pinned = system.support_stiffness(1j * k * x)
+                    A[j, i * n:(i + 1) * n, i * n:(i + 1) * n] += D
+                    rows = [i * n + p for p in pinned]
+                    A[j, rows] = 0.0
+                    A[j, rows, rows] = 1.0
+                    Fc[j, rows] = 0.0
+        out[c:c + chunk] = np.linalg.solve(A, Fc[..., None])[..., 0]
     out = out.reshape(w.size, m, n)
     return out[0] if np.ndim(omega) == 0 else out
 
@@ -1637,7 +1787,7 @@ class _Films:
         self.size = max(abs(c) for b in self.taken for c in b)
         self.Cb = scipy.linalg.block_diag(*(((cxx, cxy), (cxy, cyy)) for cxx, cxy, cyy in self.taken))
         A = system.state_matrix(omega)
-        A[n:, self.rates] -= system.mass_inverse[:, d] @ (self.Cb - self.Cf)
+        A[n:2 * n, self.rates] -= system.mass_inverse[:, d] @ (self.Cb - self.Cf)
         self.Phi, self.G0, self.G1 = foh_discretize(A, system.input_matrix(), h)
         self.R0, self.R1 = self.G0[:, d], self.G1[:, d]
         self.Ex, self.Ev = self.R1[d], self.R1[self.rates]  # the journals' x and x' at the step's end, per force
@@ -1733,12 +1883,22 @@ class RotorSimulator:
         """New parameters, keeping the motion (live editing).
 
         If the shaft's modal coordinates change in number, the stations keep their
-        motion and the shaft starts again from its static shape between them.
+        motion and the shaft starts again from its static shape between them. If
+        the magnets' controllers change their states, those start where they hold
+        the rotor's weight.
         """
-        if system.n_dof != self.system.n_dof:
-            n0, n1 = self.system.n_dof, system.n_dof
-            state = np.zeros(2 * n1)
-            state[:N_DOF], state[n1:n1 + N_DOF] = self.state[:N_DOF], self.state[n0:n0 + N_DOF]
+        old = self.system
+        if system.n_dof != old.n_dof or system.n_control != old.n_control:
+            n0, n1 = old.n_dof, system.n_dof
+            state = np.zeros(system.n_states)
+            if n1 == n0:
+                state[:2 * n1] = self.state[:2 * n0]
+            else:
+                state[:N_DOF], state[n1:n1 + N_DOF] = self.state[:N_DOF], self.state[n0:n0 + N_DOF]
+            if system.n_control == old.n_control:
+                state[2 * n1:] = self.state[2 * n0:]
+            else:
+                state[2 * n1:] = system.static_state(self.omega)[2 * n1:]
             self.state = state
         self.system = system
         self._cache.clear()
@@ -1749,8 +1909,12 @@ class RotorSimulator:
 
     def _rest(self) -> np.ndarray:
         """The state at rest: the shaft in its bowed shape (which loads nothing), sagging under gravity."""
-        q = self.system.bow_displacement(self.phase) + self.system.rest_deflection(self.phase)
-        return np.concatenate([q, np.zeros_like(q)])
+        s = self.system
+        q = s.bow_displacement(self.phase) + s.rest_deflection(self.phase)
+        z = np.concatenate([q, np.zeros_like(q), np.zeros(s.n_control)])
+        if s.magnets:  # their controllers already holding the weight
+            z[2 * s.n_dof:] = s.static_state(0.0, self.phase if s.periodic else None)[2 * s.n_dof:]
+        return z
 
     def reset(self) -> None:
         """Back to rest, not spinning (the target speed is kept)."""
@@ -1760,7 +1924,8 @@ class RotorSimulator:
     def tap(self, impulse_x: float = 0.0, impulse_y: float = 0.0) -> None:
         """Hit the disc: an impulse (N·s) in x and y changes the velocities at once, by M^{-1} times it."""
         Minv = self.system.mass_inverse
-        self.state[self.system.n_dof:] += Minv[:, XD] * impulse_x + Minv[:, YD] * impulse_y
+        n = self.system.n_dof
+        self.state[n:2 * n] += Minv[:, XD] * impulse_x + Minv[:, YD] * impulse_y
 
     @property
     def q(self) -> np.ndarray:
@@ -1768,7 +1933,12 @@ class RotorSimulator:
 
     @property
     def qdot(self) -> np.ndarray:
-        return self.state[self.system.n_dof:]
+        return self.state[self.system.n_dof:2 * self.system.n_dof]
+
+    @property
+    def control(self) -> np.ndarray:
+        """The magnets' controllers' states (see RotorSystem._control); empty without magnets."""
+        return self.state[2 * self.system.n_dof:]
 
     def energy(self) -> tuple[float, float]:
         """(kinetic, potential) energy of the vibration (J); the spin's own energy left out."""
@@ -1788,10 +1958,12 @@ class RotorSimulator:
 
         A film damps its journal so hard that its roots decay at once without
         oscillating, far faster than anything else: the exact update needs no
-        short step for them, only for what oscillates.
+        short step for them, only for what oscillates. So with a magnet's
+        controller, whose filter and amplifier are fast real roots.
         """
         lam = np.linalg.eigvals(self.system.state_matrix(omega))
-        return float((np.abs(lam.imag) if self.system.films else np.abs(lam)).max()) / (2.0 * math.pi)
+        fast = np.abs(lam.imag) if self.system.films or self.system.magnets else np.abs(lam)
+        return float(fast.max()) / (2.0 * math.pi)
 
     def step_size(self) -> float:
         """h resolving the fastest mode at any speed up to the target, and the spin.
@@ -1828,7 +2000,7 @@ class RotorSimulator:
         A = self.system.state_matrix(omega)
         if phase is not None:
             n = self.system.n_dof
-            A[n:, :n] = -self.system.mass_inverse @ self.system.stiffness_at(omega, phase)
+            A[n:2 * n, :n] = -self.system.mass_inverse @ self.system.stiffness_at(omega, phase)
         out = foh_discretize(A, self.system.input_matrix(), h)
         if cache:
             if len(self._cache) > 8:
@@ -1963,7 +2135,7 @@ class RotorSimulator:
         z = self.state
         for j in range(n):
             z = Phi @ z + first[:, j]
-            z[n_dof:] -= weights[j] @ (S @ z[:n_dof])
+            z[n_dof:2 * n_dof] -= weights[j] @ (S @ z[:n_dof])
             z = Phi @ z + second[:, j]
             out[j] = z[:n_dof]
         return z
