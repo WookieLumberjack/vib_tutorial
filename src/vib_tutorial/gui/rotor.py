@@ -196,9 +196,9 @@ KXY_TIP = (
     "grows with speed, so read it as the value at the speed you look at. Try 15,000 N/m on both.</p>"
 )
 BOW_TIP = (
-    "<p>A shaft bent for good (by a thermal bow, a sag left after standing, or a bent repair), by δ at "
+    "<p>A shaft bent for good (by a thermal bow, a sag left after standing, or a bent repair), by δ<sub>b</sub> at "
     "the disc, toward an angle measured from the keyphasor mark in the direction of spin. It turns with the "
-    "shaft, so it drives the rotor once per revolution like an unbalance, but with a force k δ that does "
+    "shaft, so it drives the rotor once per revolution like an unbalance, but with a force kδ<sub>b</sub> that does "
     "not grow with speed.</p><p>Turning slowly, the probes read the bow itself (the <i>slow-roll "
     "runout</i>), and the polar plot starts from it rather than from the origin. Well above the critical "
     "speed the disc stays on the bearings' axis and the shaft bends round it. Put the bow at 180° to the "
@@ -223,7 +223,8 @@ ASYMMETRY_TIP = (
     "heavy spot sits from the stiff axis.</p>"
 )
 CRACK_TIP = (
-    "<p>A transverse crack in the shaft, cut to a depth a/D from the surface, its mouth at the angle "
+    "<p>A transverse crack in the shaft, cut to a depth a<sub>c</sub> from the surface (a<sub>c</sub>/d of the "
+    "shaft's diameter), its mouth at the angle "
     "given from the keyphasor mark. Open, it is a hinge: the shaft's slope jumps across it, much more "
     "under bending that pulls its mouth open than across (its compliance comes from fracture "
     "mechanics, for depths up to half the shaft).</p>"
@@ -262,7 +263,7 @@ FILM_TIP = (
 )
 SWIRL_TIP = (
     "<p>Fluid swirl ratio λ of a fluid-film bearing: the oil in the clearance is dragged round at λ times the "
-    "shaft's speed, about 0.5 in a plain journal bearing. It makes a cross-coupled stiffness that grows "
+    "shaft's speed: ½ in short-bearing theory, just under it (0.42 to 0.48) in real plain bearings. It makes a cross-coupled stiffness that grows "
     "with speed, k<sub>xy</sub> = λcΩ on top of the constant one (c the bearing's damping). Once the swirl "
     "λΩ outruns a forward whirl's frequency, the oil feeds it faster than c damps it: with λ = 0.5 the "
     "rotor goes unstable at twice its first natural frequency (<i>oil whip</i>).</p>"
@@ -274,7 +275,7 @@ ORBIT_TIP = (
     "<p>The small hollow circles are once-per-revolution marks (a keyphasor): where the centre was "
     "each time the mark on the shaft passed +x (the heavy spot is at the mark unless you move it). On "
     "the disc's orbit the red line points at the heavy spot now; the angle from the high spot (where the disc is) to the heavy spot is the phase lag, "
-    "0° well below the critical speed, 90° at it and 180° well above.</p>"
+    "0° well below the critical speed, about 90° near it and 180° well above.</p>"
 )
 
 
@@ -1326,9 +1327,9 @@ class RotorPage(QtWidgets.QWidget):
         )
         self.disc_mass = spin(0.01, 1000.0, s.disc_mass, 3, " kg")
         self.ip = spin(1e-6, 100.0, s.ip, 6, " kg·m²")
-        self.ip.setToolTip("Polar moment of inertia, about the spin axis (a thin disc: m R²/2)")
+        self.ip.setToolTip("Polar moment of inertia I<sub>p</sub>, about the spin axis (a thin disc of radius r<sub>d</sub>: m r<sub>d</sub>²/2)")
         self.id = spin(1e-6, 100.0, s.id, 6, " kg·m²")
-        self.id.setToolTip("Diametral moment of inertia, about a diameter (a thin disc: m R²/4 = Ip/2)")
+        self.id.setToolTip("Diametral moment of inertia I<sub>d</sub>, about a diameter (a thin disc: m r<sub>d</sub>²/4 = I<sub>p</sub>/2)")
         self.unbalance = spin(0.0, 1e6, s.unbalance * 1e6, 1, " g·mm")
         self.unbalance.setToolTip(
             "<p>Mass unbalance U = m e: the disc's mass times the distance e of its centre of mass from "
@@ -1336,7 +1337,7 @@ class RotorPage(QtWidgets.QWidget):
             "3000 rpm (e Ω = 6.3 mm/s).</p>"
         )
         form.addRow("Span L:", self.length)
-        form.addRow("Shaft diameter:", self.diameter)
+        form.addRow("Shaft diameter d:", self.diameter)
         form.addRow("Young's modulus:", self.youngs)
         self.shaft_mass = QtWidgets.QCheckBox("Shaft mass, ρ")
         self.shaft_mass.setToolTip(SHAFT_MASS_TIP)
@@ -1362,8 +1363,8 @@ class RotorPage(QtWidgets.QWidget):
         self.mass_matrix.currentIndexChanged.connect(self._on_params)
         form.addRow("Disc position a/L:", self.position)
         form.addRow("Disc mass m:", self.disc_mass)
-        form.addRow("Polar inertia Ip:", self.ip)
-        form.addRow("Diametral inertia Id:", self.id)
+        form.addRow("Polar inertia I<sub>p</sub>:", self.ip)
+        form.addRow("Diametral inertia I<sub>d</sub>:", self.id)
         self.unbalance_angle = spin(-180.0, 180.0, math.degrees(s.unbalance_angle), 0, "°")
         self.unbalance_angle.setToolTip(
             "<p>Where the heavy spot is: its angle from the keyphasor mark on the shaft, in the direction "
@@ -1384,7 +1385,7 @@ class RotorPage(QtWidgets.QWidget):
                                         (self.skew, self.skew_angle, SKEW_TIP, "Disc skew τ:"),
                                         (self.asymmetry, self.asymmetry_angle, ASYMMETRY_TIP,
                                          "Asymmetry ±Δ:"),
-                                        (self.crack_depth, self.crack_angle, CRACK_TIP, "Crack depth a/D:")):
+                                        (self.crack_depth, self.crack_angle, CRACK_TIP, "Crack depth a<sub>c</sub>/d:")):
             angle.setWrapping(True)
             angle.setStepType(QtWidgets.QAbstractSpinBox.StepType.DefaultStepType)
             angle.setSingleStep(15.0)
@@ -2222,7 +2223,7 @@ class RotorPage(QtWidgets.QWidget):
             )
         return (
             head + "<table cellspacing='0' cellpadding='2'><tr><th align='left'>Sweep</th>"
-            f"<th>α/ω<sub>c</sub>²</th><th>{order}X peak</th><th>of steady</th><th>at rpm</th><th>vs steady</th></tr>"
+            f"<th>Ω'/ω<sub>c</sub>²</th><th>{order}X peak</th><th>of steady</th><th>at rpm</th><th>vs steady</th></tr>"
             + "".join(rows) + "</table>"
         )
 

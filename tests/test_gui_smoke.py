@@ -1724,7 +1724,7 @@ def test_rotor_page(app):
     assert abs(s.couple_unbalance) < 0.05 * abs(hidden.couple_unbalance)
     slow = b.readings("slow")
     assert np.all(np.abs(b.readings("verify") - slow) < 0.03 * np.abs(b.readings("found") - slow))
-    assert "influence matrix" in b.results.text().lower() and "W<sub>2</sub>" in b.results.text()
+    assert "influence matrix" in b.results.text().lower() and "W<sub>c2</sub>" in b.results.text()
     p.reveal_unbalance()
     assert p.skew.isEnabled() and p.skew.value() == pytest.approx(math.degrees(hidden.skew), abs=1e-3)
     # The planes changed: the trial runs no longer apply.
@@ -2125,7 +2125,7 @@ def test_rotor_fluid_film_bearing(app):
     assert not panel.k_plot.ctrl.logXCheck.isChecked()
     # A long bearing is flagged.
     panel.length.setValue(20.0)
-    assert "L/D = 2" in panel.note.text()
+    assert "L<sub>b</sub>/D<sub>b</sub> = 2" in panel.note.text()
     w.set_theme("Dark")
 
 
