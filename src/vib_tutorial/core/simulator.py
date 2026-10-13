@@ -57,7 +57,7 @@ import scipy.linalg
 
 from .energy import stored_energy
 from .forcing import ForceController, ForceKind
-from .model import ChainSystem, state_space
+from .model import ChainSystem, held, state_space
 
 MAX_STEP = 1e-3  # s
 STEPS_PER_PERIOD = 40
@@ -362,7 +362,7 @@ class Simulator:
         if forced or rest.any():
             pull = P @ w[: 2 * n + 2]
             way = np.where(rest, np.sign(pull), way)
-            stuck = rest & (np.abs(pull) <= Fs)
+            stuck = rest & held(pull, Fs)
         for i, d in forced.items():
             stuck[i], way[i] = False, d
         return stuck, np.where(stuck, 0.0, -F * way)
@@ -380,7 +380,7 @@ class Simulator:
         if stuck.any():
             frees = np.flatnonzero(stuck)
             p1 = P[frees] @ w1[:m]
-            keep = np.abs(p1) > Fs[frees]
+            keep = ~held(p1, Fs[frees])
             frees, p1 = frees[keep], p1[keep]
         elif not reversed_.any():
             return None
@@ -500,7 +500,7 @@ class Simulator:
             f1 = f[k]
             if f1 == f0 and not w[n : 2 * n].any():
                 w[2 * n], w[2 * n + 1] = f0, 0.0
-                if np.all(np.abs(P @ w[: 2 * n + 2]) <= Fs):
+                if np.all(held(P @ w[: 2 * n + 2], Fs)):
                     # At rest, every mass held by its friction (or with no pull on it),
                     # and the force not changing: nothing moves until it does.
                     changes = np.flatnonzero(f[k:] != f0)
@@ -520,7 +520,7 @@ class Simulator:
         v = zs[:, n:]
         pull = np.column_stack([zs, f, np.zeros(f.size)]) @ P.T  # a force has no slope term (b_du = 0)
         way = np.where(v != 0.0, np.sign(v), np.sign(pull))
-        stuck = (v == 0.0) & (F > 0) & (np.abs(pull) <= Fs)
+        stuck = (v == 0.0) & (F > 0) & held(pull, Fs)
         return zs, np.where(stuck, 0.0, (pull - F * way) / self.system.masses)
 
     def advance(self, duration: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
