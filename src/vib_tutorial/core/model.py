@@ -183,7 +183,9 @@ def drag_shape(system: ChainSystem, x: np.ndarray, dof: int, x_dof: float) -> np
             sliding &= ~backwards  # it would have to slide against its pull: it sticks
             continue
         pull = -(K @ y)
-        slips = others & ~sliding & (np.abs(pull) > Fs)
+        # A pull equal to the static friction holds, to within rounding: drags in even
+        # steps land on it exactly, and the last bit decides it differently on each platform.
+        slips = others & ~sliding & (np.abs(pull) > Fs * (1 + 1e-9))
         if not slips.any():
             break
         way[slips] = np.sign(pull[slips])

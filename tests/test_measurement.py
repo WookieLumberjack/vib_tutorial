@@ -274,7 +274,8 @@ def test_force_level_leaves_a_linear_frf_alone():
     a, b = (measure(SYSTEM, force_level=level, **settings) for level in (1.0, 10.0))
     processing = Processing(window=Window.FORCE_EXPONENTIAL)
     ha, hb = (FrfEstimator(acq, processing).estimate().H for acq in (a, b))
-    np.testing.assert_allclose(hb, ha, rtol=1e-9, atol=0)
+    # Equal to rounding: near an antiresonance |H| is small and its last bits differ by platform.
+    np.testing.assert_allclose(hb, ha, rtol=1e-9, atol=1e-12 * np.abs(ha).max())
     assert np.abs(b.block(0)[0]).max() == pytest.approx(10 * np.abs(a.block(0)[0]).max())
 
 
