@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable
 
 import numpy as np
@@ -31,7 +32,7 @@ from .history import History
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, PhasorPanel, TimeHistoryPlot
-from . import theming
+from . import frame_stats, theming
 from .style import SYSTEM, colors
 
 FRAME_MS = 16  # ~60 fps
@@ -416,6 +417,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._frame)
         self._timer.start(FRAME_MS)
+        self.frame_overlay = frame_stats.install(self)  # only with VIB_FRAME_STATS set
 
     # --------------------------------------------------------------- pages
     frf_page = property(lambda self: self._page("frf_page"))
@@ -740,10 +742,24 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     # ------------------------------------------------------------ main loop
+    def event(self, event: QtCore.QEvent) -> bool:
+        # With frame stats on, time each repaint of the window (every widget in it).
+        if frame_stats.STATS is None or event.type() != QtCore.QEvent.Type.UpdateRequest:
+            return super().event(event)
+        start = time.perf_counter()
+        try:
+            return super().event(event)
+        finally:
+            frame_stats.STATS.paint(time.perf_counter() - start)
+
     def _frame(self) -> None:
         start = self._clock.elapsed()
         try:
-            self._tick()
+            if self.pages.currentWidget() is self.sim_page:
+                with frame_stats.frame("Simulation", lambda: self.sim.t, FRAME_MS):
+                    self._tick()
+            else:
+                self._tick()
         finally:
             spent = self._clock.elapsed() - start
             self._timer.start(max(1, FRAME_MS - spent))

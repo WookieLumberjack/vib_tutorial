@@ -56,6 +56,7 @@ from ..core.rotor_balance import SteadyMeasurement
 from ..core.rotor_presets import rotor_presets
 from ..core.rotor_stability import AsymmetryChart, Onset, full_spectrum, least_damped, stability_onset
 from ..core.rotor_waterfall import Waterfall
+from . import frame_stats
 from .cms_time import SampleBuffer
 from .panels import spin
 from .rotor_balance import BalancingPanel
@@ -2318,7 +2319,8 @@ class RotorPage(QtWidgets.QWidget):
         dt = min(now - self._last, 0.1)
         self._last = now
         speed = float(self.sim_speed.currentData())
-        self.step(dt * (max(speed, MEASURE_SPEED) if self.measurement is not None else speed), FRAME_BUDGET)
+        with frame_stats.frame("Jeffcott rotor", lambda: self.sim.t, FRAME_MS):
+            self.step(dt * (max(speed, MEASURE_SPEED) if self.measurement is not None else speed), FRAME_BUDGET)
         if self.isVisible() and self.running:
             self._timer.start()
 

@@ -103,6 +103,7 @@ def record_startup(window, path: str, launched_at: float | None = None) -> None:
 def run() -> int:
     from PySide6 import QtCore
 
+    from . import frame_stats
     from .main_window import MainWindow
 
     app = make_app()
@@ -121,6 +122,7 @@ def run() -> int:
         QtCore.QTimer.singleShot(2000, app.quit)
     code = app.exec()
     close_graphics(window)
+    frame_stats.uninstall()
     if preload.is_alive():  # don't tear the interpreter down mid-import
         preload.join()
     return code
