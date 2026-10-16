@@ -919,6 +919,12 @@ $F_f$ times the distance slid, so the energy balance still closes.
   redraws in a new one through its `apply_theme()`. Log axes use `gui/axes.py`, which labels
   only as many ticks as fit.
 
+To measure the frame rate on your own display, start the app with `VIB_FRAME_STATS=1`
+(e.g. `VIB_FRAME_STATS=1 uv run vib-tutorial`): an overlay in the corner shows the running
+page's frames per second, the time each frame spends computing and painting (median and 95th
+percentile) against the display's refresh, the share of late frames, and the simulation's speed
+against real time. `VIB_FRAME_STATS=frames.csv` also logs every frame to that file.
+
 `scripts/readme_screenshots.py` regenerates the images in `docs/images` (offscreen, each in
 the state its caption describes): `uv run python scripts/readme_screenshots.py`, or name the
 shots to retake, e.g. `... chirp pluck`.

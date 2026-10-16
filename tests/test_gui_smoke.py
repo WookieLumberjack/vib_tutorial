@@ -2290,3 +2290,57 @@ def test_rotor_theory_figures_follow_the_theme(app):
     finally:
         style.set_theme(before)
         browser.deleteLater()
+
+
+def test_frame_stats_summarize_the_frames():
+    from vib_tutorial.gui.frame_stats import FrameStats
+
+    stats = FrameStats()
+    for i in range(11):  # every 20 ms, 4 ms of computing; the 5th starts 40 ms late
+        start = 0.02 * i + (0.04 if i >= 5 else 0.0)
+        stats.record("Page", start, 0.004, sim_t=0.01 * i, target=0.016)
+        stats.paint(0.001)
+        stats.paint(0.002)  # every repaint until the next frame counts
+    s = stats.summary()
+    assert s["frames"] == 10  # the last frame's paint is still to come
+    assert s["work_med"] == pytest.approx(4.0) and s["paint_med"] == pytest.approx(3.0)
+    assert s["late"] == pytest.approx(1 / 9)  # 60 ms > 1.5 x 16 ms; the first has no interval
+    assert s["fps"] == pytest.approx(9 / 0.22)
+    assert s["sim_speed"] == pytest.approx(0.09 / 0.22)
+    stats.record("Page", 10.0, 0.004, None, 0.016)  # after a pause: no interval
+    assert np.isnan(stats.frames["Page"][-1].interval)
+
+
+def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path):
+    import time
+
+    from vib_tutorial.gui import frame_stats
+    from vib_tutorial.gui.main_window import MainWindow
+
+    monkeypatch.delenv(frame_stats.ENV, raising=False)
+    w = MainWindow()
+    assert w.frame_overlay is None and frame_stats.STATS is None
+    w._timer.stop()  # or its frames would count with the next window's
+    w.close()
+
+    log = tmp_path / "frames.csv"
+    monkeypatch.setenv(frame_stats.ENV, str(log))
+    w = MainWindow()
+    try:
+        w._timer.stop()
+        w.show()
+        for _ in range(6):
+            time.sleep(0.02)  # a frame's worth of time, so there's something new to draw
+            w._frame()
+            w._timer.stop()
+            for _ in range(2):  # the repaint the frame asked for (posted while the first pass runs)
+                app.processEvents()
+        w.frame_overlay.refresh()
+        text = w.frame_overlay.text()
+        assert text.startswith("Simulation") and "fps" in text and "sim speed" in text
+        rows = log.read_text().splitlines()
+        assert rows[0].startswith("wall_s,page") and len(rows) >= 5
+        assert all(float(r.split(",")[4]) > 0 for r in rows[2:])  # each frame's repaint was timed
+    finally:
+        frame_stats.uninstall()
+        w.close()

@@ -51,6 +51,7 @@ from ..core.identification import (
     peak_picking,
 )
 from ..core.measurement import AA_CUTOFF, FORCE_RMS, IMPACT_PEAK, SINE_AMPLITUDE
+from . import frame_stats
 from .axes import log_axes
 from .modal_extraction import EXTRACTION_THEORY_HTML, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
@@ -497,7 +498,7 @@ class ModalTestPage(QtWidgets.QWidget):
         self.held: tuple[np.ndarray, np.ndarray, MeasurementSettings] | None = None  # (freqs, H, settings)
         self._timer = QtCore.QTimer(self)
         self._timer.setInterval(FRAME_MS)
-        self._timer.timeout.connect(self._measure_some)
+        self._timer.timeout.connect(self._measure_frame)
         self._clock = QtCore.QElapsedTimer()
         # Paced playback: the record being drawn, and how much of it (s) is shown so far.
         self._live: Estimate | None = None
@@ -952,6 +953,10 @@ class ModalTestPage(QtWidgets.QWidget):
         self._measure_some()
         if self.running and self.isVisible():
             self._timer.start()
+
+    def _measure_frame(self) -> None:
+        with frame_stats.frame("Virtual modal test", target_ms=FRAME_MS):
+            self._measure_some()
 
     def _measure_some(self) -> None:
         if self.acq is None:
