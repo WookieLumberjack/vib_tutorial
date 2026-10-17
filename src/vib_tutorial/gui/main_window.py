@@ -32,7 +32,7 @@ from .history import History
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, PhasorPanel, TimeHistoryPlot
-from . import frame_stats, theming
+from . import frame_stats, settle_plots, theming
 from .style import SYSTEM, colors
 
 FRAME_MS = 16  # ~60 fps
@@ -758,6 +758,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.pages.currentWidget() is self.sim_page:
                 with frame_stats.frame("Simulation", lambda: self.sim.t, FRAME_MS):
                     self._tick()
+                    settle_plots(self.sim_page)
             else:
                 self._tick()
         finally:

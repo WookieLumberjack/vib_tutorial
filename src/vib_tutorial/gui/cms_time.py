@@ -13,7 +13,7 @@ from PySide6 import QtCore, QtWidgets
 
 from ..core import CMSModel, ForceController, ForceKind, ForceSettings, ModalResult
 from ..core.cms_response import CMSResponse
-from . import frame_stats
+from . import frame_stats, settle_plots
 from .animation import ChainView
 from .panels import spin
 from .style import colors
@@ -234,6 +234,7 @@ class CMSRunView(QtWidgets.QWidget):
         self._last = now
         with frame_stats.frame("Substructuring time response", lambda: self.sim.t if self.sim else None, FRAME_MS):
             self.step(dt * float(self.speed.currentData()))
+            settle_plots(self)
         if self.sim is not None and self.isVisible():
             self._timer.start()
 

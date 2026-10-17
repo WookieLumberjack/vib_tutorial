@@ -59,6 +59,20 @@ def close_graphics(widget) -> None:
         view.close()
 
 
+def settle_plots(widget) -> None:
+    """Apply the new view ranges of the plots showing in `widget` now, at the end of a frame.
+
+    pyqtgraph defers a range change to the start of the next paint, where moving the items
+    to it marks them dirty again, so every plot whose range a frame changes (the strip
+    charts scroll, the orbits rescale) was painted twice. Call it after a frame's drawing.
+    """
+    import pyqtgraph as pg
+
+    for view in widget.findChildren(pg.GraphicsView):
+        if view.isVisible():
+            view.scene().prepareForPaint()
+
+
 def _preload_scipy() -> None:
     """Import the SciPy modules that only the Virtual modal test uses.
 

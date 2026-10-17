@@ -2406,6 +2406,56 @@ def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path)
         w.close()
 
 
+def test_rotor_plots_paint_once_per_frame(app):
+    """The orbits rescale and the strip charts scroll every frame: each paints once per frame, not twice
+    (a range applied at the start of the paint marked the items dirty again, and a narrower tick label
+    re-laid the orbits out). And the Bode plot, whose marker stands still at a steady speed, doesn't
+    repaint."""
+    import time
+
+    import pyqtgraph as pg
+
+    from vib_tutorial.core.rotor import RPM
+    from vib_tutorial.gui.main_window import MainWindow
+
+    class Paints(QtCore.QObject):
+        n = 0
+
+        def eventFilter(self, obj, event):  # noqa: N802 (Qt override)
+            if event.type() == QtCore.QEvent.Type.Paint:
+                self.n += 1
+            return False
+
+    def run(seconds):
+        end = time.perf_counter() + seconds
+        while time.perf_counter() < end:
+            app.processEvents()
+            time.sleep(0.001)
+
+    w = MainWindow()
+    w.resize(1700, 900)
+    w.show()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    page._refresh_analysis()
+    page.tabs.setCurrentWidget(page.bode.parentWidget())
+    page.sim.omega = page.sim.target = page.target_rpm.value() / RPM  # at speed: the marker stands still
+    run(1.0)
+    views = {type(v).__name__: v for v in page.findChildren(pg.GraphicsView) if v.isVisible()}
+    counts = {name: Paints() for name in ("OrbitPlots", "TimePlots", "BodePlots")}
+    for name, c in counts.items():
+        views[name].viewport().installEventFilter(c)
+    frames = Paints()
+    page._timer.timeout.connect(lambda: setattr(frames, "n", frames.n + 1))
+    run(1.5)
+    page._timer.stop()
+    assert frames.n > 10
+    for name in ("OrbitPlots", "TimePlots"):
+        assert counts[name].n <= frames.n + 1, name
+    assert counts["BodePlots"].n == 0
+    w.close()
+
+
 def test_rotor_analysis_runs_in_the_worker(app, monkeypatch):
     """A parameter change hands the analysis to the worker process, and the page shows it when it's done;
     a change while one runs supersedes it."""

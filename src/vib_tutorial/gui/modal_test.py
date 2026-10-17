@@ -51,7 +51,7 @@ from ..core.identification import (
     peak_picking,
 )
 from ..core.measurement import AA_CUTOFF, FORCE_RMS, IMPACT_PEAK, SINE_AMPLITUDE
-from . import frame_stats
+from . import frame_stats, settle_plots
 from .axes import log_axes
 from .modal_extraction import EXTRACTION_THEORY_HTML, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
@@ -957,6 +957,7 @@ class ModalTestPage(QtWidgets.QWidget):
     def _measure_frame(self) -> None:
         with frame_stats.frame("Virtual modal test", target_ms=FRAME_MS):
             self._measure_some()
+            settle_plots(self)
 
     def _measure_some(self) -> None:
         if self.acq is None:
