@@ -59,6 +59,14 @@ class SweepCurves:
     drawn: int = 0  # revolutions drawn so far
 
 
+def _major_grid(plot: pg.PlotItem) -> None:
+    """A grid on the major ticks only. The marker moves every frame of a run-up, and each move
+    repaints the axes, which draw the grid: the minor lines doubled the plots' paint."""
+    plot.showGrid(x=True, y=True, alpha=0.15)
+    for name in ("left", "bottom"):
+        plot.getAxis(name).setStyle(maxTickLevel=0)
+
+
 def _pen(sweep: TrackedSweep, color: int, width: float = 1.5) -> QtCore.QObject:
     c = colors.mode[SWEEP_COLORS[color % len(SWEEP_COLORS)]]
     return pg.mkPen(c, width=width, style=QtCore.Qt.PenStyle.SolidLine if sweep.up else DASH)
@@ -79,7 +87,7 @@ class BodePlots(pg.GraphicsLayoutWidget):
         self.lag.getAxis("bottom").enableAutoSIPrefix(False)
         self.lag.setXLink(self.amp)
         for p in (self.amp, self.lag):
-            p.showGrid(x=True, y=True, alpha=0.15)
+            _major_grid(p)
             p.setAutoVisible(y=True)
             p.setMenuEnabled(False)
         self.ci.layout.setRowStretchFactor(0, 3)
@@ -89,6 +97,7 @@ class BodePlots(pg.GraphicsLayoutWidget):
         self.steady_lag = self.lag.plot()
         self.here_lines = [pg.InfiniteLine(angle=90) for _ in range(2)]
         self.here_dots = [pg.ScatterPlotItem(size=9) for _ in range(2)]
+        self._here: tuple[float, float, float] | None = None
         for p, line, dot in zip((self.amp, self.lag), self.here_lines, self.here_dots):
             p.addItem(line)
             p.addItem(dot)
@@ -113,6 +122,9 @@ class BodePlots(pg.GraphicsLayoutWidget):
         self.steady_lag.setData(rpm, lag)
 
     def set_here(self, rpm: float, amp: float, lag: float) -> None:
+        if (rpm, amp, lag) == self._here:
+            return  # at a steady speed: don't make the plots repaint every frame for nothing
+        self._here = (rpm, amp, lag)
         for line in self.here_lines:
             line.setValue(rpm)
         self.here_dots[0].setData([rpm], [amp])
@@ -130,7 +142,7 @@ class PolarPlot(pg.PlotWidget):
         p.setMenuEnabled(False)
         p.setLabel("bottom", "In phase with the keyphasor", units="m")
         p.setLabel("left", "Quadrature (down: lagging 90°)", units="m")
-        p.showGrid(x=True, y=True, alpha=0.15)
+        _major_grid(p)
         self.axes = [pg.InfiniteLine(pos=0, angle=a) for a in (0, 90)]
         for line in self.axes:
             p.addItem(line)
@@ -139,6 +151,7 @@ class PolarPlot(pg.PlotWidget):
         p.addItem(self.marks)
         self.mark_labels: list[pg.TextItem] = []
         self.here = pg.ScatterPlotItem(size=9)
+        self._here: complex | None = None
         p.addItem(self.here)
         self.here.setZValue(10)
         self.apply_theme()
@@ -179,7 +192,9 @@ class PolarPlot(pg.PlotWidget):
         self.apply_theme()
 
     def set_here(self, value: complex) -> None:
-        self.here.setData([value.real], [value.imag])
+        if value != self._here:  # unchanged at a steady speed: no repaint
+            self._here = value
+            self.here.setData([value.real], [value.imag])
 
 
 class SweepPlots:

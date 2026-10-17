@@ -54,7 +54,7 @@ from ..core.rotor_balance import SteadyMeasurement
 from ..core.rotor_presets import rotor_presets
 from ..core.rotor_stability import AsymmetryChart, Onset, full_spectrum, least_damped
 from ..core.rotor_waterfall import Waterfall
-from . import frame_stats
+from . import frame_stats, settle_plots
 from .cms_time import SampleBuffer
 from .panels import spin
 from .rotor_balance import BalancingPanel
@@ -634,8 +634,10 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
             p.setMenuEnabled(False)
             p.setLabel("bottom", "x", units="m")
             p.setLabel("left", "y", units="m")
-            p.getAxis("bottom").setStyle(maxTickLevel=0)
-            p.getAxis("left").setStyle(maxTickLevel=0)
+            # Not narrowing the axes when the labels do: as the orbits rescale each frame, a
+            # narrower label would re-lay out the plots (and paint them again).
+            p.getAxis("bottom").setStyle(maxTickLevel=0, autoReduceTextSpace=False)
+            p.getAxis("left").setStyle(maxTickLevel=0, autoReduceTextSpace=False)
             for angle in (0, 90):
                 line = pg.InfiniteLine(pos=0, angle=angle)
                 p.addItem(line)
@@ -2361,6 +2363,7 @@ class RotorPage(QtWidgets.QWidget):
         speed = float(self.sim_speed.currentData())
         with frame_stats.frame("Jeffcott rotor", lambda: self.sim.t, FRAME_MS):
             self.step(dt * (max(speed, MEASURE_SPEED) if self.measurement is not None else speed), FRAME_BUDGET)
+            settle_plots(self)
         if self.isVisible() and self.running:
             self._timer.start()
 
