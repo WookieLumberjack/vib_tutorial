@@ -70,6 +70,24 @@ def _preload_scipy() -> None:
     import scipy.signal  # noqa: F401
 
 
+def _analysis_worker_runs(timeout: float = 60.0) -> bool:
+    """True if the rotor page's analysis process starts and answers (in a packaged app it's the app itself)."""
+    from ..core.rotor import RotorSystem
+    from ..core.rotor_analysis import AnalysisWorker
+
+    worker = AnalysisWorker()
+    try:
+        ticket = worker.submit(RotorSystem(), 6000.0)
+        end = time.perf_counter() + timeout
+        while time.perf_counter() < end:
+            if worker.result(ticket) is not None:
+                return worker.running  # not worked out here, because the process didn't start
+            time.sleep(0.05)
+        return False
+    finally:
+        worker.close()
+
+
 def record_startup(window, path: str, launched_at: float | None = None) -> None:
     """Write how long startup took to `path` (JSON) once `window` first paints.
 
@@ -118,6 +136,8 @@ def run() -> int:
         from .rotor_figures import FIGURES, render  # the rotor page is built lazily: check QtSvg is packaged
 
         if any(render(build()).isNull() for build in FIGURES.values()):
+            return 1
+        if not _analysis_worker_runs():
             return 1
         QtCore.QTimer.singleShot(2000, app.quit)
     code = app.exec()

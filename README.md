@@ -904,6 +904,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/rotor_balance.py`: single- and two-plane balancing: influence coefficient and matrix,
   correction weights, and `SteadyMeasurement`, which runs the stepper at a speed, lets it settle and averages the
   1X vector over some revolutions.
+- `core/rotor_analysis.py`: what the rotor page works out when its parameters change (the
+  Campbell diagram, the stability onset, the steady states: `analyse`), and `AnalysisWorker`,
+  which runs it in a process of its own so the animation keeps going meanwhile.
 - `core/rotor_presets.py`: the rotor page's presets, each a `RotorSystem` with a speed range
   and a note.
 - `core/rotor_stability.py`: the least damped mode, the onset speed of instability (swept,

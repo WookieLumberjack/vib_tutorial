@@ -2344,3 +2344,42 @@ def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path)
     finally:
         frame_stats.uninstall()
         w.close()
+
+
+def test_rotor_analysis_runs_in_the_worker(app, monkeypatch):
+    """A parameter change hands the analysis to the worker process, and the page shows it when it's done;
+    a change while one runs supersedes it."""
+    import time
+
+    from vib_tutorial.core.rotor_analysis import analyse
+    from vib_tutorial.gui import rotor as rotor_page
+
+    p = rotor_page.RotorPage()
+
+    def settle():
+        p._analysis_timer.stop()
+        p._start_analysis()
+        end = time.perf_counter() + 60.0
+        while p._job is not None and time.perf_counter() < end:
+            app.processEvents()
+            time.sleep(0.01)
+        assert p._job is None
+
+    p.gravity.setChecked(not p.gravity.isChecked())
+    shown = p.campbell
+    settle()
+    assert p.campbell is not shown
+    expected = analyse(p.sim.system, p.top_rpm)
+    assert p.campbell.criticals == expected.campbell.criticals
+    assert np.allclose(p._steady_vectors, expected.steady_orders[0], rtol=1e-12, atol=1e-18)
+
+    # Superseded: the worker drops the old job, and the page shows the rotor it has now.
+    monkeypatch.setattr(rotor_page, "RESTART_S", 0.0)
+    p.unbalance.setValue(p.unbalance.value() * 2.0)
+    p._analysis_timer.stop()
+    p._start_analysis()
+    first = p._job[2]
+    p.gravity.toggle()
+    settle()
+    assert rotor_page.WORKER.lost(first)
+    assert p.campbell.criticals == analyse(p.sim.system, p.top_rpm).campbell.criticals

@@ -5,6 +5,7 @@ import math
 import numpy as np
 import pytest
 
+from vib_tutorial.core import rotor
 from vib_tutorial.core.fluid_bearing import JournalBearing
 from vib_tutorial.core.rotor import (
     RPM,
@@ -175,3 +176,19 @@ def test_heavier_loaded_films_whirl_later():
     assert round(stability_onset(s, 10_000.0 / RPM).omega * RPM) == 4358
     q = ON_FILMS.static_deflection(0.0)
     assert (round(q[XA] * 1e6, 1), round(q[YA] * 1e6, 1)) == (4.8, -12.6)
+
+
+def test_film_terms_are_cached_per_speed():
+    """A sweep asks for each speed's film terms several times: they're kept, read-only, and match a fresh copy."""
+    s = ON_FILMS.with_()
+    w = 3000.0 / RPM
+    Kf, Cf, p = s._film_terms(w)
+    assert s._film_terms(-w)[0] is Kf  # the films don't care which way it spins
+    assert not Kf.flags.writeable and not p.flags.writeable
+    fresh = s.with_()._new_film_terms(w)
+    for a, b in zip((Kf, Cf, p), fresh, strict=True):
+        assert np.array_equal(a, b)
+    for x in np.linspace(100.0, 9000.0, 300) / RPM:
+        s.stiffness(x)
+    assert len(s.__dict__["_film_terms_at"]) <= rotor.CACHE_TERMS
+    assert len(s.__dict__["_film_states"]) == 301

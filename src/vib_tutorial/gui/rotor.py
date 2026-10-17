@@ -37,8 +37,6 @@ from ..core.rotor import (
     Campbell,
     RotorSimulator,
     RotorSystem,
-    campbell,
-    steady_harmonics,
     whirl_modes,
 )
 from ..core.rotor_sweep import (
@@ -48,13 +46,13 @@ from ..core.rotor_sweep import (
     TrackedSweep,
     lag_degrees,
     probe,
-    station_motion,
 )
 from ..core.fluid_bearing import JournalBearing
 from ..core.magnetic_bearing import MagneticBearing
+from ..core.rotor_analysis import Analysis, AnalysisWorker, analyse
 from ..core.rotor_balance import SteadyMeasurement
 from ..core.rotor_presets import rotor_presets
-from ..core.rotor_stability import AsymmetryChart, Onset, full_spectrum, least_damped, stability_onset
+from ..core.rotor_stability import AsymmetryChart, Onset, full_spectrum, least_damped
 from ..core.rotor_waterfall import Waterfall
 from . import frame_stats
 from .cms_time import SampleBuffer
@@ -96,7 +94,10 @@ SPRINGS, FILMS, MAGNETS = range(len(SUPPORTS))
 DAMPED = 0.3  # modes with more damping than this are drawn hollow and are not called critical
 DASH = QtCore.Qt.PenStyle.DashLine
 DOT = QtCore.Qt.PenStyle.DotLine
-STEADY_POINTS = 2000  # speeds on the steady-state curve, plus as many again around the criticals
+WORKER = AnalysisWorker()  # shared by every rotor page: one process
+JOB_POLL_MS = 30  # how often the page checks for a finished analysis
+BUSY_NOTE_S = 0.3  # s an analysis runs before the page says it is working on it
+RESTART_S = 0.5  # s a superseded analysis has run past which the worker drops it rather than see it out
 BEARING_WIDTHS = (56, 56, 50, 50, 46, 56, 40)  # px, the bearing table's columns: kx, ky, cx, cy, m, kxy, λ
 BEARING_GAP = 0.02  # of the span: the closest the disc may be put to a bearing
 RUB = 0.02  # of the span: a whirl this large pauses the simulation (a real rotor would rub)
@@ -1202,11 +1203,18 @@ class RotorPage(QtWidgets.QWidget):
         self._timer.setSingleShot(True)
         self._timer.setInterval(FRAME_MS)
         self._timer.timeout.connect(self._frame)
-        # Parameter edits are applied at once; the Campbell diagram is recomputed once they settle.
+        # Parameter edits are applied at once; the Campbell diagram and the steady states are worked out
+        # once they settle, on a worker thread (seconds, for a turning shaft), and shown when they're done.
         self._analysis_timer = QtCore.QTimer(self)
         self._analysis_timer.setSingleShot(True)
         self._analysis_timer.setInterval(150)
-        self._analysis_timer.timeout.connect(self._refresh_analysis)
+        self._analysis_timer.timeout.connect(self._start_analysis)
+        self._job: tuple[RotorSystem, float, int, float] | None = None  # (system, top rpm, ticket, started)
+        self._busy_noted = False
+        WORKER.start()
+        self._job_timer = QtCore.QTimer(self)
+        self._job_timer.setInterval(JOB_POLL_MS)
+        self._job_timer.timeout.connect(self._poll_analysis)
 
         self._on_params()
         self._refresh_analysis()
@@ -1810,13 +1818,54 @@ class RotorPage(QtWidgets.QWidget):
                 f"{system.nodes.size - 1} elements, reduced to the stations and {held}")
 
     def _refresh_analysis(self) -> None:
-        """The Campbell diagram and critical speeds for the current parameters."""
+        """The Campbell diagram, critical speeds and steady states for the current parameters, at once."""
+        self._show_analysis(self.sim.system, self.top_rpm, analyse(self.sim.system, self.top_rpm))
+
+    def _start_analysis(self) -> None:
+        """Hand the analysis to the worker process; `_poll_analysis` shows it. One job at a time."""
+        if self._job is not None:
+            system, top_rpm, _, started = self._job
+            if system is self.sim.system and top_rpm == self.top_rpm:
+                return
+            if time.perf_counter() - started < RESTART_S:
+                return  # nearly done, likely: `_poll_analysis` starts the new one after it
+            WORKER.restart()  # a turning shaft's: don't wait seconds for a rotor no longer shown
         system = self.sim.system
-        top = self.top_rpm
-        self.campbell = campbell(system, top / RPM, n_modes=8)
-        # With the shaft's mass: the same rotor's Jeffcott model, for comparison.
-        massless = campbell(system.with_(density=0.0), top / RPM, n_modes=8) if system.density else None
-        self.onset = stability_onset(system, top / RPM)
+        self._job = (system, self.top_rpm, WORKER.submit(system, self.top_rpm), time.perf_counter())
+        self._busy_noted = False
+        self._job_timer.start()
+
+    def _poll_analysis(self) -> None:
+        if self._job is None:
+            self._job_timer.stop()
+            return
+        system, top_rpm, ticket, started = self._job
+        if WORKER.lost(ticket):  # another page restarted the worker
+            self._job = None
+            self._start_analysis()
+            return
+        try:
+            analysis = WORKER.result(ticket)
+        except RuntimeError:
+            self._job = None  # the next change starts another
+            self._job_timer.stop()
+            raise
+        if analysis is None:
+            if time.perf_counter() - started > BUSY_NOTE_S and not self._busy_noted:
+                self._busy_noted = True
+                self.crit_label.setText("<b>Critical speeds</b>: working them out for the new parameters…")
+            return
+        self._job = None
+        self._job_timer.stop()
+        if system is not self.sim.system or top_rpm != self.top_rpm:
+            self._start_analysis()  # the parameters changed while it ran: start again on the new ones
+            return
+        self._show_analysis(system, top_rpm, analysis)
+
+    def _show_analysis(self, system: RotorSystem, top: float, analysis: Analysis) -> None:
+        self.campbell = analysis.campbell
+        massless = analysis.massless
+        self.onset = analysis.onset
         self.bearing_panel.set_onset(self.onset if system.films else None)
         self.magnet_panel.set_onset(self.onset if system.magnets else None)
         iso = _isotropic(system)
@@ -1856,7 +1905,12 @@ class RotorPage(QtWidgets.QWidget):
         )
         self._matrices_speed = -math.inf
         self._refresh_matrices()
-        self._refresh_steady()
+        self._steady_rpm = analysis.steady_rpm
+        self._steady_orders = analysis.steady_orders
+        self._steady_vectors = self._steady_orders[0]
+        self._draw_tracking(full=True)
+        self.balancing.rotor_changed()
+        self.balancing.refresh()
 
     def _onset_text(self) -> str:
         o = self.onset
@@ -1929,24 +1983,6 @@ class RotorPage(QtWidgets.QWidget):
         self.asymmetry_plot.set_chart(chart)
         if chart.done or self._frames % SPECTRUM_FRAMES == 0:
             self.stability_note.setText(self._stability_note())
-
-    def _refresh_steady(self) -> None:
-        """The steady-state 1X vectors at every station, finely around each critical speed."""
-        w = [np.linspace(self.top_rpm / STEADY_POINTS, self.top_rpm, STEADY_POINTS) / RPM]
-        crits = [c for c, _, _ in self.campbell.criticals] if self.campbell else []
-        system = self.sim.system
-        if system.periodic and system.gravity:
-            # Gravity's 2X peaks near half of each (and a breathing crack's 3X near a third).
-            crits += [c / k for c in crits for k in ((2, 3) if system.spacing == 1 else (2,))]
-        w += [np.linspace(0.8 * c, 1.2 * c, STEADY_POINTS // max(len(crits), 1)) for c in crits]
-        w = np.unique(np.concatenate(w))
-        self._steady_rpm = w * RPM
-        V = steady_harmonics(system, w, len(ORDER_NAMES))[1]
-        self._steady_orders = [station_motion(system, V[:, k]) for k in range(len(ORDER_NAMES))]
-        self._steady_vectors = self._steady_orders[0]
-        self._draw_tracking(full=True)
-        self.balancing.rotor_changed()
-        self.balancing.refresh()
 
     def _on_bearing_tab(self, kind: int) -> None:
         if self.supports.currentIndex() == kind:

@@ -154,6 +154,8 @@ kick to the velocities at mid-step, between two exact half steps of the rest.
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import cached_property, lru_cache
 from typing import NamedTuple
@@ -195,6 +197,25 @@ def _edge_crack_factor(s: np.ndarray, bending: bool) -> np.ndarray:
     if bending:
         return root * (0.923 + 0.199 * (1.0 - np.sin(x)) ** 4)
     return root * (0.752 + 2.02 * s + 0.37 * (1.0 - np.sin(x)) ** 3)
+
+
+# Speeds a system keeps its films' states for (an analysis refresh asks for ~5,000), and their
+# terms (whole matrices; a sweep asks for each a few times in a row).
+CACHE_STATES = 8192
+CACHE_TERMS = 64
+
+
+def _cached[T](system: RotorSystem, name: str, key: float, make: Callable[[], T], size: int) -> T:
+    """`make()` for speed `key`, kept in the system's cache `name`, the least recently used dropped first."""
+    cache = system.__dict__.setdefault(name, OrderedDict())
+    try:
+        cache.move_to_end(key)
+        return cache[key]
+    except KeyError:
+        value = cache[key] = make()
+        if len(cache) > size:
+            cache.popitem(last=False)
+        return value
 
 
 @lru_cache(maxsize=64)
@@ -919,14 +940,10 @@ class RotorSystem:
 
     def bearing_states(self, omega: float) -> tuple[BearingState | None, BearingState | None]:
         """Each oil film's state at speed Ω under its share of the weight, A then B (None: springs)."""
-        cache = self.__dict__.setdefault("_film_states", {})
         key = abs(float(omega))
-        if key not in cache:
-            if len(cache) > 64:
-                cache.clear()
-            cache[key] = tuple(None if b.film is None else b.film.with_load(abs(w)).on_rotor(key)
-                               for b, w in zip((self.bearing_a, self.bearing_b), self.bearing_loads))
-        return cache[key]
+        return _cached(self, "_film_states", key, lambda: tuple(
+            None if b.film is None else b.film.with_load(abs(w)).on_rotor(key)
+            for b, w in zip((self.bearing_a, self.bearing_b), self.bearing_loads)), CACHE_STATES)
 
     def _film_terms(self, omega: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """(K_f, C_f, p): the films' stiffness and damping at speed Ω, and the load that holds them there.
@@ -936,19 +953,26 @@ class RotorSystem:
         W its share of the weight held up. So it adds K_f to the stiffness and the
         constant p = W + K_f q_J to the load (with gravity, beside f_g): the rotor
         then rests with its journals on the film's locus.
+
+        Cached per speed, read-only: a sweep asks for each speed several times.
         """
+        return _cached(self, "_film_terms_at", abs(float(omega)), lambda: self._new_film_terms(omega), CACHE_TERMS)
+
+    def _new_film_terms(self, omega: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         n = self.n_dof
         Kf, Cf, p = np.zeros((n, n)), np.zeros((n, n)), np.zeros(n)
         for j, b, w, st in zip((XA, XB), (self.bearing_a, self.bearing_b), self.bearing_loads,
                                self.bearing_states(omega)):
             if st is None:
                 continue
-            d = [j, j + 4]
-            Kf[np.ix_(d, d)] = st.k
-            Cf[np.ix_(d, d)] = st.c
+            d = slice(j, j + 5, 4)  # [x, y] of the journal
+            Kf[d, d] = st.k
+            Cf[d, d] = st.c
             # An upward pull mirrors the journal through the centre; the coefficients stay the same.
             q_j = math.copysign(b.film.clearance, w) * np.array(st.position())
             p[d] = np.array([0.0, w]) + st.k @ q_j
+        for a in (Kf, Cf, p):
+            a.flags.writeable = False
         return Kf, Cf, p
 
     def stiffness(self, omega: float) -> np.ndarray:
