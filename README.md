@@ -926,7 +926,11 @@ To measure the frame rate on your own display, start the app with `VIB_FRAME_STA
 (e.g. `VIB_FRAME_STATS=1 uv run vib-tutorial`): an overlay in the corner shows the running
 page's frames per second, the time each frame spends computing and painting (median and 95th
 percentile) against the display's refresh, the share of late frames, and the simulation's speed
-against real time. `VIB_FRAME_STATS=frames.csv` also logs every frame to that file.
+against real time. `VIB_FRAME_STATS=frames.csv` also logs every frame to that file, with
+what was on screen (page, sub-tab, rotor preset, window size, display scale and refresh rate)
+and what you clicked, typed or picked in between. `uv run python scripts/frame_report.py
+frames.csv` then summarizes it by view and input: frames per second, computing and drawing
+time for each.
 
 `scripts/readme_screenshots.py` regenerates the images in `docs/images` (offscreen, each in
 the state its caption describes): `uv run python scripts/readme_screenshots.py`, or name the
