@@ -226,17 +226,18 @@ class CMSRunView(QtWidgets.QWidget):
             self._clock.restart()
             self._last = 0.0
             self._target = self.sim.t
-            self._timer.start()
+            self._timer.start(FRAME_MS)
 
     def _frame(self) -> None:
-        now = self._clock.elapsed() / 1000.0
+        began = self._clock.elapsed()
+        now = began / 1000.0
         dt = min(now - self._last, 0.1)
         self._last = now
         with frame_stats.frame("Substructuring time response", lambda: self.sim.t if self.sim else None, FRAME_MS):
             self.step(dt * float(self.speed.currentData()))
             settle_plots(self)
-        if self.sim is not None and self.isVisible():
-            self._timer.start()
+        if self.sim is not None and self.isVisible():  # the next frame FRAME_MS after this one began
+            self._timer.start(max(1, FRAME_MS - (self._clock.elapsed() - began)))
 
     def step(self, duration: float) -> None:
         """Advance both models by `duration` s of simulated time and redraw."""
