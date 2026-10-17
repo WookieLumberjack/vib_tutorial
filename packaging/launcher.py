@@ -2,4 +2,5 @@
 
 from vib_tutorial import main
 
-main()
+if __name__ == "__main__":  # main() first hands a worker process (the rotor page's analysis) its job
+    main()
