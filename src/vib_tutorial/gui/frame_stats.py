@@ -290,6 +290,8 @@ class InputLog(QtCore.QObject):
         """The control `obj` belongs to (a spin box's line edit, a plot's viewport), if it's in the window."""
         widget = obj if isinstance(obj, QtWidgets.QWidget) else None
         while widget is not None:
+            if isinstance(widget, QtWidgets.QScrollBar):
+                return None  # scrolling a panel, not a setting
             if isinstance(widget, self.KINDS):
                 if isinstance(widget, QtWidgets.QLineEdit) and isinstance(widget.parentWidget(),
                                                                           (QtWidgets.QAbstractSpinBox,
@@ -350,8 +352,8 @@ def _label(widget: QtWidgets.QWidget) -> str:
     w = widget
     for _ in range(3):  # the control itself, or the box of controls it is in
         parent = w.parentWidget()
-        if parent is None:
-            break
+        if parent is None or isinstance(w, QtWidgets.QGroupBox):
+            break  # not past its group: the label before a group box is someone else's
         layout = parent.layout()
         found = _holding(layout, w) if layout is not None else None
         if isinstance(layout, QtWidgets.QFormLayout) and (label := _form_label(layout, w)):
