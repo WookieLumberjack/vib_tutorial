@@ -184,10 +184,28 @@ def test_decimation_keeps_extremes():
 
     t = np.linspace(0, 10, 50_000)
     y = np.column_stack([np.sin(40 * t), np.cos(7 * t), np.where(np.abs(t - 5) < 0.01, 1.0, 0.0)])
-    idx = decimation_index(y, 3000)
-    assert idx.size <= 3000
-    np.testing.assert_array_equal(y[idx].max(axis=0), y.max(axis=0))
-    np.testing.assert_array_equal(y[idx].min(axis=0), y.min(axis=0))
+    picks = decimation_index(y, 3000)
+    for c, idx in enumerate(picks):
+        assert idx.size <= 3000
+        assert y[idx, c].max() == y[:, c].max() and y[idx, c].min() == y[:, c].min()
+
+
+def test_decimation_keeps_each_curves_own_extremes_per_bucket():
+    """A fast sine beside a slow one: every bucket's min and max of each curve are among its own points."""
+    import numpy as np
+
+    from vib_tutorial.gui.plots import decimation_index
+
+    t = np.linspace(0, 10, 100_000)
+    y = np.column_stack([np.sin(2 * np.pi * 12 * t), np.sin(2 * np.pi * 0.5 * t)])
+    picks = decimation_index(y, 1500)  # ~750 buckets of 133 samples, ~1.6 per cycle of the fast one
+    b = math.ceil(1.2 * math.ceil(2 * len(t) / 1500))
+    for c, idx in enumerate(picks):
+        bucket = idx // b
+        for j in range(len(t) // b):
+            mine = y[idx[bucket == j], c]
+            whole = y[j * b : (j + 1) * b, c]
+            assert mine.max() == whole.max() and mine.min() == whole.min()
 
 
 def test_decimator_cache_matches_a_fresh_pass():
@@ -203,15 +221,15 @@ def test_decimator_cache_matches_a_fresh_pass():
         end = min(end + int(rng.integers(0, 3000)), len(y))
         start = max(start, end - int(rng.integers(20_000, 60_000)))
         w = y[start:end]
-        idx = cached.index(start, len(w), w.__getitem__, 3)
-        assert idx[0] == 0 and idx[-1] == len(w) - 1
+        picks = cached.index(start, len(w), w.__getitem__, 3)
         if len(w) > 3000:
-            assert idx.size <= 3000
             fresh = Decimator(3000)  # same buckets, nothing cached
-            fresh.bucket, fresh.picks = cached.bucket, np.empty((0, 7), dtype=np.intp)
-            np.testing.assert_array_equal(idx, fresh.index(start, len(w), w.__getitem__, 3))
-        np.testing.assert_array_equal(w[idx].max(axis=0), w.max(axis=0))
-        np.testing.assert_array_equal(w[idx].min(axis=0), w.min(axis=0))
+            fresh.bucket, fresh.picks = cached.bucket, np.empty((0, 6), dtype=np.intp)
+            for a, b in zip(picks, fresh.index(start, len(w), w.__getitem__, 3), strict=True):
+                np.testing.assert_array_equal(a, b)
+        for c, idx in enumerate(picks):
+            assert idx[0] == 0 and idx[-1] == len(w) - 1 and (len(w) <= 3000 or idx.size <= 3000 + 6)  # the edges add a few
+            assert w[idx, c].max() == w[:, c].max() and w[idx, c].min() == w[:, c].min()
 
 
 def test_history_offset_numbers_samples():
@@ -630,6 +648,18 @@ def test_modal_coordinates_view(app):
     w.close()
 
 
+def _energy_rows(w):
+    """The energy curves' whole rows (not the decimated points each curve shows), checked against the curves."""
+    import numpy as np
+
+    t, *rows = w.history.window(w.controls.window.value())
+    y = w._plot_values(*rows)(slice(None))
+    for i, c in enumerate(w.time_plot.x_curves):
+        tc, yc = c.getData()
+        np.testing.assert_array_equal(yc, y[np.searchsorted(t, tc), i])
+    return y[:, :-1].T
+
+
 def test_energy_time_history(app):
     import numpy as np
 
@@ -644,7 +674,7 @@ def test_energy_time_history(app):
     for _ in range(5):
         w._sim_target = w.sim.t + 0.2
         w._tick()
-    T, V, stored, added, work, dissipated, rubbed = (c.getData()[1] for c in w.time_plot.x_curves)
+    T, V, stored, added, work, dissipated, rubbed = _energy_rows(w)
     assert added.max() > 0 and np.abs(work).max() == 0.0 and dissipated[-1] > 0 and rubbed.max() == 0.0
     np.testing.assert_allclose(added + work, stored + dissipated, rtol=0, atol=1e-12)
     # The balance still closes across a parameter edit (T, V use the parameters of the time),
@@ -655,7 +685,7 @@ def test_energy_time_history(app):
         w._sim_target = w.sim.t + 0.2
         w._tick()
     assert w.sim.system.friction[1] == 0.05
-    T, V, stored, added, work, dissipated, rubbed = (c.getData()[1] for c in w.time_plot.x_curves)
+    T, V, stored, added, work, dissipated, rubbed = _energy_rows(w)
     assert rubbed[-1] > 0
     np.testing.assert_allclose(added + work, stored + dissipated + rubbed, rtol=0, atol=1e-12)
     # Changing the number of masses keeps the energy curves.
@@ -2365,6 +2395,12 @@ def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path)
         inputs = [r["detail"] for r in rows if r["kind"] == "input"]
         assert inputs[0].startswith("1 m [kg]: ") and inputs[1:] == ["tab: Jeffcott rotor", "Gravity: on"]
         assert rows[-1]["kind"] == "view" and rows[-1]["detail"].startswith("Jeffcott rotor > [Custom] > ")
+        # A combo alone in its group is named by its tooltip, not by a label outside the group;
+        # scrolling a panel isn't an input.
+        assert frame_stats.describe_input(page.supports, "click") == ("What holds the journals",
+                                                                     "Springs and dampers")
+        bars = w.findChildren(QtWidgets.QScrollBar)
+        assert bars and all(w.frame_overlay.inputs._control(b) is None for b in bars)
     finally:
         frame_stats.uninstall()
         w.close()
