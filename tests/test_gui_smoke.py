@@ -2456,6 +2456,29 @@ def test_rotor_plots_paint_once_per_frame(app):
     w.close()
 
 
+def test_frame_timers_keep_the_frame_rate(app, monkeypatch):
+    """The rotor and substructuring pages start their next frame FRAME_MS after the last one began: a
+    frame's computing comes out of the wait, not on top of it (16 ms + its work held the rotor at 47 fps)."""
+    import time
+
+    from vib_tutorial.gui import cms_time, rotor
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    w.pages.setCurrentWidget(w.cms_page)
+    w.cms_page.tabs.setCurrentWidget(w.cms_page.time)
+    app.processEvents()
+    for p, frame_ms in ((w.cms_page.time, cms_time.FRAME_MS), (w.rotor_page, rotor.FRAME_MS)):
+        w.pages.setCurrentWidget(p if p is w.rotor_page else w.cms_page)
+        app.processEvents()
+        monkeypatch.setattr(p, "step", lambda *_, **__: time.sleep(0.008))
+        p._frame()
+        assert p._timer.isActive()
+        assert p._timer.remainingTime() <= frame_ms - 7
+    w.close()
+
+
 def test_rotor_analysis_runs_in_the_worker(app, monkeypatch):
     """A parameter change hands the analysis to the worker process, and the page shows it when it's done;
     a change while one runs supersedes it."""
