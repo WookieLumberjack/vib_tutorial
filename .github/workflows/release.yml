@@ -65,7 +65,7 @@ jobs:
         run: uv sync --locked --group build
 
       - name: Run tests
-        run: uv run pytest
+        run: uv run pytest --durations=15
 
       - name: Build
         run: uv run pyinstaller packaging/vib-tutorial.spec --noconfirm
