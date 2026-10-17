@@ -2312,6 +2312,7 @@ def test_frame_stats_summarize_the_frames():
 
 
 def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path):
+    import csv
     import time
 
     from vib_tutorial.gui import frame_stats
@@ -2338,9 +2339,32 @@ def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path)
         w.frame_overlay.refresh()
         text = w.frame_overlay.text()
         assert text.startswith("Simulation") and "fps" in text and "sim speed" in text
-        rows = log.read_text().splitlines()
-        assert rows[0].startswith("wall_s,page") and len(rows) >= 5
-        assert all(float(r.split(",")[4]) > 0 for r in rows[2:])  # each frame's repaint was timed
+        rows = list(csv.DictReader(log.open(encoding="utf-8")))
+        frames = [r for r in rows if r["kind"] == "frame"]
+        assert len(frames) >= 4
+        assert all(float(r["paint_ms"]) > 0 for r in frames[1:])  # each frame's repaint was timed
+        view = next(r for r in rows if r["kind"] == "view")
+        assert view["detail"].startswith("Simulation & modal analysis > Modal analysis | ")
+
+        # What the user does is logged between the frames, with what the control is called.
+        from PySide6.QtTest import QTest
+
+        box = next(b for b in w.params.rows[0] if isinstance(b, QtWidgets.QAbstractSpinBox))
+        box.setFocus()
+        QTest.keyClick(box, QtCore.Qt.Key.Key_Up)
+        bar = w.pages.tabBar()
+        rotor = next(i for i in range(w.pages.count()) if "rotor" in w.pages.tabText(i).lower())
+        QTest.mouseClick(bar, QtCore.Qt.MouseButton.LeftButton, pos=bar.tabRect(rotor).center())
+        for _ in range(3):
+            app.processEvents()
+        page = w.pages.currentWidget()
+        QTest.mouseClick(page.gravity, QtCore.Qt.MouseButton.LeftButton, pos=QtCore.QPoint(8, 8))
+        app.processEvents()
+        w.frame_overlay.refresh()
+        rows = list(csv.DictReader(log.open(encoding="utf-8")))
+        inputs = [r["detail"] for r in rows if r["kind"] == "input"]
+        assert inputs[0].startswith("1 m [kg]: ") and inputs[1:] == ["tab: Jeffcott rotor", "Gravity: on"]
+        assert rows[-1]["kind"] == "view" and rows[-1]["detail"].startswith("Jeffcott rotor > [Custom] > ")
     finally:
         frame_stats.uninstall()
         w.close()

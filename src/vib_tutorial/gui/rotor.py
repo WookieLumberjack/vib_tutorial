@@ -1678,6 +1678,10 @@ class RotorPage(QtWidgets.QWidget):
         self.set_target_rpm(preset.target_rpm)
         self.reset()
 
+    def frame_context(self) -> str:
+        """For the frame log (frame_stats): the preset showing."""
+        return self.preset.currentText()
+
     def _on_preset(self, index: int) -> None:
         if index < len(self.presets):
             self.load_preset(self.presets[index].name)
