@@ -930,7 +930,9 @@ against real time. `VIB_FRAME_STATS=frames.csv` also logs every frame to that fi
 what was on screen (page, sub-tab, rotor preset, window size, display scale and refresh rate)
 and what you clicked, typed or picked in between. `uv run python scripts/frame_report.py
 frames.csv` then summarizes it by view and input: frames per second, computing and drawing
-time for each.
+time for each. `VIB_OPENGL=1` draws the plots through OpenGL instead, to compare (the log's
+views then end in `OpenGL`); the drawing time it shows is then only the CPU's share, so compare
+the frame rates.
 
 `scripts/readme_screenshots.py` regenerates the images in `docs/images` (offscreen, each in
 the state its caption describes): `uv run python scripts/readme_screenshots.py`, or name the
