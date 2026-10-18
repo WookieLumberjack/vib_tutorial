@@ -38,6 +38,8 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from . import opengl
+
 ENV = "VIB_FRAME_STATS"
 WINDOW = 120  # frames the overlay summarizes (~2 s at 60 fps)
 GAP = 0.5  # s between frames that starts a new run (a page shown again, a pause)
@@ -212,7 +214,7 @@ class Overlay(QtWidgets.QLabel):
         window = self.parentWidget()
         screen = window.screen()
         view = (f"{describe_view(window)} | {window.width()}x{window.height()} @{window.devicePixelRatioF():g}x"
-                f" {screen.refreshRate() if screen else 0:.0f} Hz")
+                f" {screen.refreshRate() if screen else 0:.0f} Hz{' OpenGL' if opengl() else ''}")
         if view != self._view:
             self._view = view
             self.stats.note("view", view, page=_page_title(window))
