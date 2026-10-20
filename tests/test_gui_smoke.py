@@ -2516,3 +2516,44 @@ def test_rotor_analysis_runs_in_the_worker(app, monkeypatch):
     settle()
     assert rotor_page.WORKER.lost(first)
     assert p.campbell.criticals == analyse(p.sim.system, p.top_rpm).campbell.criticals
+
+
+def test_simulation_page_keeps_to_its_compute_budget(app, monkeypatch):
+    """A frame takes no more simulator steps than FRAME_BUDGET allows at the cost of a step seen so far,
+    so a slow simulation (friction on a stiff chain) falls behind real time instead of stalling the
+    frames. A new system is measured afresh, with PROBE_STEPS; a dearer step counts at once."""
+    import time
+
+    from vib_tutorial.gui.main_window import FRAME_BUDGET, PROBE_STEPS, MainWindow
+
+    w = MainWindow()
+    w.pages.setCurrentWidget(w.sim_page)
+    w.running = True
+
+    def tick():
+        w._last_wall = w._clock.elapsed() / 1000.0 - 0.1
+        w._sim_target = w.sim.t + 10.0  # far behind: only the caps hold it
+        before = w.sim.t
+        w._tick()
+        return round((w.sim.t - before) / w.sim.step_size())
+
+    w._on_system_changed(w.sim.system)
+    assert w._step_cost == 0.0
+    assert tick() <= PROBE_STEPS
+    assert w._step_cost > 0.0
+
+    advance = w.sim.advance
+
+    def slow(duration):  # 1 ms per step
+        out = advance(duration)
+        time.sleep(1e-3 * out[0].size)
+        return out
+
+    monkeypatch.setattr(w.sim, "advance", slow)
+    tick()
+    assert w._step_cost >= 1e-3  # dearer: taken at once
+    assert tick() <= FRAME_BUDGET / 1e-3 + 1
+    monkeypatch.setattr(w.sim, "advance", advance)
+    tick()
+    assert 0.0 < w._step_cost < 1e-3  # cheaper: gradually
+    w.close()
