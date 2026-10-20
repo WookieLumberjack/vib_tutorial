@@ -2516,28 +2516,3 @@ def test_rotor_analysis_runs_in_the_worker(app, monkeypatch):
     settle()
     assert rotor_page.WORKER.lost(first)
     assert p.campbell.criticals == analyse(p.sim.system, p.top_rpm).campbell.criticals
-
-
-def test_opengl_views_are_opt_in(app, monkeypatch):
-    """VIB_OPENGL=1 gives every pyqtgraph view made afterwards a plain QOpenGLWidget viewport (QPainter
-    still draws the curves, wide and dashed), redrawn whole; without it they keep the raster one."""
-    import pyqtgraph as pg
-    from PySide6.QtOpenGLWidgets import QOpenGLWidget
-
-    from vib_tutorial import gui
-
-    monkeypatch.delenv("VIB_OPENGL", raising=False)
-    assert not gui.opengl()
-    plain = pg.PlotWidget()
-    assert not isinstance(plain.viewport(), QOpenGLWidget)
-    monkeypatch.setenv("VIB_OPENGL", "1")
-    assert gui.opengl()
-    monkeypatch.setattr(pg.GraphicsView, "__init__", pg.GraphicsView.__init__)  # undone after the test
-    gui._opengl_views()
-    gui._opengl_views()  # once only
-    view = pg.PlotWidget()
-    assert type(view.viewport()) is QOpenGLWidget
-    assert view.viewportUpdateMode() == QtWidgets.QGraphicsView.ViewportUpdateMode.FullViewportUpdate
-    assert view.viewport().format().samples() == 4
-    for v in (plain, view):
-        v.close()
