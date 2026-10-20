@@ -20,47 +20,10 @@ def make_app(theme: str | None = None):
     from . import theming
 
     pg.setConfigOptions(antialias=True)
-    if opengl():
-        _opengl_views()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Vibration Tutorial")
     theming.apply(theme or theming.saved_name())
     return app
-
-
-def opengl() -> bool:
-    """Whether the plots draw through OpenGL (`VIB_OPENGL=1`, to compare frame rates; off by default)."""
-    return os.environ.get("VIB_OPENGL", "") not in ("", "0")
-
-
-def _opengl_views() -> None:
-    """Give every pyqtgraph view made from now on an OpenGL viewport (the rotor page's are built lazily).
-
-    A plain QOpenGLWidget, not pyqtgraph's own GL viewport: with that, curves skip QPainter for
-    raw GL lines, which draw 1 device pixel wide (core profiles have no wide lines) and without
-    dashes. With a plain one QPainter draws everything as before, on Qt's GL paint engine, with
-    4× multisampling for the antialiasing. It doesn't keep what it drew between paints, so each
-    paint redraws the whole view.
-    """
-    import pyqtgraph as pg
-    from PySide6 import QtGui, QtWidgets
-    from PySide6.QtOpenGLWidgets import QOpenGLWidget
-
-    init = pg.GraphicsView.__init__
-    if getattr(init, "opengl", False):
-        return
-
-    def gl_init(self, *args, **kwargs):
-        init(self, *args, **kwargs)
-        viewport = QOpenGLWidget()
-        surface = QtGui.QSurfaceFormat()
-        surface.setSamples(4)
-        viewport.setFormat(surface)
-        self.setViewport(viewport)
-        self.setViewportUpdateMode(QtWidgets.QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
-
-    gl_init.opengl = True
-    pg.GraphicsView.__init__ = gl_init
 
 
 def close_graphics(widget) -> None:
