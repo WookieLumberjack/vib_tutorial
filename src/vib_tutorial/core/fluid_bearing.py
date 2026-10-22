@@ -73,6 +73,8 @@ from dataclasses import dataclass, replace
 import numpy as np
 import scipy.optimize
 
+from . import native
+
 GRAVITY = 9.81  # m/s²
 PI2 = math.pi**2
 LIGHTEST = 1e-6  # the least S_s⁻¹ taken: an unloaded bearing is worked out as one this lightly loaded
@@ -252,7 +254,7 @@ def coefficients(eps: float) -> tuple[np.ndarray, np.ndarray]:
     return a, b
 
 
-def pi_film(k: float, c: float, x: float, y: float, vx: float, vy: float, omega: float) -> tuple[float, ...]:
+def pi_film_reference(k: float, c: float, x: float, y: float, vx: float, vy: float, omega: float) -> tuple[float, ...]:
     """The π-film's whole force on the journal, its derivatives and its dissipation, in closed form.
 
     k is `film_scale`, c the clearance, the journal at (x, y) moving at (vx, vy),
@@ -316,6 +318,9 @@ def pi_film(k: float, c: float, x: float, y: float, vx: float, vy: float, omega:
             (crr - ctt) * cp * sp + crt * (cp * cp - sp * sp),
             crr * sp * sp + 2.0 * crt * cp * sp + ctt * cp * cp,
             psi)
+
+
+pi_film = native.kernel("pi_film", pi_film_reference)
 
 
 def full_film_damping(k: float, c: float, x: float, y: float) -> tuple[float, float, float]:

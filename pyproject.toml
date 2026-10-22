@@ -20,8 +20,25 @@ dependencies = [
 vib-tutorial = "vib_tutorial:main"
 
 [build-system]
-requires = ["uv_build>=0.12.17,<0.13.0"]
-build-backend = "uv_build"
+requires = ["maturin>=1.15,<2.0"]
+build-backend = "maturin"
+
+# The Rust kernels (native/) build into vib_tutorial._native; the pure-Python code in
+# vib_tutorial.core stays the reference, and VIB_NATIVE=0 runs it instead.
+[tool.maturin]
+manifest-path = "native/Cargo.toml"
+python-source = "src"
+module-name = "vib_tutorial._native"
+features = ["pyo3/extension-module"]
+
+# Rebuild the package (and so the kernels) on `uv sync` / `uv run` when the Rust changes.
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "native/Cargo.toml" },
+    { file = "native/Cargo.lock" },
+    { file = "native/src/**/*.rs" },
+]
 
 [dependency-groups]
 build = [

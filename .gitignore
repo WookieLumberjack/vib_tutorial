@@ -11,3 +11,8 @@ wheels/
 
 # Tooling
 .pytest_cache/
+
+# Rust kernels: cargo's output, and the module maturin builds into the package
+native/target/
+src/vib_tutorial/_native*.so
+src/vib_tutorial/_native*.pyd

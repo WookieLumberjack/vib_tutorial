@@ -153,6 +153,10 @@ def run() -> int:
             return 1
         if not _analysis_worker_runs():
             return 1
+        from ..core import native
+
+        if native.module is None:  # the build must ship the Rust kernels, not fall back to the Python
+            return 1
         QtCore.QTimer.singleShot(2000, app.quit)
     code = app.exec()
     close_graphics(window)
