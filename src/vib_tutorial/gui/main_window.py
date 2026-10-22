@@ -36,6 +36,8 @@ from . import frame_stats, settle_plots, theming
 from .style import SYSTEM, colors
 
 FRAME_MS = 16  # ~60 fps
+FRAME_BUDGET = 0.012  # s of computing per frame: past it (friction on a stiff chain) the simulation runs slower
+PROBE_STEPS = 200  # steps in a frame while the cost of a step isn't known yet (a new system)
 
 # The pages after the Simulation one, in tab order: (attribute, tab title). Each is
 # imported and built the first time it's opened (MainWindow._page), not at startup.
@@ -411,6 +413,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clock.start()
         self._last_wall = 0.0
         self._sim_target = 0.0
+        self._step_cost = 0.0  # s of computing per simulator step (with the history it feeds); 0 = not known
         # Single-shot timer re-armed after each frame: if a frame runs long, the
         # event loop still gets to handle input before the next one starts.
         self._timer = QtCore.QTimer(self)
@@ -486,6 +489,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_system_changed(self, system: ChainSystem) -> None:
         n_changed = system.n != self.sim.system.n
         self.sim.set_system(system)
+        self._step_cost = 0.0  # friction, or a new size, changes it: measure it afresh
         if n_changed:
             self._apply_dof(system.n)
         else:
@@ -779,6 +783,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sim_target += dt * speed
             # If the simulator can't keep up (very stiff system), drop the backlog.
             self._sim_target = min(self._sim_target, self.sim.t + 0.25 * speed + 0.05)
+            # And take no more steps than FRAME_BUDGET allows at the cost seen so far: a slow
+            # simulation then falls behind real time (the overlay's sim speed) instead of stalling the frames.
+            steps = FRAME_BUDGET / self._step_cost if self._step_cost else PROBE_STEPS
+            self._sim_target = min(self._sim_target, self.sim.t + max(1.0, steps) * self.sim.step_size())
+            began = time.perf_counter()
             ts, xs, vs, fs = self.sim.advance(self._sim_target - self.sim.t)
             system = self.sim.system
             # With ground motion fs is x_g; the springs and dampers see the motion relative to it.
@@ -792,6 +801,9 @@ class MainWindow(QtWidgets.QMainWindow):
             energy = np.column_stack([kinetic, potential, self.sim.ledger])
             forces = np.hstack(element_forces(system, xr, vr))
             self.history.extend(ts, xs, vs, fs, energy, forces, np.column_stack([xg, vg]))
+            if ts.size:  # a dearer step counts at once, a cheaper one gradually
+                cost = (time.perf_counter() - began) / ts.size
+                self._step_cost = cost if cost > self._step_cost else 0.8 * self._step_cost + 0.2 * cost
         if self.force.active != self._force_active:  # e.g. a chirp reached its end
             self._force_active = self.force.active
             self.force_panel.refresh()
