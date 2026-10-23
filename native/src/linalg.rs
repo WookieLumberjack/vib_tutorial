@@ -551,6 +551,20 @@ pub fn expm_foh(a: &Mat, b: &Mat, h: f64) -> (Mat, Mat, Mat) {
     )
 }
 
+/// e^A, balanced first (`balance`): for matrices as badly scaled as a chain's or a rotor's A h.
+pub fn expm_balanced(a: &Mat) -> Mat {
+    let n = a.rows;
+    let mut t = a.clone();
+    let d = balance(&mut t, &mut Mat::zeros(n, 0));
+    let mut e = expm(&t);
+    for (i, di) in d.iter().enumerate() {
+        for (j, dj) in d.iter().enumerate() {
+            e.data[i * n + j] *= di / dj;
+        }
+    }
+    e
+}
+
 type Array<'py> = Bound<'py, numpy::PyArray2<f64>>;
 
 fn to_numpy<'py>(py: Python<'py>, m: Mat) -> PyResult<Array<'py>> {
