@@ -3,6 +3,7 @@
 
 use std::f64::consts::PI;
 
+use numpy::ndarray::Array2;
 use numpy::{PyReadonlyArray1, PyReadonlyArray2, PyReadwriteArray2};
 
 use crate::linalg::{Mat, dot, expm_foh, max_abs, solve};
@@ -406,9 +407,11 @@ impl FilmSteps {
     /// `_film_steps_reference`'s loop: from the state z, steps to the speeds w1 (Ω was omega0 at z) under
     /// the loads u0 (before the first step) and u (n × n_dof, after each), writing q into `out`'s rows.
     /// Takes the bound where it first steps and afresh as the journals drift; returns the last state.
+    /// Steps without the GIL, so other threads run meanwhile.
     #[allow(clippy::too_many_arguments)]
     fn steps(
         &mut self,
+        py: Python<'_>,
         z: Vec<f64>,
         u0: PyReadonlyArray1<f64>,
         u: PyReadonlyArray2<f64>,
@@ -416,7 +419,7 @@ impl FilmSteps {
         omega0: f64,
         mut out: PyReadwriteArray2<f64>,
     ) -> PyResult<Vec<f64>> {
-        let (u0, u, w1) = (u0.as_array(), u.as_array(), w1.as_array());
+        let (u0, u, w1) = (u0.as_array().to_vec(), u.as_array().to_owned(), w1.as_array().to_vec());
         let mut out = out.as_array_mut();
         let ns = self.a.rows;
         let (n, nu) = u.dim();
@@ -426,41 +429,46 @@ impl FilmSteps {
                 "the state, loads or output don't match the matrices",
             ));
         }
-        let mut z = z;
-        if self.bound.is_none() {
-            self.take(&z);
-        }
-        let m = self.m();
-        let mut r = self.remainder(&z, omega0);
-        let (mut last, mut older) = (r.clone(), r.clone());
         let n_out = out.ncols();
-        let mut zb = vec![0.0; ns];
-        let mut before = u0.to_vec();
-        for j in 0..n {
-            if self.drifted(&z) {
+        let (z, qs) = py.detach(|| {
+            let mut qs = Array2::zeros((n, n_out));
+            let mut z = z;
+            if self.bound.is_none() {
                 self.take(&z);
-                r = self.remainder(&z, if j > 0 { w1[j - 1] } else { omega0 });
-                (last, older) = (r.clone(), r.clone());
             }
-            let t = self.bound.as_ref().unwrap();
-            let after = u.row(j).to_vec();
-            zb.fill(0.0);
-            t.phi.mul_add(&z, &mut zb);
-            t.g0.mul_add(&before, &mut zb);
-            t.g1.mul_add(&after, &mut zb);
-            t.r0.mul_add(&r, &mut zb);
-            // r on the parabola through the last three steps
-            let guess: Vec<f64> = (0..m).map(|i| 3.0 * (r[i] - last[i]) + older[i]).collect();
-            let new = self.solve(&zb, guess, w1[j]);
-            (older, last, r) = (last, r, new);
-            let t = self.bound.as_ref().unwrap();
-            z.copy_from_slice(&zb);
-            t.r1.mul_add(&r, &mut z);
-            for (i, v) in z.iter().take(n_out).enumerate() {
-                out[[j, i]] = *v;
+            let m = self.m();
+            let mut r = self.remainder(&z, omega0);
+            let (mut last, mut older) = (r.clone(), r.clone());
+            let mut zb = vec![0.0; ns];
+            let mut before = u0;
+            for j in 0..n {
+                if self.drifted(&z) {
+                    self.take(&z);
+                    r = self.remainder(&z, if j > 0 { w1[j - 1] } else { omega0 });
+                    (last, older) = (r.clone(), r.clone());
+                }
+                let t = self.bound.as_ref().unwrap();
+                let after = u.row(j).to_vec();
+                zb.fill(0.0);
+                t.phi.mul_add(&z, &mut zb);
+                t.g0.mul_add(&before, &mut zb);
+                t.g1.mul_add(&after, &mut zb);
+                t.r0.mul_add(&r, &mut zb);
+                // r on the parabola through the last three steps
+                let guess: Vec<f64> = (0..m).map(|i| 3.0 * (r[i] - last[i]) + older[i]).collect();
+                let new = self.solve(&zb, guess, w1[j]);
+                (older, last, r) = (last, r, new);
+                let t = self.bound.as_ref().unwrap();
+                z.copy_from_slice(&zb);
+                t.r1.mul_add(&r, &mut z);
+                for (i, v) in z.iter().take(n_out).enumerate() {
+                    qs[[j, i]] = *v;
+                }
+                before = after;
             }
-            before = after;
-        }
+            (z, qs)
+        });
+        out.assign(&qs);
         Ok(z)
     }
 

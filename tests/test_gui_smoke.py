@@ -684,6 +684,7 @@ def test_energy_time_history(app):
     for _ in range(3):
         w._sim_target = w.sim.t + 0.2
         w._tick()
+        w._collect()  # with friction the steps run beside the frame: wait for them
     assert w.sim.system.friction[1] == 0.05
     T, V, stored, added, work, dissipated, rubbed = _energy_rows(w)
     assert rubbed[-1] > 0
@@ -2524,6 +2525,54 @@ def test_rotor_analysis_runs_in_the_worker(app, monkeypatch):
     assert p.campbell.criticals == analyse(p.sim.system, p.top_rpm).campbell.criticals
 
 
+def test_simulation_page_steps_friction_beside_the_frame(app):
+    """With friction the steps run in Rust on a worker thread: a frame starts them as it ends (so they run
+    while it paints) and the next records them. A parameter edit records the steps in flight first, under
+    the parameters they ran with; a reset drops them."""
+    import time
+
+    from vib_tutorial.core import native
+    from vib_tutorial.core.forcing import ForceController
+    from vib_tutorial.core.simulator import Simulator
+    from vib_tutorial.gui.main_window import MainWindow
+
+    if native.module is None:
+        pytest.skip("Rust kernels not loaded")
+    w = MainWindow()
+    w.pages.setCurrentWidget(w.sim_page)
+    w.params.rows[0][4].setValue(0.3)
+    w.params._copy_first_row()
+    system = w.sim.system
+    w.force_panel.button.click()
+    w.running = True
+    w._sim_target = 0.1
+    w._tick()
+    assert w._started is not None and w.history.size == 0
+    t = w.sim.t
+    while not w.sim.ready:
+        time.sleep(1e-3)
+    w.running = False
+    w._tick()  # records them, and starts no more
+    w.running = True
+    assert w._started is None and w.history.size == round(t / w.sim.step_size())
+
+    ref = Simulator(system, ForceController(w.force.settings))
+    ref.force.switch_on()
+    want = ref.advance(t)
+    np.testing.assert_allclose(w.history.window(1.0)[1], want[1], rtol=0, atol=1e-12)
+
+    w._sim_target = t + 0.05
+    w._tick()
+    assert w._started is not None
+    w.params.rows[0][1].setValue(2.0)  # a heavier first mass: the steps before it are recorded first
+    assert w._started is None and w.history.size > round(t / w.sim.step_size())
+    w._sim_target = w.sim.t + 0.05
+    w._tick()
+    w._reset()
+    assert w._started is None and w.history.size == 0 and w.sim.t == 0.0
+    w.close()
+
+
 def test_simulation_page_keeps_to_its_compute_budget(app, monkeypatch):
     """A frame takes no more simulator steps than FRAME_BUDGET allows at the cost of a step seen so far,
     so a slow simulation (friction on a stiff chain) falls behind real time instead of stalling the
@@ -2548,19 +2597,19 @@ def test_simulation_page_keeps_to_its_compute_budget(app, monkeypatch):
     assert tick() <= PROBE_STEPS
     assert w._step_cost > 0.0
 
-    advance = w.sim.advance
+    collect = w.sim.collect
 
-    def slow(duration):  # 1 ms per step
-        out = advance(duration)
+    def slow():  # 1 ms per step
+        out = collect()
         time.sleep(1e-3 * out[0].size)
         return out
 
-    monkeypatch.setattr(w.sim, "advance", slow)
+    monkeypatch.setattr(w.sim, "collect", slow)
     tick()
     assert w._step_cost >= 1e-3  # dearer: taken at once
     assert tick() <= FRAME_BUDGET / 1e-3 + 1
     slow_cost = w._step_cost  # ≥ 1 ms: more where sleeps overshoot (macOS runners)
-    monkeypatch.setattr(w.sim, "advance", advance)
+    monkeypatch.setattr(w.sim, "collect", collect)
     tick()
     assert 0.0 < w._step_cost < slow_cost  # cheaper: gradually
     w.close()

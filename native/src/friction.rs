@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 
+use numpy::ndarray::Array2;
 use numpy::{PyReadonlyArray1, PyReadonlyArray2, PyReadwriteArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -433,9 +434,11 @@ impl FrictionSteps {
 
     /// `_advance_friction`'s steps from the state z with the input u0 = `u0`, to the inputs `u` (one per step,
     /// at its end) over steps of h: each step's state into `out` (steps × 2n) and its (dissipated, work,
-    /// friction loss) into `losses` (steps × 3).
+    /// friction loss) into `losses` (steps × 3). Steps without the GIL, so other threads run meanwhile.
+    #[allow(clippy::too_many_arguments)]
     fn advance(
         &mut self,
+        py: Python<'_>,
         z: Vec<f64>,
         u0: f64,
         u: PyReadonlyArray1<f64>,
@@ -444,36 +447,44 @@ impl FrictionSteps {
         mut losses: PyReadwriteArray2<f64>,
     ) -> PyResult<()> {
         let n = self.n;
-        let u = u.as_array();
+        let u = u.as_array().to_vec();
         let (mut out, mut losses) = (out.as_array_mut(), losses.as_array_mut());
         if z.len() != 2 * n || out.dim() != (u.len(), 2 * n) || losses.dim() != (u.len(), 3) {
             return Err(PyValueError::new_err(
                 "the state, inputs or outputs don't match the chain",
             ));
         }
-        let mut w = vec![0.0; 3 * n + 2];
-        w[..2 * n].copy_from_slice(&z);
-        let mut f0 = u0;
-        for (j, &f1) in u.iter().enumerate() {
-            w[2 * n] = f0;
-            w[2 * n + 1] = (f1 - f0) / h;
-            let totals = self.step(&mut w, h, true);
-            for i in 0..2 * n {
-                out[[j, i]] = w[i];
+        let (zs, totals) = py.detach(|| {
+            let mut zs = Array2::zeros((u.len(), 2 * n));
+            let mut totals = Array2::zeros((u.len(), 3));
+            let mut w = vec![0.0; 3 * n + 2];
+            w[..2 * n].copy_from_slice(&z);
+            let mut f0 = u0;
+            for (j, &f1) in u.iter().enumerate() {
+                w[2 * n] = f0;
+                w[2 * n + 1] = (f1 - f0) / h;
+                let step = self.step(&mut w, h, true);
+                for i in 0..2 * n {
+                    zs[[j, i]] = w[i];
+                }
+                for i in 0..3 {
+                    totals[[j, i]] = step[i];
+                }
+                f0 = f1;
             }
-            for i in 0..3 {
-                losses[[j, i]] = totals[i];
-            }
-            f0 = f1;
-        }
+            (zs, totals)
+        });
+        out.assign(&zs);
+        losses.assign(&totals);
         Ok(())
     }
 
     /// `drive`'s steps, without the ledger: from z with the input u0, through the inputs `u` (at each step's
     /// end), each state into `out`. While every mass is at rest, held by its friction, and the input doesn't
-    /// change, nothing moves until it does.
+    /// change, nothing moves until it does. Steps without the GIL.
     fn drive(
         &mut self,
+        py: Python<'_>,
         z: Vec<f64>,
         u0: f64,
         u: PyReadonlyArray1<f64>,
@@ -481,42 +492,47 @@ impl FrictionSteps {
         mut out: PyReadwriteArray2<f64>,
     ) -> PyResult<()> {
         let n = self.n;
-        let u = u.as_array();
+        let u = u.as_array().to_vec();
         let mut out = out.as_array_mut();
         if z.len() != 2 * n || out.dim() != (u.len(), 2 * n) {
             return Err(PyValueError::new_err(
                 "the state, inputs or output don't match the chain",
             ));
         }
-        let mut w = vec![0.0; 3 * n + 2];
-        w[..2 * n].copy_from_slice(&z);
-        let mut f0 = u0;
-        let mut k = 0;
-        while k < u.len() {
-            let f1 = u[k];
-            if f1 == f0 && w[n..2 * n].iter().all(|&v| v == 0.0) {
-                w[2 * n] = f0;
-                w[2 * n + 1] = 0.0;
-                if (0..n).all(|i| held(self.pull(i, &w), self.static_[i])) {
-                    let stop = (k..u.len()).find(|&j| u[j] != f0).unwrap_or(u.len());
-                    for j in k..stop {
-                        for i in 0..2 * n {
-                            out[[j, i]] = w[i];
+        let zs = py.detach(|| {
+            let mut zs = Array2::zeros((u.len(), 2 * n));
+            let mut w = vec![0.0; 3 * n + 2];
+            w[..2 * n].copy_from_slice(&z);
+            let mut f0 = u0;
+            let mut k = 0;
+            while k < u.len() {
+                let f1 = u[k];
+                if f1 == f0 && w[n..2 * n].iter().all(|&v| v == 0.0) {
+                    w[2 * n] = f0;
+                    w[2 * n + 1] = 0.0;
+                    if (0..n).all(|i| held(self.pull(i, &w), self.static_[i])) {
+                        let stop = (k..u.len()).find(|&j| u[j] != f0).unwrap_or(u.len());
+                        for j in k..stop {
+                            for i in 0..2 * n {
+                                zs[[j, i]] = w[i];
+                            }
                         }
+                        k = stop;
+                        continue;
                     }
-                    k = stop;
-                    continue;
                 }
+                w[2 * n] = f0;
+                w[2 * n + 1] = (f1 - f0) / h;
+                self.step(&mut w, h, false);
+                for i in 0..2 * n {
+                    zs[[k, i]] = w[i];
+                }
+                f0 = f1;
+                k += 1;
             }
-            w[2 * n] = f0;
-            w[2 * n + 1] = (f1 - f0) / h;
-            self.step(&mut w, h, false);
-            for i in 0..2 * n {
-                out[[k, i]] = w[i];
-            }
-            f0 = f1;
-            k += 1;
-        }
+            zs
+        });
+        out.assign(&zs);
         Ok(())
     }
 }
