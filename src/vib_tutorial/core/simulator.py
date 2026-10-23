@@ -261,6 +261,10 @@ class Simulator:
         lam = np.linalg.eigvals(self._A)
         return float(np.abs(lam).max()) / (2.0 * math.pi) if lam.size else 0.0
 
+    def fastest_hz(self) -> float:
+        """The fastest frequency the steps resolve (Hz): the fastest mode's or the forcing's."""
+        return max(self._fmax_natural, self.force.settings.max_freq_hz)
+
     def step_size(self) -> float:
         """Choose h to resolve the fastest mode, the forcing, and any pulse.
 
@@ -268,7 +272,7 @@ class Simulator:
         while the user drags the frequency around.
         """
         s = self.force.settings
-        fmax = max(self._fmax_natural, s.max_freq_hz)
+        fmax = self.fastest_hz()
         h = MAX_STEP if fmax <= 0 else min(MAX_STEP, 1.0 / (STEPS_PER_PERIOD * fmax))
         if s.kind is ForceKind.PULSE:
             h = min(h, s.pulse_duration / 10.0)

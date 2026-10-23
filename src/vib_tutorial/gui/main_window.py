@@ -38,6 +38,11 @@ from .style import SYSTEM, colors
 FRAME_MS = 16  # ~60 fps
 FRAME_BUDGET = 0.012  # s of computing per frame: past it (friction on a stiff chain) the simulation runs slower
 PROBE_STEPS = 200  # steps in a frame while the cost of a step isn't known yet (a new system)
+# The history keeps samples at least STORE_DT apart, or STORE_PER_PERIOD to the fastest mode's or the
+# forcing's period (the steps take 40-80) where that's shorter, or a tenth of a pulse: a fast step
+# (a stiff chain) then doesn't fill it in a few seconds, or cost the recording of every step.
+STORE_DT = 1e-3  # s
+STORE_PER_PERIOD = 16
 
 # The pages after the Simulation one, in tab order: (attribute, tab title). Each is
 # imported and built the first time it's opened (MainWindow._page), not at startup.
@@ -415,6 +420,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sim_target = 0.0
         self._step_cost = 0.0  # s of computing per simulator step (with the history it feeds); 0 = not known
         self._started: tuple[float, bool] | None = None  # (when, ground motion?) of the advance in flight
+        self._carry = 0  # steps since the last sample stored in the history
         # Single-shot timer re-armed after each frame: if a frame runs long, the
         # event loop still gets to handle input before the next one starts.
         self._timer = QtCore.QTimer(self)
@@ -508,6 +514,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _apply_dof(self, n: int) -> None:
         self.history.reset(n)
+        self._carry = 0
         self._sim_target = self.sim.t
         self.chain.set_masses(self.sim.system.masses)
         self.force_panel.set_dof(n)
@@ -693,6 +700,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sim.reset()  # drops the steps in flight
         self._started = None
         self.history.reset(self.sim.system.n)
+        self._carry = 0
         self._sim_target = 0.0
         self._ground_velocity = 0.0
         self.force_panel.refresh()
@@ -837,6 +845,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sim.start(self._sim_target - self.sim.t)
         self._started = (time.perf_counter() - began, base)
 
+    def _store_stride(self) -> int:
+        """Steps between the samples the history keeps (STORE_DT, STORE_PER_PERIOD)."""
+        spacing = STORE_DT
+        f = self.sim.fastest_hz()
+        if f > 0:
+            spacing = min(spacing, 1.0 / (STORE_PER_PERIOD * f))
+        s = self.force.settings
+        if s.kind is ForceKind.PULSE:
+            spacing = min(spacing, s.pulse_duration / 10.0)
+        return max(1, int(spacing / self.sim.step_size()))
+
     def _collect(self) -> None:
         """Record the steps `_start` began in the history (waiting for them if they aren't done)."""
         if self._started is None:
@@ -846,21 +865,27 @@ class MainWindow(QtWidgets.QMainWindow):
         waits = not self.sim.ready
         began = time.perf_counter()
         ts, xs, vs, fs = self.sim.collect()
-        system = self.sim.system
-        # With ground motion fs is x_g; the springs and dampers see the motion relative to it.
-        xg = fs if base else np.zeros_like(fs)
+        steps = ts.size
         vg = self.sim.ground_velocity
         if vg.size:
             self._ground_velocity = float(vg[-1])
+        # Keep every stride-th sample, continuing the stride across advances.
+        stride = self._store_stride()
+        pick = np.arange((stride - self._carry - 1) % stride, steps, stride)
+        self._carry = (steps - 1 - pick[-1]) if pick.size else self._carry + steps
+        ts, xs, vs, fs, vg, ledger = ts[pick], xs[pick], vs[pick], fs[pick], vg[pick], self.sim.ledger[pick]
+        system = self.sim.system
+        # With ground motion fs is x_g; the springs and dampers see the motion relative to it.
+        xg = fs if base else np.zeros_like(fs)
         xr, vr = xs - xg[:, None], vs - vg[:, None]
         kinetic = kinetic_energy(system, vs).sum(axis=1)
         potential = potential_energy(system, xr).sum(axis=1)
-        energy = np.column_stack([kinetic, potential, self.sim.ledger])
+        energy = np.column_stack([kinetic, potential, ledger])
         forces = np.hstack(element_forces(system, xr, vr))
         self.history.extend(ts, xs, vs, fs, energy, forces, np.column_stack([xg, vg]))
-        if ts.size and not waits:  # a dearer step counts at once, a cheaper one gradually
+        if steps and not waits:  # a dearer step counts at once, a cheaper one gradually
             # This thread's work and the steps' (where they run beside it): the slower sets the pace.
-            cost = max(spent + time.perf_counter() - began, self.sim.steps_time) / ts.size
+            cost = max(spent + time.perf_counter() - began, self.sim.steps_time) / steps
             self._step_cost = cost if cost > self._step_cost else 0.8 * self._step_cost + 0.2 * cost
 
 
