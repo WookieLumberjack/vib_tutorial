@@ -2441,6 +2441,12 @@ def test_rotor_plots_paint_once_per_frame(app):
     page.tabs.setCurrentWidget(page.bode.parentWidget())
     page.sim.omega = page.sim.target = page.target_rpm.value() / RPM  # at speed: the marker stands still
     run(1.0)
+    # Building the page also handed the analysis to the worker, which can take seconds to spawn (Windows):
+    # let its result arrive (and redraw the Bode plot) before counting.
+    end = time.perf_counter() + 60.0
+    while (page._job is not None or page._analysis_timer.isActive()) and time.perf_counter() < end:
+        run(0.05)
+    run(0.2)
     views = {type(v).__name__: v for v in page.findChildren(pg.GraphicsView) if v.isVisible()}
     counts = {name: Paints() for name in ("OrbitPlots", "TimePlots", "BodePlots")}
     for name, c in counts.items():
@@ -2553,7 +2559,8 @@ def test_simulation_page_keeps_to_its_compute_budget(app, monkeypatch):
     tick()
     assert w._step_cost >= 1e-3  # dearer: taken at once
     assert tick() <= FRAME_BUDGET / 1e-3 + 1
+    slow_cost = w._step_cost  # ≥ 1 ms: more where sleeps overshoot (macOS runners)
     monkeypatch.setattr(w.sim, "advance", advance)
     tick()
-    assert 0.0 < w._step_cost < 1e-3  # cheaper: gradually
+    assert 0.0 < w._step_cost < slow_cost  # cheaper: gradually
     w.close()

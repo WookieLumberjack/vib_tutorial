@@ -61,6 +61,10 @@ jobs:
           sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
             libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xkb1 libxcb-shape0
 
+      # The runners come with rustup; the package's build (maturin) compiles native/ with it.
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
       - name: Install dependencies
         run: uv sync --locked --group build
 

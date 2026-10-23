@@ -22,7 +22,9 @@ install, are on the [Releases](https://github.com/WookieLumberjack/vib_tutorial/
 page. They aren't code-signed; the release notes say how to open them past the system's
 warning.
 
-To run from source instead, you need [uv](https://docs.astral.sh/uv/).
+To run from source instead, you need [uv](https://docs.astral.sh/uv/) and a
+[Rust toolchain](https://rustup.rs/) (uv builds the app's Rust kernels, in `native/`, on
+the first sync).
 
 ```bash
 uv sync               # create .venv and install dependencies
