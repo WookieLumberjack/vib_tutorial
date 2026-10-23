@@ -414,6 +414,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_wall = 0.0
         self._sim_target = 0.0
         self._step_cost = 0.0  # s of computing per simulator step (with the history it feeds); 0 = not known
+        self._started: tuple[float, bool] | None = None  # (when, ground motion?) of the advance in flight
         # Single-shot timer re-armed after each frame: if a frame runs long, the
         # event loop still gets to handle input before the next one starts.
         self._timer = QtCore.QTimer(self)
@@ -487,6 +488,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------------------------------------------- events
     def _on_system_changed(self, system: ChainSystem) -> None:
+        self._collect()  # the steps in flight belong to the old system
         n_changed = system.n != self.sim.system.n
         self.sim.set_system(system)
         self._step_cost = 0.0  # friction, or a new size, changes it: measure it afresh
@@ -688,7 +690,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sim_target = self.sim.t
 
     def _reset(self) -> None:
-        self.sim.reset()
+        self.sim.reset()  # drops the steps in flight
+        self._started = None
         self.history.reset(self.sim.system.n)
         self._sim_target = 0.0
         self._ground_velocity = 0.0
@@ -777,33 +780,19 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.pages.currentWidget() is not self.sim_page:
             return
 
+        # Steps that run in Rust (friction) start at the end of a frame, beside its drawing, and are
+        # recorded at the next; if they aren't done by then, it doesn't wait. The others run here.
+        if self._started is not None and self.sim.ready:
+            self._collect()
         held = self.chain.held
-        if self.running and held is None:
-            speed = self.controls.speed_factor
-            self._sim_target += dt * speed
-            # If the simulator can't keep up (very stiff system), drop the backlog.
-            self._sim_target = min(self._sim_target, self.sim.t + 0.25 * speed + 0.05)
-            # And take no more steps than FRAME_BUDGET allows at the cost seen so far: a slow
-            # simulation then falls behind real time (the overlay's sim speed) instead of stalling the frames.
-            steps = FRAME_BUDGET / self._step_cost if self._step_cost else PROBE_STEPS
-            self._sim_target = min(self._sim_target, self.sim.t + max(1.0, steps) * self.sim.step_size())
-            began = time.perf_counter()
-            ts, xs, vs, fs = self.sim.advance(self._sim_target - self.sim.t)
-            system = self.sim.system
-            # With ground motion fs is x_g; the springs and dampers see the motion relative to it.
-            xg = fs if self.force.settings.base else np.zeros_like(fs)
-            vg = self.sim.ground_velocity
-            if vg.size:
-                self._ground_velocity = float(vg[-1])
-            xr, vr = xs - xg[:, None], vs - vg[:, None]
-            kinetic = kinetic_energy(system, vs).sum(axis=1)
-            potential = potential_energy(system, xr).sum(axis=1)
-            energy = np.column_stack([kinetic, potential, self.sim.ledger])
-            forces = np.hstack(element_forces(system, xr, vr))
-            self.history.extend(ts, xs, vs, fs, energy, forces, np.column_stack([xg, vg]))
-            if ts.size:  # a dearer step counts at once, a cheaper one gradually
-                cost = (time.perf_counter() - began) / ts.size
-                self._step_cost = cost if cost > self._step_cost else 0.8 * self._step_cost + 0.2 * cost
+        steps = self.running and held is None
+        if steps:
+            self._sim_target += dt * self.controls.speed_factor
+            if self._started is None and not self.sim.steps_aside:
+                self._start()
+                self._collect()
+        if self._started is not None:
+            return  # nothing new to show (and the state isn't there yet)
         if self.force.active != self._force_active:  # e.g. a chirp reached its end
             self._force_active = self.force.active
             self.force_panel.refresh()
@@ -829,6 +818,50 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.animate_modes.isChecked():
             self._animate_modes(2 * math.pi * MODE_ANIMATION_HZ * now)
         self.controls.time_label.setText(f"{self.sim.t:8.3f} s   (step {self.sim.step_size() * 1e3:.3g} ms)")
+        if steps and self._started is None:
+            self._start()  # last, so that its steps run while this frame paints
+
+    def _start(self) -> None:
+        """Start the simulator's steps towards `_sim_target`; the next frame's `_collect` records them."""
+        speed = self.controls.speed_factor
+        # If the simulator can't keep up (very stiff system), drop the backlog.
+        self._sim_target = min(self._sim_target, self.sim.t + 0.25 * speed + 0.05)
+        # And take no more steps than FRAME_BUDGET allows at the cost seen so far: a slow
+        # simulation then falls behind real time (the overlay's sim speed) instead of stalling the frames.
+        steps = FRAME_BUDGET / self._step_cost if self._step_cost else PROBE_STEPS
+        self._sim_target = min(self._sim_target, self.sim.t + max(1.0, steps) * self.sim.step_size())
+        if self._sim_target - self.sim.t < 0.5 * self.sim.step_size():
+            return  # not a step's worth yet
+        began = time.perf_counter()
+        base = self.force.settings.base  # what the samples' input is, whatever the panel does meanwhile
+        self.sim.start(self._sim_target - self.sim.t)
+        self._started = (time.perf_counter() - began, base)
+
+    def _collect(self) -> None:
+        """Record the steps `_start` began in the history (waiting for them if they aren't done)."""
+        if self._started is None:
+            return
+        spent, base = self._started
+        self._started = None
+        waits = not self.sim.ready
+        began = time.perf_counter()
+        ts, xs, vs, fs = self.sim.collect()
+        system = self.sim.system
+        # With ground motion fs is x_g; the springs and dampers see the motion relative to it.
+        xg = fs if base else np.zeros_like(fs)
+        vg = self.sim.ground_velocity
+        if vg.size:
+            self._ground_velocity = float(vg[-1])
+        xr, vr = xs - xg[:, None], vs - vg[:, None]
+        kinetic = kinetic_energy(system, vs).sum(axis=1)
+        potential = potential_energy(system, xr).sum(axis=1)
+        energy = np.column_stack([kinetic, potential, self.sim.ledger])
+        forces = np.hstack(element_forces(system, xr, vr))
+        self.history.extend(ts, xs, vs, fs, energy, forces, np.column_stack([xg, vg]))
+        if ts.size and not waits:  # a dearer step counts at once, a cheaper one gradually
+            # This thread's work and the steps' (where they run beside it): the slower sets the pace.
+            cost = max(spent + time.perf_counter() - began, self.sim.steps_time) / ts.size
+            self._step_cost = cost if cost > self._step_cost else 0.8 * self._step_cost + 0.2 * cost
 
 
 def energy_curves(e: np.ndarray) -> np.ndarray:

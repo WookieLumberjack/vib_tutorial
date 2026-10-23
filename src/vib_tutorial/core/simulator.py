@@ -51,6 +51,8 @@ moving ground does on the chain, -integral of (tension in element 1) x_g' dt.
 from __future__ import annotations
 
 import math
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import numpy as np
 import scipy.linalg
@@ -64,6 +66,8 @@ MAX_STEP = 1e-3  # s
 STEPS_PER_PERIOD = 40
 MAX_STEPS_PER_ADVANCE = 20_000
 EVENTS_PER_MASS = 4  # stick-slip events handled within one step, per mass (then the rest is stepped as is)
+# Where `Simulator.start` runs the Rust steps (they release the GIL, so the caller draws meanwhile).
+_STEPS = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vib-steps")
 
 
 def foh_discretize(A: np.ndarray, B: np.ndarray, h: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -153,6 +157,11 @@ class Simulator:
         self.force = force or ForceController()
         self.system = system
         self.t = 0.0
+        # An advance `start` left running: the worker's steps, and what `collect` finishes them with.
+        self._job: Future | None = None
+        self._finish = None
+        self._done: tuple[np.ndarray, ...] | None = None
+        self.steps_time = 0.0  # s the worker took over the last advance's steps (0 if they ran in `start`)
         self.state = np.zeros(2 * system.n)
         self._A, self._B = state_space(system)
         self._fmax_natural = self._highest_natural_freq()
@@ -171,6 +180,17 @@ class Simulator:
         self.energy_added = 0.0  # J, jumps in stored energy from set_state and parameter edits
         # (added, work, dissipated, friction_loss) at each sample of the last advance
         self.ledger = np.empty((0, 4))
+
+    @property
+    def state(self) -> np.ndarray:
+        """z = [x, v] now. Waits for the steps an advance left running (`start`)."""
+        self._settle()
+        return self._state
+
+    @state.setter
+    def state(self, z: np.ndarray) -> None:
+        self._settle()
+        self._state = z
 
     @property
     def ground(self) -> float:
@@ -207,6 +227,8 @@ class Simulator:
         self.energy_added += self.stored_energy - before
 
     def reset(self) -> None:
+        self._settle()
+        self._done = None  # the samples before it belong to no history now
         self.t = 0.0
         self.state = np.zeros(2 * self.system.n)
         self.force.reset()
@@ -466,23 +488,11 @@ class Simulator:
                 key[1] if key[0] == "force" else 0, EVENTS_PER_MASS)
         return self._friction_cache[ck]
 
-    def _advance_friction(self, h: float, steps: int) -> tuple[np.ndarray, ...]:
-        """`_advance_friction_reference`'s steps, by the Rust kernel (`_friction_kernel`) where it's built."""
-        if native.module is None:
-            return self._advance_friction_reference(h, steps)
-        n = self.system.n
-        ts, fs = np.empty(steps), np.empty(steps)
-        for k in range(steps):  # the force doesn't depend on the motion: all of it first
-            self.force.advance(h)
-            fs[k] = self.force.value()
-            self.t += h
-            ts[k] = self.t
-        zs, losses = np.empty((steps, 2 * n)), np.empty((steps, 3))
-        self._friction_kernel().advance(self.state.tolist(), self._u, fs, h, zs, losses)
-        return ts, zs, fs, losses
-
     def _advance_friction_reference(self, h: float, steps: int) -> tuple[np.ndarray, ...]:
-        """(t, z, input, per-step (dissipated, work, friction loss)) for `steps` steps with friction."""
+        """(t, z, input, per-step (dissipated, work, friction loss)) for `steps` steps with friction.
+
+        The Python the Rust kernel's `advance` mirrors (`start` runs that where it's built).
+        """
         n = self.system.n
         inp = self._input()
         P = self._pull_rows(*inp)
@@ -570,14 +580,24 @@ class Simulator:
         columns energy_added, work, dissipated, friction_loss, and the ground's
         velocity over each step in ``self.ground_velocity``.
         """
+        self.start(duration)
+        return self.collect()
+
+    def start(self, duration: float) -> None:
+        """Begin `advance(duration)`, for `collect` to finish.
+
+        The force, the clock and the input move here, at once. With friction,
+        the steps run in Rust on a worker thread, without the GIL, so the caller
+        can draw meanwhile; anything that touches the state (`state`, `reset`,
+        `set_system`, …) waits for them. Otherwise the steps run here too.
+        """
+        self._settle()
+        if self._done is not None:
+            raise RuntimeError("collect the last advance before starting another")
         h = self.step_size()
         steps = min(MAX_STEPS_PER_ADVANCE, max(0, int(round(duration / h))))
         n = self.system.n
-        ts = np.empty(steps)
-        zs = np.empty((steps, 2 * n))
-        fs = np.empty(steps)
-        self.ledger = np.empty((steps, 4))
-        self.ground_velocity = np.zeros(steps)
+        self.steps_time = 0.0
         base = self.force.settings.base
         if base != self._u_base:
             # The new kind of input starts from 0. A displaced ground snaps back,
@@ -586,32 +606,96 @@ class Simulator:
             self._u, self._u_base = 0.0, base
             self.energy_added += self.stored_energy - before
         if steps == 0:
-            return ts, zs[:, :n], zs[:, n:], fs
+            zs = np.empty((0, 2 * n))
+            self.ledger, self.ground_velocity = np.empty((0, 4)), np.zeros(0)
+            self._done = np.empty(0), zs[:, :n], zs[:, n:], np.empty(0)
+            return
 
-        z_start, f_start = self.state.copy(), self._u
-        if self.has_friction:
-            ts, zs, fs, losses = self._advance_friction(h, steps)
+        z_start, f_start = self._state.copy(), self._u
+        if self.steps_aside:
+            ts, fs = self._forces(h, steps)
+            zs, losses = np.empty((steps, 2 * n)), np.empty((steps, 3))
+            kernel, z0 = self._friction_kernel(), z_start.tolist()
+
+            def steps_():
+                began = time.perf_counter()
+                kernel.advance(z0, f_start, fs, h, zs, losses)
+                return time.perf_counter() - began
+
+            self._job = _STEPS.submit(steps_)
         else:
-            Phi, g0, g1 = self._discrete(h)
-            z = self.state
-            f0 = f_start
-            for k in range(steps):
-                self.force.advance(h)
-                f1 = self.force.value()
-                z = Phi @ z + g0 * f0 + g1 * f1
-                self.t += h
-                ts[k] = self.t
-                zs[k] = z
-                fs[k] = f1
-                f0 = f1
-        self.state = zs[-1].copy()
+            if self.has_friction:
+                ts, zs, fs, losses = self._advance_friction_reference(h, steps)
+            else:
+                (ts, zs, fs), losses = self._advance_linear(h, steps, z_start, f_start), None
         self._u = float(fs[-1])
+        self._finish = lambda: self._finish_advance(h, ts, zs, fs, losses, z_start, f_start, base)
+        if self._job is None:
+            self._settle()
+
+    @property
+    def steps_aside(self) -> bool:
+        """Whether `start` leaves its steps running on the worker thread (friction, in Rust)."""
+        return self.has_friction and native.module is not None
+
+    @property
+    def ready(self) -> bool:
+        """Whether `collect` returns at once (the steps `start` left running are done)."""
+        return self._job is None or self._job.done()
+
+    def collect(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """The samples (t, x, v, force) of the advance `start` began (waiting for its steps), as `advance` returns them."""
+        self._settle()
+        done, self._done = self._done, None
+        if done is None:
+            raise RuntimeError("no advance to collect")
+        return done
+
+    def _settle(self) -> None:
+        """Wait for the steps `start` left running and finish the advance with them."""
+        if self._finish is None:
+            return
+        if self._job is not None:
+            job, self._job = self._job, None
+            self.steps_time = job.result()
+        finish, self._finish = self._finish, None
+        self._done = finish()
+
+    def _forces(self, h: float, steps: int) -> tuple[np.ndarray, np.ndarray]:
+        """The clock and the force (input) at the end of each of the next `steps` steps, moving them on."""
+        ts, fs = np.empty(steps), np.empty(steps)
+        for k in range(steps):  # the force doesn't depend on the motion: all of it first
+            self.force.advance(h)
+            fs[k] = self.force.value()
+            self.t += h
+            ts[k] = self.t
+        return ts, fs
+
+    def _advance_linear(self, h: float, steps: int, z: np.ndarray, f0: float) -> tuple[np.ndarray, ...]:
+        """(t, z, input) for `steps` steps without friction."""
+        Phi, g0, g1 = self._discrete(h)
+        ts, zs, fs = np.empty(steps), np.empty((steps, 2 * self.system.n)), np.empty(steps)
+        for k in range(steps):
+            self.force.advance(h)
+            f1 = self.force.value()
+            z = Phi @ z + g0 * f0 + g1 * f1
+            self.t += h
+            ts[k] = self.t
+            zs[k] = z
+            fs[k] = f1
+            f0 = f1
+        return ts, zs, fs
+
+    def _finish_advance(self, h, ts, zs, fs, losses, z_start, f_start, base) -> tuple[np.ndarray, ...]:
+        """`advance`'s samples, once its steps are done: the state, and the energy ledger at each sample."""
+        n, steps = self.system.n, ts.size
+        self._state = zs[-1].copy()
 
         # Energy ledger: each step's integrals are quadratic in w0 = [z0, f0, (f1 - f0) / h].
         z0s = np.vstack([z_start, zs[:-1]])
         f0s = np.concatenate([[f_start], fs[:-1]])
         w = np.column_stack([z0s, f0s, (fs - f0s) / h])
-        if not self.has_friction:
+        if losses is None:
             Wd, Ww = self._energy_forms(h)
             losses = np.column_stack(
                 [np.einsum("ki,ij,kj->k", w, Wd, w), np.einsum("ki,ij,kj->k", w, Ww, w), np.zeros(steps)]
@@ -621,6 +705,5 @@ class Simulator:
         friction = self.friction_loss + np.cumsum(losses[:, 2])
         self.dissipated, self.work, self.friction_loss = float(dissipated[-1]), float(work[-1]), float(friction[-1])
         self.ledger = np.column_stack([np.full(steps, self.energy_added), work, dissipated, friction])
-        if base:
-            self.ground_velocity = w[:, -1]
+        self.ground_velocity = w[:, -1] if base else np.zeros(steps)
         return ts, zs[:, :n], zs[:, n:], fs

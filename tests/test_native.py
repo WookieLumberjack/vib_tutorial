@@ -2,6 +2,8 @@
 
 import math
 import os
+import sys
+import time
 
 import numpy as np
 import pytest
@@ -176,14 +178,16 @@ FRICTION_CASES = {
 
 @needs_native
 @pytest.mark.parametrize("case", FRICTION_CASES)
-def test_friction_steps_match_the_reference(case):
+def test_friction_steps_match_the_reference(case, monkeypatch):
     # The kernel steps as _advance_friction_reference does, events and all; its energy ledger comes from
     # the input's work and the energy balance rather than Van Loan's integrals, the same to rounding.
     system, freq, amplitude, base = FRICTION_CASES[case]
     sim, ref = _forced(system, freq, amplitude, base), _forced(system, freq, amplitude, base)
-    ref._advance_friction = ref._advance_friction_reference
     for _ in range(6):
-        got, want = sim.advance(0.1), ref.advance(0.1)
+        got = sim.advance(0.1)
+        with monkeypatch.context() as m:
+            m.setattr(native, "module", None)
+            want = ref.advance(0.1)
         for g, w in zip(got, want):
             np.testing.assert_allclose(g, w, rtol=0, atol=1e-11 * max(np.abs(w).max(), 1e-300))
         np.testing.assert_allclose(sim.ledger, ref.ledger, rtol=0, atol=1e-11 * np.abs(ref.ledger).max())
@@ -207,3 +211,48 @@ def test_friction_drive_matches_the_reference(monkeypatch):
         assert (np.abs(want[0][:, system.n:]).max(axis=1) == 0.0).sum() > 1000  # the quiet stretch stuck
         for g, w in zip(got, want):
             np.testing.assert_allclose(g, w, rtol=0, atol=1e-11 * np.abs(w).max())
+
+
+@needs_native
+def test_friction_steps_run_beside_the_caller():
+    # Simulator.start leaves the Rust steps on a worker thread, without the GIL: this thread runs meanwhile
+    # (with a switch interval of 10 s, a kernel that held the GIL would block it until the steps were done).
+    system, freq, amplitude, base = FRICTION_CASES["eight masses"]
+    sim, ref = _forced(system, freq, amplitude, base), _forced(system, freq, amplitude, base)
+    assert sim.steps_aside
+    interval = sys.getswitchinterval()
+    sys.setswitchinterval(10.0)
+    try:
+        sim.start(20_000 * sim.step_size())
+        beside = 0
+        while not sim.ready:
+            time.sleep(1e-3)
+            beside += 1
+    finally:
+        sys.setswitchinterval(interval)
+    assert beside >= 3
+    np.testing.assert_array_equal(sim.collect()[1], ref.advance(20_000 * ref.step_size())[1])
+
+
+@needs_native
+def test_started_steps_finish_whenever_the_state_is_touched():
+    system, freq, amplitude, base = FRICTION_CASES["stick-slip"]
+    sim, ref = _forced(system, freq, amplitude, base), _forced(system, freq, amplitude, base)
+    sim.start(0.1)
+    with pytest.raises(RuntimeError):
+        sim.start(0.1)  # one at a time: the first's samples are collected first
+    x = sim.displacement.copy()  # waits for the steps
+    want = ref.advance(0.1)
+    np.testing.assert_array_equal(x, ref.displacement)
+    sim.set_state(np.zeros(3), np.zeros(3))  # the samples before it are still there to collect
+    got = sim.collect()
+    for g, w in zip(got, want):
+        np.testing.assert_array_equal(g, w)
+    np.testing.assert_array_equal(sim.ledger, ref.ledger)
+    with pytest.raises(RuntimeError):
+        sim.collect()
+    sim.start(0.1)
+    sim.reset()  # drops them
+    assert sim.t == 0.0 and not sim.displacement.any()
+    with pytest.raises(RuntimeError):
+        sim.collect()
