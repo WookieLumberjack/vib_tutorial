@@ -1789,11 +1789,12 @@ class _Films:
         self.scale = 1.0 + max(abs(w) for w in system.bearing_loads)
         self.held = math.nan
         self.key: tuple | None = None
-        self.kernel = None  # the Rust steps on the update, built when first stepped (`stepper`)
+        self.kernel = None  # the Rust film steps at the held speed (`stepper`), and their (h, Ω)
+        self.kernel_key: tuple | None = None
 
     def __getstate__(self) -> dict:
-        # The Rust kernel doesn't copy or pickle: a copy builds its own from the same matrices.
-        return {**self.__dict__, "kernel": None}
+        # The Rust kernel doesn't copy or pickle: a copy builds its own, and takes the bound afresh.
+        return {**self.__dict__, "kernel": None, "kernel_key": None}
 
     def hold(self, omega: float) -> None:
         """Take the films' K_f and p at the speed Ω the exact update holds."""
@@ -1830,15 +1831,17 @@ class _Films:
         self.lin = np.hstack([self.Kf, self.Cb])  # the update's films: p - K_f x - C_b x'
         self.eye = np.eye(len(d))
         self.key = (h, omega)
-        self.kernel = None
 
-    def stepper(self):
-        """The Rust kernel's steps on this bound's update (`native.module.FilmSteps`)."""
-        if self.kernel is None:
+    def stepper(self, h: float):
+        """The Rust kernel's steps over h at the held speed (`native.module.FilmSteps`): it takes the
+        bound itself, as `take` does, where it first steps and as the journals drift."""
+        if self.kernel_key != (h, self.held):
+            d = self.dofs
             self.kernel = native.module.FilmSteps(
-                self.Phi, self.G0, self.G1, self.R0, self.R1, self.E, self.Es, self.Ev, self.lin, self.Kf,
-                self.Cb, self.p, self.dofs + self.rates, self.films, self.taken, FILM_DRIFT * self.size,
-                FILM_TOL * self.scale, FILM_CORRECTION * self.scale, FILM_ITERATIONS)
+                self.A, self.system.input_matrix(), self.system.mass_inverse[:, d], self.Cf, self.Kf, self.p, h,
+                d + self.rates, self.films, FILM_DRIFT, FILM_TOL * self.scale, FILM_CORRECTION * self.scale,
+                FILM_ITERATIONS)
+            self.kernel_key = (h, self.held)
         return self.kernel
 
     def drifted(self, z: np.ndarray) -> bool:
@@ -2118,29 +2121,13 @@ class RotorSimulator:
 
     def _film_steps(self, h: float, held: float, w1: np.ndarray, u0: np.ndarray, u: np.ndarray,
                     out: np.ndarray) -> np.ndarray:
-        """`_film_steps_reference`'s steps, by the Rust kernel (`_Films.stepper`) where it's built.
-
-        It steps until a journal drifts; the bound is taken afresh here (a matrix
-        exponential), and it carries on from there.
-        """
+        """`_film_steps_reference`'s steps, by the Rust kernel (`_Films.stepper`) where it's built."""
         if native.module is None:
             return self._film_steps_reference(h, held, w1, u0, u, out)
         films = self._films
         films.hold(held)
-        z = self.state
-        if films.key != (h, held) or films.drifted(z):
-            films.take(z, h, held)
-        r = films.remainder(z, self.omega)
-        last = older = r
         u0, u = np.ascontiguousarray(u0, dtype=float), np.ascontiguousarray(u, dtype=float)
-        j = 0
-        while True:
-            j, z, r, last, older = films.stepper().steps(z, r, last, older, u0, u, w1, j, out)
-            z = np.asarray(z)
-            if j == w1.size:
-                return z
-            films.take(z, h, held)
-            r = last = older = films.remainder(z, w1[j - 1])
+        return np.asarray(films.stepper(h).steps(self.state, u0, u, w1, self.omega, out))
 
     def _film_steps_reference(self, h: float, held: float, w1: np.ndarray, u0: np.ndarray, u: np.ndarray,
                               out: np.ndarray) -> np.ndarray:

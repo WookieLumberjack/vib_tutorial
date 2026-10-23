@@ -1,15 +1,16 @@
 """The Rust kernels (vib_tutorial._native) against the Python they replace, which stays the reference."""
 
-import copy
 import math
 import os
 
 import numpy as np
 import pytest
+import scipy.linalg
 
-from vib_tutorial.core import fluid_bearing, native, rotor
+from vib_tutorial.core import fluid_bearing, native
 from vib_tutorial.core.rotor import RPM, RotorSimulator, RotorSystem
 from vib_tutorial.core.rotor_presets import JOURNAL_BEARING
+from vib_tutorial.core.simulator import foh_discretize
 
 needs_native = pytest.mark.skipif(native.module is None, reason="Rust kernels not loaded")
 
@@ -74,40 +75,75 @@ def test_full_film_damping_matches_the_reference():
 
 
 @needs_native
+def test_expm_matches_scipy():
+    rng = np.random.default_rng(0)
+    for n in (1, 5, 32, 48):  # 32 and 48: the film step's augmented matrices, with and without a shaft's mass
+        for norm in (1e-3, 0.1, 1.0, 5.0, 40.0):  # each Padé degree, and scaling and squaring
+            a = rng.normal(size=(n, n)) * norm / math.sqrt(n)
+            want = scipy.linalg.expm(a)
+            np.testing.assert_allclose(native.module.expm(a), want, rtol=0, atol=1e-13 * np.abs(want).max())
+    # The film step's kind: stiff modes over a short step, with the FOH's input blocks. Its norm is
+    # thousands but its powers' are small, so it needs few squarings. (On the Journal bearings preset's
+    # own matrix, scaling by the norm alone, as Higham 2005 does, took eleven and Φ came out 3.5e-11 off.)
+    n, h = 8, 1.2e-4
+    k = np.diag(rng.uniform(1e6, 4e8, n))
+    a = np.zeros((4 * n, 4 * n))
+    a[:n, n:2 * n] = np.eye(n) * h
+    a[n:2 * n, :n], a[n:2 * n, n:2 * n] = -k * h, -1e-3 * k * h
+    a[n:2 * n, 2 * n:3 * n] = h * np.eye(n)
+    a[2 * n:3 * n, 3 * n:] = np.eye(n)
+    assert np.abs(a).sum(axis=0).max() > 1e3
+    want = scipy.linalg.expm(a)
+    np.testing.assert_allclose(native.module.expm(a), want, rtol=0, atol=1e-13 * np.abs(want).max())
+
+
+@needs_native
+@pytest.mark.parametrize("density", [0.0, 7800.0])
+def test_foh_discretize_matches_the_python(density):
+    # The film step's update, worked out in the augmented matrix's blocks, on the rotor's own A and B with
+    # its films' damping bound: as simulator.foh_discretize's dense expm gives it.
+    system = RotorSystem(bearing_a=JOURNAL_BEARING, bearing_b=JOURNAL_BEARING, gravity=9.81, density=density,
+                         nonlinear_films=True)
+    sim = RotorSimulator(system)
+    sim._film_steps = sim._film_steps_reference
+    sim.omega = sim.target = 6000.0 / RPM
+    sim.advance(0.2)
+    films, n, h = sim._films, system.n_dof, sim._films.key[0]
+    a = films.A.copy()
+    a[n:2 * n, films.rates] -= system.mass_inverse[:, films.dofs] @ (films.Cb - films.Cf)
+    b = system.input_matrix()
+    # The kernel balances the matrix first (the rotor's A h runs from h to K/M h), so it's the more
+    # accurate of the two: against a 40-digit evaluation ~1e-15 at the step, where SciPy's is ~1e-14.
+    # Many squarings (64 steps at once) cost both ~1e-12.
+    for scale in (0.01, 1.0, 64.0):
+        for got, want in zip(native.module.foh_discretize(a, b, h * scale), foh_discretize(a, b, h * scale)):
+            np.testing.assert_allclose(got, want, rtol=0, atol=5e-13 * max(scale, 1.0) * np.abs(want).max())
+
+
+@needs_native
 @pytest.mark.parametrize("gravity, density, rpm, drifts", [
     (9.81, 0.0, 9000.0, False),  # Journal bearings (oil whip), past the whip's onset
     (0.0, 0.0, 3500.0, True),  # Oil whirl (vertical rotor): the journals circle past ε = 0.9, the bound retaken often
     (9.81, 7800.0, 6000.0, False),  # a shaft with mass: more states than the stations'
 ])
 def test_film_steps_match_the_reference(gravity, density, rpm, drifts):
-    # The kernel steps as _film_steps_reference does, handing back to take the bound afresh as the
-    # journals drift: the same motion to rounding error, while ramping and at a steady speed.
+    # The kernel steps as _film_steps_reference does, taking the damping bound afresh as the journals
+    # drift (with its own expm): the same motion to rounding error, while ramping and at a steady speed.
+    # Its expm (balanced) is a little more accurate than SciPy's; the two part by ~1e-12 of the motion.
     system = RotorSystem(bearing_a=JOURNAL_BEARING, bearing_b=JOURNAL_BEARING, gravity=gravity,
                          density=density, nonlinear_films=True)
-    sim = RotorSimulator(system)
-    sim.omega, sim.target = 0.9 * rpm / RPM, rpm / RPM
-    sim.accel = 0.1 * rpm / RPM / 0.25  # at speed 0.25 s into the first stretch
-    sim.advance(0.05)
-    take = rotor._Films.take
-
-    def counting(self, *args):
-        nonlocal takes
-        takes += 1
-        return take(self, *args)
-
+    sims = [RotorSimulator(system), RotorSimulator(system)]
+    sims[1]._film_steps = sims[1]._film_steps_reference
+    for sim in sims:
+        sim.omega, sim.target = 0.9 * rpm / RPM, rpm / RPM
+        sim.accel = 0.1 * rpm / RPM / 0.25  # at speed 0.25 s into the first stretch
     for steady in (False, True):  # ramping, then at speed
-        assert (sim.omega == sim.target) == steady
-        takes = 0
-        ref = copy.deepcopy(sim)
-        ref._film_steps = ref._film_steps_reference
-        rotor._Films.take = counting
-        try:
-            got = sim.advance(0.3)
-        finally:
-            rotor._Films.take = take
-        want = ref.advance(0.3)
-        scale = np.abs(want.q).max()
-        np.testing.assert_allclose(got.q, want.q, rtol=0, atol=1e-11 * scale)
-        np.testing.assert_allclose(sim.state, ref.state, rtol=0, atol=1e-11 * np.abs(ref.state).max())
-    # At speed the bound is retaken only as the journals drift: the kernel hands back to take it afresh.
-    assert (takes > 1) == drifts
+        assert (sims[0].omega == sims[0].target) == steady
+        takes = sims[0]._films.kernel.takes if steady else 0
+        for _ in range(2):
+            got, want = sims[0].advance(0.15), sims[1].advance(0.15)
+            np.testing.assert_allclose(got.q, want.q, rtol=0, atol=1e-10 * np.abs(want.q).max())
+            np.testing.assert_allclose(sims[0].state, sims[1].state, rtol=0,
+                                       atol=1e-10 * np.abs(sims[1].state).max())
+    # At speed the kernel keeps its bound from one advance to the next, and retakes it as the journals drift.
+    assert (sims[0]._films.kernel.takes > takes) == drifts
