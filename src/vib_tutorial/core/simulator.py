@@ -55,6 +55,7 @@ import math
 import numpy as np
 import scipy.linalg
 
+from . import native
 from .energy import stored_energy
 from .forcing import ForceController, ForceKind
 from .model import ChainSystem, held, state_space
@@ -453,7 +454,34 @@ class Simulator:
                 break
         return totals
 
+    def _friction_kernel(self):
+        """The Rust friction steps for the current input (`native.module.FrictionSteps`), kept while the system is."""
+        key, b, b_du = inp = self._input()
+        ck = ("kernel", key)
+        if ck not in self._friction_cache:
+            s = self.system
+            self._friction_cache[ck] = native.module.FrictionSteps(
+                input_system(self._A, b, b_du), self._pull_rows(*inp), s.masses.tolist(), s.stiffness.tolist(),
+                s.damping.tolist(), s.friction.tolist(), s.static_friction.tolist(), key[0] == "base",
+                key[1] if key[0] == "force" else 0, EVENTS_PER_MASS)
+        return self._friction_cache[ck]
+
     def _advance_friction(self, h: float, steps: int) -> tuple[np.ndarray, ...]:
+        """`_advance_friction_reference`'s steps, by the Rust kernel (`_friction_kernel`) where it's built."""
+        if native.module is None:
+            return self._advance_friction_reference(h, steps)
+        n = self.system.n
+        ts, fs = np.empty(steps), np.empty(steps)
+        for k in range(steps):  # the force doesn't depend on the motion: all of it first
+            self.force.advance(h)
+            fs[k] = self.force.value()
+            self.t += h
+            ts[k] = self.t
+        zs, losses = np.empty((steps, 2 * n)), np.empty((steps, 3))
+        self._friction_kernel().advance(self.state.tolist(), self._u, fs, h, zs, losses)
+        return ts, zs, fs, losses
+
+    def _advance_friction_reference(self, h: float, steps: int) -> tuple[np.ndarray, ...]:
         """(t, z, input, per-step (dissipated, work, friction loss)) for `steps` steps with friction."""
         n = self.system.n
         inp = self._input()
@@ -491,9 +519,27 @@ class Simulator:
         inp = self._input()
         P = self._pull_rows(*inp)
         zs = np.empty((f.size, 2 * n))
+        F, Fs = self.system.friction, self.system.static_friction
+        if native.module is not None:
+            self._friction_kernel().drive(self.state.tolist(), self._u, f, h, zs)
+        else:
+            self._drive_reference(f, h, inp, P, zs)
+        if f.size:
+            self.state = zs[-1].copy()
+            self._u = float(f[-1])
+        # The acceleration at each sample: none while stuck, else (pull - friction) / m.
+        v = zs[:, n:]
+        pull = np.column_stack([zs, f, np.zeros(f.size)]) @ P.T  # a force has no slope term (b_du = 0)
+        way = np.where(v != 0.0, np.sign(v), np.sign(pull))
+        stuck = (v == 0.0) & (F > 0) & held(pull, Fs)
+        return zs, np.where(stuck, 0.0, (pull - F * way) / self.system.masses)
+
+    def _drive_reference(self, f: np.ndarray, h: float, inp: tuple, P: np.ndarray, zs: np.ndarray) -> None:
+        """`drive`'s steps, into zs (len(f), 2n): the Python the Rust kernel's `drive` mirrors."""
+        n = self.system.n
         w = np.zeros(3 * n + 2)
         w[: 2 * n] = self.state
-        F, Fs = self.system.friction, self.system.static_friction
+        Fs = self.system.static_friction
         f0 = self._u
         k = 0
         while k < f.size:
@@ -513,15 +559,6 @@ class Simulator:
             zs[k] = w[: 2 * n]
             f0 = f1
             k += 1
-        if f.size:
-            self.state = zs[-1].copy()
-            self._u = float(f[-1])
-        # The acceleration at each sample: none while stuck, else (pull - friction) / m.
-        v = zs[:, n:]
-        pull = np.column_stack([zs, f, np.zeros(f.size)]) @ P.T  # a force has no slope term (b_du = 0)
-        way = np.where(v != 0.0, np.sign(v), np.sign(pull))
-        stuck = (v == 0.0) & (F > 0) & held(pull, Fs)
-        return zs, np.where(stuck, 0.0, (pull - F * way) / self.system.masses)
 
     def advance(self, duration: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Advance by approximately `duration` seconds of simulated time.

@@ -8,9 +8,11 @@ import pytest
 import scipy.linalg
 
 from vib_tutorial.core import fluid_bearing, native
+from vib_tutorial.core.forcing import ForceKind
+from vib_tutorial.core.model import ChainSystem
 from vib_tutorial.core.rotor import RPM, RotorSimulator, RotorSystem
 from vib_tutorial.core.rotor_presets import JOURNAL_BEARING
-from vib_tutorial.core.simulator import foh_discretize
+from vib_tutorial.core.simulator import Simulator, foh_discretize
 
 needs_native = pytest.mark.skipif(native.module is None, reason="Rust kernels not loaded")
 
@@ -148,3 +150,60 @@ def test_film_steps_match_the_reference(gravity, density, rpm, drifts):
                                        atol=1e-10 * np.abs(sims[1].state).max())
     # At speed the kernel keeps its bound from one advance to the next, and retakes it as the journals drift.
     assert (sims[0]._films.kernel.takes > takes) == drifts
+
+
+def _forced(system, freq, amplitude, base=False):
+    sim = Simulator(system)
+    s = sim.force.settings
+    s.kind, s.freq_hz, s.base = ForceKind.HARMONIC, freq, base
+    if base:
+        s.base_amplitude = amplitude
+    else:
+        s.amplitude = amplitude
+    sim.force.switch_on()
+    return sim
+
+
+FRICTION_CASES = {
+    "stick-slip": (ChainSystem([1.0] * 3, [400.0] * 3, [1.0] * 3, [0.3, 0.2, 0.5]), 2.0, 2.0, False),
+    "eight masses": (ChainSystem([0.5] * 8, [2000.0] * 8, [0.5] * 8, [1.0] * 8), 5.0, 20.0, False),
+    "stiff, 1 kHz": (ChainSystem([0.01] * 4, [1e5] * 4, [0.1] * 4, [0.5] * 4), 1000.0, 50.0, False),
+    "ground motion": (ChainSystem([1.0] * 3, [400.0] * 3, [1.0] * 3, [0.3, 0.2, 0.5]), 2.0, 0.01, True),
+    "static friction, a free mass": (ChainSystem([1.0] * 3, [400.0] * 3, [1.0] * 3, [0.3, 0.0, 0.5],
+                                                 static_ratio=1.5), 2.0, 2.0, False),
+}
+
+
+@needs_native
+@pytest.mark.parametrize("case", FRICTION_CASES)
+def test_friction_steps_match_the_reference(case):
+    # The kernel steps as _advance_friction_reference does, events and all; its energy ledger comes from
+    # the input's work and the energy balance rather than Van Loan's integrals, the same to rounding.
+    system, freq, amplitude, base = FRICTION_CASES[case]
+    sim, ref = _forced(system, freq, amplitude, base), _forced(system, freq, amplitude, base)
+    ref._advance_friction = ref._advance_friction_reference
+    for _ in range(6):
+        got, want = sim.advance(0.1), ref.advance(0.1)
+        for g, w in zip(got, want):
+            np.testing.assert_allclose(g, w, rtol=0, atol=1e-11 * max(np.abs(w).max(), 1e-300))
+        np.testing.assert_allclose(sim.ledger, ref.ledger, rtol=0, atol=1e-11 * np.abs(ref.ledger).max())
+    assert sim.friction_loss > 0.0
+    assert sim.t == ref.t
+
+
+@needs_native
+def test_friction_drive_matches_the_reference(monkeypatch):
+    # The virtual modal test's path: a burst, a quiet stretch where everything sticks (skipped), a step, noise.
+    rng = np.random.default_rng(1)
+    f = np.concatenate([rng.normal(scale=3.0, size=800), np.zeros(1500), np.full(300, 0.4),
+                        rng.normal(scale=1.0, size=500)])
+    for system in (ChainSystem([1.0] * 3, [400.0] * 3, [1.0] * 3, [0.3, 0.2, 0.5]),
+                   ChainSystem([0.5] * 8, [2000.0] * 8, [0.5] * 8, [1.0] * 8, static_ratio=1.3)):
+        got = Simulator(system).drive(f, 2.0**-11)
+        with monkeypatch.context() as m:
+            m.setattr(native, "module", None)
+            ref = Simulator(system)
+            want = ref.drive(f, 2.0**-11)
+        assert (np.abs(want[0][:, system.n:]).max(axis=1) == 0.0).sum() > 1000  # the quiet stretch stuck
+        for g, w in zip(got, want):
+            np.testing.assert_allclose(g, w, rtol=0, atol=1e-11 * np.abs(w).max())
