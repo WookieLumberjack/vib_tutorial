@@ -163,6 +163,7 @@ from typing import NamedTuple
 import numpy as np
 import scipy.linalg
 
+from . import native
 from .fluid_bearing import BearingState, JournalBearing, full_film_damping, pi_film
 from .magnetic_bearing import MagneticBearing
 from .simulator import MAX_STEP, MAX_STEPS_PER_ADVANCE, STEPS_PER_PERIOD, foh_discretize
@@ -1788,6 +1789,11 @@ class _Films:
         self.scale = 1.0 + max(abs(w) for w in system.bearing_loads)
         self.held = math.nan
         self.key: tuple | None = None
+        self.kernel = None  # the Rust steps on the update, built when first stepped (`stepper`)
+
+    def __getstate__(self) -> dict:
+        # The Rust kernel doesn't copy or pickle: a copy builds its own from the same matrices.
+        return {**self.__dict__, "kernel": None}
 
     def hold(self, omega: float) -> None:
         """Take the films' K_f and p at the speed Ω the exact update holds."""
@@ -1798,6 +1804,7 @@ class _Films:
         self.held = omega
         self.Kf, self.Cf = Kf[np.ix_(d, d)], Cf[np.ix_(d, d)]
         self.p = p[d] if self.system.gravity else np.zeros(len(d))
+        self.A = self.system.state_matrix(omega)  # each take changes only the films' damping in it
 
     def bound(self, z: np.ndarray) -> list[tuple[float, float, float]]:
         """Each film's whole damping (c_xx, c_xy, c_yy) where its journal is in the state z."""
@@ -1807,10 +1814,13 @@ class _Films:
     def take(self, z: np.ndarray, h: float, omega: float) -> None:
         """Bound the damping where the journals are in z, and discretize over h at the held speed Ω."""
         system, n, d = self.system, self.system.n_dof, self.dofs
+        self.hold(omega)
         self.taken = self.bound(z)
         self.size = max(abs(c) for b in self.taken for c in b)
-        self.Cb = scipy.linalg.block_diag(*(((cxx, cxy), (cxy, cyy)) for cxx, cxy, cyy in self.taken))
-        A = system.state_matrix(omega)
+        self.Cb = np.zeros((len(d), len(d)))
+        for i, (cxx, cxy, cyy) in enumerate(self.taken):
+            self.Cb[2 * i:2 * i + 2, 2 * i:2 * i + 2] = ((cxx, cxy), (cxy, cyy))
+        A = self.A.copy()
         A[n:2 * n, self.rates] -= system.mass_inverse[:, d] @ (self.Cb - self.Cf)
         self.Phi, self.G0, self.G1 = foh_discretize(A, system.input_matrix(), h)
         self.R0, self.R1 = self.G0[:, d], self.G1[:, d]
@@ -1820,6 +1830,16 @@ class _Films:
         self.lin = np.hstack([self.Kf, self.Cb])  # the update's films: p - K_f x - C_b x'
         self.eye = np.eye(len(d))
         self.key = (h, omega)
+        self.kernel = None
+
+    def stepper(self):
+        """The Rust kernel's steps on this bound's update (`native.module.FilmSteps`)."""
+        if self.kernel is None:
+            self.kernel = native.module.FilmSteps(
+                self.Phi, self.G0, self.G1, self.R0, self.R1, self.E, self.Es, self.Ev, self.lin, self.Kf,
+                self.Cb, self.p, self.dofs + self.rates, self.films, self.taken, FILM_DRIFT * self.size,
+                FILM_TOL * self.scale, FILM_CORRECTION * self.scale, FILM_ITERATIONS)
+        return self.kernel
 
     def drifted(self, z: np.ndarray) -> bool:
         """True once a journal has moved far enough that the damping bound should be taken afresh."""
@@ -2098,6 +2118,32 @@ class RotorSimulator:
 
     def _film_steps(self, h: float, held: float, w1: np.ndarray, u0: np.ndarray, u: np.ndarray,
                     out: np.ndarray) -> np.ndarray:
+        """`_film_steps_reference`'s steps, by the Rust kernel (`_Films.stepper`) where it's built.
+
+        It steps until a journal drifts; the bound is taken afresh here (a matrix
+        exponential), and it carries on from there.
+        """
+        if native.module is None:
+            return self._film_steps_reference(h, held, w1, u0, u, out)
+        films = self._films
+        films.hold(held)
+        z = self.state
+        if films.key != (h, held) or films.drifted(z):
+            films.take(z, h, held)
+        r = films.remainder(z, self.omega)
+        last = older = r
+        u0, u = np.ascontiguousarray(u0, dtype=float), np.ascontiguousarray(u, dtype=float)
+        j = 0
+        while True:
+            j, z, r, last, older = films.stepper().steps(z, r, last, older, u0, u, w1, j, out)
+            z = np.asarray(z)
+            if j == w1.size:
+                return z
+            films.take(z, h, held)
+            r = last = older = films.remainder(z, w1[j - 1])
+
+    def _film_steps_reference(self, h: float, held: float, w1: np.ndarray, u0: np.ndarray, u: np.ndarray,
+                              out: np.ndarray) -> np.ndarray:
         """Steps with the oil films' whole force (`whole_films`); fills out (n, n_dof), returns the last state.
 
         The film's force depends on where the journal is and how it moves, far from

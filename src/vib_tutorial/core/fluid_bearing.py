@@ -323,7 +323,7 @@ def pi_film_reference(k: float, c: float, x: float, y: float, vx: float, vy: flo
 pi_film = native.kernel("pi_film", pi_film_reference)
 
 
-def full_film_damping(k: float, c: float, x: float, y: float) -> tuple[float, float, float]:
+def full_film_damping_reference(k: float, c: float, x: float, y: float) -> tuple[float, float, float]:
     """(c_xx, c_xy, c_yy): the whole uncavitated film's damping at (x, y), more than the π-film's at any velocity.
 
     2k ∫ n nᵀ / (1 - ε cos φ)³ round the whole bearing: π(1 + 2ε²)/(1 - ε²)^{5/2}
@@ -336,6 +336,9 @@ def full_film_damping(k: float, c: float, x: float, y: float) -> tuple[float, fl
     crr = 2.0 * math.pi * k * (1.0 + 2.0 * eps * eps) / s2**2.5
     ctt = 2.0 * math.pi * k / s2**1.5
     return crr * cp * cp + ctt * sp * sp, (crr - ctt) * cp * sp, crr * sp * sp + ctt * cp * cp
+
+
+full_film_damping = native.kernel("full_film_damping", full_film_damping_reference)
 
 
 def rigid_threshold(k: np.ndarray, c: np.ndarray) -> tuple[float, float]:

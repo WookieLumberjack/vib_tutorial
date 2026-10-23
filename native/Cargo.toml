@@ -13,6 +13,7 @@ crate-type = ["cdylib"]
 [dependencies]
 # abi3: one build serves every Python from 3.12 on.
 pyo3 = { version = "0.30.1", features = ["abi3-py312"] }
+numpy = "0.30.0"
 
 [profile.release]
 codegen-units = 1
