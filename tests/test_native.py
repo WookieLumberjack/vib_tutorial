@@ -70,8 +70,9 @@ def test_full_film_damping_matches_the_reference():
         angle = rng.uniform(0.0, 2 * math.pi)
         x, y = eps * c * math.cos(angle), eps * c * math.sin(angle)
         want = fluid_bearing.full_film_damping_reference(k, c, x, y)
+        # At the wall it divides by (1 - ε²)^2.5 ~ 1e-15, and the platforms' pow round apart by ~1e-13 there.
         np.testing.assert_allclose(native.module.full_film_damping(k, c, x, y), want, rtol=0,
-                                   atol=1e-13 * max(abs(v) for v in want))
+                                   atol=1e-12 * max(abs(v) for v in want))
 
 
 @needs_native
