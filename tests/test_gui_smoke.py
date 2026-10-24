@@ -1506,6 +1506,15 @@ def test_frequency_response_with_friction(app):
     assert "friction at 10 N" in plot.mag.titleLabel.text
     w.force_panel.amplitude.setValue(2.0)
     assert "friction at 2 N" in plot.mag.titleLabel.text and len(plot.friction_curves) == 2 * w.sim.system.n
+    drawn = list(plot.friction_curves)
+    w.tabs.setCurrentIndex(0)
+    w.tabs.setCurrentWidget(w.frf_tab)
+    assert plot.friction_curves == drawn  # nothing changed while hidden: kept, not worked out again
+    w.tabs.setCurrentIndex(0)
+    w.force_panel.amplitude.setValue(3.0)
+    assert plot.friction_curves == drawn  # changed while hidden: drawn when shown
+    w.tabs.setCurrentWidget(w.frf_tab)
+    assert plot.friction_curves != drawn and len(plot.friction_curves) == 2 * w.sim.system.n
     w.force_panel.input.setCurrentIndex(1)  # ground motion
     w.force_panel.base_amplitude.setValue(5.0)
     assert "friction at 5 mm" in plot.mag.titleLabel.text
