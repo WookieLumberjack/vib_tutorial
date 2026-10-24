@@ -2573,6 +2573,38 @@ def test_simulation_page_steps_friction_beside_the_frame(app):
     w.close()
 
 
+def test_history_keeps_every_stride_th_step_of_a_fast_chain(app):
+    """A stiff chain's steps are short: the history keeps STORE_PER_PERIOD samples to its fastest period,
+    evenly across advances, so it spans the plot window; the energy balance still closes on them."""
+    import numpy as np
+
+    from vib_tutorial.core.model import ChainSystem
+    from vib_tutorial.gui.main_window import STORE_PER_PERIOD, MainWindow
+
+    w = MainWindow()
+    w.pages.setCurrentWidget(w.sim_page)
+    w.coords_combo.setCurrentIndex(2)  # energy
+    w._on_system_changed(ChainSystem([0.01] * 4, [3.6e5] * 4, [0.1] * 4, [0.5] * 4))
+    w.force.settings.freq_hz, w.force.settings.amplitude = 1000.0, 50.0
+    w.force_panel.button.click()
+    h, stride = w.sim.step_size(), w._store_stride()
+    assert stride > 1 and 1.0 / (stride * h * w.sim.fastest_hz()) >= STORE_PER_PERIOD
+    assert w.history.capacity * stride * h > 9.0  # most of the 10 s window, not 2.3 s
+    for steps in (7, 1, 3000, 2):  # advances shorter and longer than the stride
+        w._sim_target = w.sim.t + (steps + 0.4) * h
+        w._start()
+        w._collect()
+    t = w.history.t[: w.history.size]
+    np.testing.assert_allclose(np.diff(t), stride * h, rtol=1e-9)
+    assert t[-1] <= w.sim.t < t[-1] + stride * h
+    w.running = False
+    w._tick()  # draws them
+    T, V, stored, added, work, dissipated, rubbed = _energy_rows(w)
+    assert rubbed[-1] > 0
+    np.testing.assert_allclose(added + work, stored + dissipated + rubbed, rtol=0, atol=1e-12 * work.max())
+    w.close()
+
+
 def test_simulation_page_keeps_to_its_compute_budget(app, monkeypatch):
     """A frame takes no more simulator steps than FRAME_BUDGET allows at the cost of a step seen so far,
     so a slow simulation (friction on a stiff chain) falls behind real time instead of stalling the
