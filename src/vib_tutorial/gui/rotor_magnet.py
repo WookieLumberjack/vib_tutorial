@@ -76,6 +76,7 @@ class MagnetPanel(QtWidgets.QWidget):
         self.onset: Onset | None = None  # where the rotor running on it goes unstable
         self.rpm = 0.0  # the rotor's speed now
         self._mode_rpm = math.nan  # the speed the mode lines were drawn for
+        self._stale = False  # changed while hidden: drawn when the tab shows
         m = MagneticBearing()
         self.gap = spin(0.05, 10.0, m.gap * 1e3, 3, " mm")
         self.bias = spin(0.01, 100.0, m.bias, 2, " A")
@@ -194,6 +195,15 @@ class MagnetPanel(QtWidgets.QWidget):
         self.changed.emit()
 
     # ------------------------------------------------------------- drawing
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().showEvent(event)
+        self.catch_up()
+
+    def catch_up(self) -> None:
+        """Draw what changed while the tab was hidden (its drawing waits till it shows)."""
+        if self._stale:
+            self._redraw()
+
     def apply_theme(self) -> None:
         self.k_curve.setPen(pg.mkPen(colors.mode[0], width=2))
         self.c_curve.setPen(pg.mkPen(colors.mode[1], width=2))
@@ -211,6 +221,9 @@ class MagnetPanel(QtWidgets.QWidget):
         return LOWEST, 10.0 ** math.ceil(math.log10(top))
 
     def _redraw(self) -> None:
+        self._stale = self.isHidden()  # a tab not showing: draw when it does
+        if self._stale:
+            return
         m = self.bearing()
         lo, hi = self._span(m)
         f = np.geomspace(lo, hi, POINTS)
@@ -281,6 +294,9 @@ class MagnetPanel(QtWidgets.QWidget):
                 lines.append(line)
 
     def _write(self) -> None:
+        if self.isHidden():
+            self._stale = True
+            return
         m = self.bearing()
         ks, ki = m.negative_stiffness, m.current_gain
         net = ki * m.kp - ks
