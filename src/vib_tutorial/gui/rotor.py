@@ -1183,6 +1183,7 @@ class RotorPage(QtWidgets.QWidget):
         self.tabs.addTab(self.magnet_panel, "Magnetic bearing")
         self.tabs.addTab(self.matrices, "Equations && matrices")
         self.tabs.addTab(self.theory, "Theory")
+        self.tabs.currentChanged.connect(lambda _: self._catch_up_tab())
         self.tabs.currentChanged.connect(lambda _: self._refresh_matrices())
         self.tabs.currentChanged.connect(lambda _: self._draw_waterfall(only_new=True))
         self.tabs.currentChanged.connect(lambda _: self._show_bearing_speed())
@@ -1993,6 +1994,12 @@ class RotorPage(QtWidgets.QWidget):
     def _on_bearing_tab(self, kind: int) -> None:
         if self.supports.currentIndex() == kind:
             self._on_params()  # the rotor's bearings are the tab's
+
+    def _catch_up_tab(self) -> None:
+        """The Balancing and bearing tabs draw only while they show: bring the one showing up to date."""
+        tab = self.tabs.currentWidget()
+        if tab in (self.balancing, self.bearing_panel, self.magnet_panel):
+            tab.catch_up()
 
     def _show_bearing_speed(self) -> None:
         if self.tabs.currentWidget() is self.bearing_panel:

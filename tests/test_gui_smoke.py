@@ -2117,6 +2117,36 @@ def test_rotor_cracked_shaft(app):
     assert not len(p.view.crack_mark.getData()[0])
 
 
+def test_rotor_hidden_tabs_draw_when_shown(app, monkeypatch):
+    """The Balancing and bearing tabs draw only while they show: a preset loaded meanwhile is drawn when
+    the tab shows, once, while the state they keep (the load box, the buttons) follows at once."""
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.rotor_balance import BalancingPanel
+    from vib_tutorial.gui.rotor_bearing import BearingPanel
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    p.running = False
+    drawn = []
+    for cls, name in ((BearingPanel, "_draw_locus"), (BalancingPanel, "_draw_curves")):
+        draw = getattr(cls, name)
+        monkeypatch.setattr(cls, name, lambda self, *a, draw=draw, name=name: (drawn.append(name), draw(self, *a)))
+    p.load_preset("Journal bearings (oil whip)")
+    p._refresh_analysis()
+    s = p.sim.system
+    assert not drawn and p.bearing_panel._stale and p.balancing._stale
+    assert p.bearing_panel.load.value() == pytest.approx(abs(s.bearing_loads[0]), abs=0.01)
+    p.tabs.setCurrentWidget(p.bearing_panel)
+    assert drawn == ["_draw_locus"] and not p.bearing_panel._stale and "At rest" in p.bearing_panel.readout.text()
+    p.tabs.setCurrentWidget(p.balancing)
+    assert drawn == ["_draw_locus", "_draw_curves"] and not p.balancing._stale
+    p.tabs.setCurrentWidget(p.bearing_panel)  # nothing changed meanwhile
+    assert drawn == ["_draw_locus", "_draw_curves"]
+    w.close()
+
+
 def test_rotor_fluid_film_bearing(app):
     from vib_tutorial.core.fluid_bearing import JournalBearing
     from vib_tutorial.gui.main_window import MainWindow
@@ -2243,7 +2273,10 @@ def test_rotor_on_magnetic_bearings(app):
     p.running = False
     panel = p.magnet_panel
     assert panel.bearing() == MagneticBearing() and panel.system is None
+    assert panel.note.text() == ""  # a tab not showing draws when it shows
+    p.tabs.setCurrentWidget(panel)
     assert "Choose <i>Magnetic bearings</i>" in panel.note.text()
+    p.tabs.setCurrentIndex(0)  # hidden again while the preset loads
     # The preset floats on the tab's bearing (its amplifier slowed), the journals held at the centre.
     p.load_preset("Magnetic bearings")
     p._refresh_analysis()

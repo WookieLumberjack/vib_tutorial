@@ -88,6 +88,7 @@ class BalancingPanel(QtWidgets.QWidget):
         self.planes_used: tuple[PlaneWeight, ...] = ()  # the planes the trials went in (two planes)
         self.correction: np.ndarray | None = None  # the correction weights put on (kg·m), one per plane
         self._rng = np.random.default_rng()
+        self._stale = False  # changed while hidden: drawn when the tab shows
 
         form = QtWidgets.QFormLayout()
         self.mode = QtWidgets.QComboBox()
@@ -463,6 +464,15 @@ class BalancingPanel(QtWidgets.QWidget):
             self.status.setText(text)
 
     # ------------------------------------------------------------- drawing
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().showEvent(event)
+        self.catch_up()
+
+    def catch_up(self) -> None:
+        """Draw what changed while the tab was hidden (its drawing waits till it shows)."""
+        if self._stale:
+            self.refresh()
+
     def _place_speed_lines(self) -> None:
         self.speed_lines[0].setValue(self.speed.value())
         self.speed_lines[1].setValue(self.slow_speed.value())
@@ -472,6 +482,9 @@ class BalancingPanel(QtWidgets.QWidget):
         """Redraw the vectors, the results and the curves from the readings kept."""
         if self.page.measurement is None:
             self._enable(True)
+        self._stale = self.isHidden()  # a tab not showing: draw when it does
+        if self._stale:
+            return
         values = {key: self.readings(key) for key, _, _ in READINGS}
         shown = {key for key, _, _ in READINGS if key != "trial2" or self.two_planes}
         n = len(self.probes())

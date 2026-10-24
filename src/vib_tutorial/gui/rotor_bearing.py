@@ -89,6 +89,7 @@ class BearingPanel(QtWidgets.QWidget):
         self.rpm = 0.0  # the rotor's speed now
         self._shown_rpm = math.nan  # the speed the readings were written for
         self._threshold: float | None = None  # rad/s, where a rigid rotor on it whirls, if it does
+        self._stale = False  # changed while hidden: drawn when the tab shows
         b = JournalBearing()
         self.diameter = spin(1.0, 1000.0, b.diameter * 1e3, 1, " mm")
         self.length = spin(0.5, 1000.0, b.length * 1e3, 1, " mm")
@@ -266,6 +267,9 @@ class BearingPanel(QtWidgets.QWidget):
             self.load.blockSignals(True)
             self.load.setValue(b.load)
             self.load.blockSignals(False)
+        self._stale = self.isHidden()  # a tab not showing: draw when it does
+        if self._stale:
+            return
         threshold = b.threshold(max(self.top_rpm, THRESHOLD_TOP) / RPM)
         self._threshold = threshold
         self._draw_locus(b)
@@ -284,6 +288,15 @@ class BearingPanel(QtWidgets.QWidget):
         self._show_speed()
 
     # ------------------------------------------------------------- drawing
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().showEvent(event)
+        self.catch_up()
+
+    def catch_up(self) -> None:
+        """Draw what changed while the tab was hidden (its drawing waits till it shows)."""
+        if self._stale:
+            self._redraw()
+
     def apply_theme(self) -> None:
         self.circle.setPen(pg.mkPen(colors.structure, width=1.5))
         for line in self.axes:
