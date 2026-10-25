@@ -1,5 +1,6 @@
 """Rub on a stator ring round the disc: the contact force, the time step, and the presets' notes."""
 
+import cmath
 import math
 from dataclasses import replace
 
@@ -191,3 +192,55 @@ def test_things_to_try():
     freqs, amps = full_spectrum(t[t > 17.0], x[t > 17.0], y[t > 17.0])
     assert freqs[np.argmax(amps)] == pytest.approx(50.0, abs=0.4)  # 1X
     assert amps[np.abs(np.abs(freqs) - 25.0) < 0.5].max() < 0.02 * amps.max()
+
+
+def one_x(sim: RotorSimulator, r) -> complex:
+    """The disc's 1X vector (x probe) over the last revolution of the samples r."""
+    last = r.phase > r.phase[-1] - 2 * math.pi
+    return complex(2 * np.mean(r.q[last, XD] * np.exp(-1j * r.phase[last])))
+
+
+def test_thermal_bow_moves_with_the_heat():
+    """τ b' = β H - b: held heat settles the bow at β H toward the hot spot, e-folding in τ."""
+    s = RotorSystem(stator=Stator(clearance=5e-6, thermal_gain=1e-5, thermal_lag=0.5))
+    sim = RotorSimulator(s)
+    assert sim.thermal and sim.thermal_bow == 0
+    n = 1000
+    heat, q = np.full(n, 2.0), np.zeros((n, s.n_dof))
+    q[:, YD] = -1.0  # touching at the bottom
+    sim._warm(0.5, heat, q, np.zeros(n))  # the mark at 0: the hot spot at -90° on the shaft
+    assert sim.thermal_bow == pytest.approx(-2e-5j * (1 - math.exp(-1)))
+    sim._warm(100.0, heat, q, np.full(n, 0.5 * math.pi))  # turned a quarter: the hot spot at -180°
+    assert sim.thermal_bow == pytest.approx(-2e-5, abs=1e-12)
+    # As a bow, it loads the shaft as the residual bow does.
+    bowed = s.with_(bow=2e-5, bow_angle=math.pi)
+    assert sim.force(0.3, 100.0, 0.0) == pytest.approx(RotorSimulator(bowed).force(0.3, 100.0, 0.0))
+    sim.reset()
+    assert sim.thermal_bow == 0
+    with pytest.raises(ValueError):
+        RotorSystem(stator=Stator(thermal_lag=0.0))
+
+
+def test_newkirk_preset_spirals_out_below_the_critical_and_heals_above():
+    p = PRESETS["Newkirk effect (thermal bow)"]
+    sim = RotorSimulator(p.system)
+    sim.target = p.target_rpm / RPM
+    lags, sizes = [], []
+    while sim.t < 18.0 - 0.5 * sim.step_size():
+        r = sim.advance(min(0.25, 18.0 - sim.t))
+        if sim.t > 3.0:
+            x = one_x(sim, r)
+            lags.append(-math.degrees(cmath.phase(x)))
+            sizes.append(abs(x))
+    assert round(lags[0]) == 13 and round(lags[-1], -1) == 40
+    assert sizes[0] == pytest.approx(10e-6, abs=1e-6) and sizes[-1] > 100e-6
+    assert np.all(np.diff(lags[::8]) > -1.0)  # turning against the spin: the lag only grows
+    # Above the critical the bow built through it fades, and the rub settles light.
+    sim = RotorSimulator(p.system)
+    sim.target = 3200.0 / RPM
+    peak = 0.0
+    while sim.t < 30.0 - 0.5 * sim.step_size():
+        r = sim.advance(min(0.25, 30.0 - sim.t))
+        peak = max(peak, float(np.abs(r.bow).max()))
+    assert round(peak * 1e6) == 26
+    assert round(abs(sim.thermal_bow) * 1e6, 1) == 2.4 and round(abs(one_x(sim, r)) * 1e6, 1) == 5.9

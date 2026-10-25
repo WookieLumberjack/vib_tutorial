@@ -63,7 +63,7 @@ from .panels import spin
 from .rotor_balance import BalancingPanel
 from .rotor_bearing import BearingPanel
 from .rotor_magnet import MagnetPanel
-from .rotor_rub import RubPanel
+from .rotor_rub import SPIRAL_POINTS, RubPanel
 from .rotor_bode import SWEEP_COLORS, BodePlots, PolarPlot, SweepPlots, nice_marks
 from .rotor_figures import FigureBrowser
 from .rotor_notes import THEORY_HTML, matrices_html, whirl_name
@@ -110,6 +110,7 @@ RUB = 0.02  # of the span: a whirl this large pauses the simulation (a real roto
 GRAVITY = 9.81  # m/s²
 SAG_SPEEDS = 201  # speeds the static sag is worked out at, with internal damping, and interpolated
 SPECTRUM_FRAMES = 6  # the full spectrum is recomputed every this many frames
+SPIRAL_DT = 0.05  # s of simulated time between the Newkirk spiral's points
 MEASURE_SPEED = 2.0  # × real time, at least, while a balancing measurement runs
 FRAME_BUDGET = 0.012  # s of computing per frame: past it (the films' whole force is slow) the page runs slower
 WATERFALL_FRAMES = 15  # new spectra are drawn at most every this many frames (each repaint fills every line)
@@ -1029,6 +1030,9 @@ class RotorPage(QtWidgets.QWidget):
         self._frames = 0
         self._next_tap = 0.0  # simulated time of the next repeated tap
         self.waterfall: Waterfall | None = None  # spectra block by block, made by _new_waterfall
+        self._spiral: tuple[list[complex], list[complex]] = ([], [])  # the 1X vectors and thermal bows recorded
+        self._spiral_next = 0.0  # simulated time of the spiral's next point
+        self._heat = 0.0  # W: the rub's heat over the last advance
         self._waterfall_drawn = False  # the waterfall tab shows the latest blocks
 
         # --- parameters
@@ -1804,6 +1808,7 @@ class RotorPage(QtWidgets.QWidget):
             self.clear_sweeps()  # their steady-state curve is about to change
         self.cancel_measurement()
         self.sim.set_system(system)
+        self._clear_spiral()  # a new rotor's spiral starts afresh
         self.bearing_panel.set_rotor(system.bearing_loads if system.films else None)
         self.magnet_panel.set_rotor(system if system.magnets else None)
         self.rub_panel.update_info(system)
@@ -2130,6 +2135,7 @@ class RotorPage(QtWidgets.QWidget):
         self.sim.reset()
         self.rubbed = False
         self.history.clear()
+        self._clear_spiral()
         self._new_waterfall()
         self._target_t = 0.0
         self._carry = 0
@@ -2438,6 +2444,8 @@ class RotorPage(QtWidgets.QWidget):
         if self.sim.t > began:  # s of computing per simulated s, smoothed
             cost = (time.perf_counter() - start) / (self.sim.t - began)
             self._cost = 0.8 * self._cost + 0.2 * cost if self._cost > 1e-9 else cost
+        if r.rub is not None and r.t.size:
+            self._heat = float(r.rub[:, 3].mean())
         if r.t.size:
             # Keep every stride-th sample, continuing the stride across advances.
             first = (self._stride - self._carry - 1) % self._stride
@@ -2451,6 +2459,11 @@ class RotorPage(QtWidgets.QWidget):
                 cols = np.column_stack([cols, push])
                 self.history.extend(r.t[pick], cols)
                 vib = self._vibration(cols)
+                if self.sim.thermal:  # at a steady speed only: a new speed starts it afresh
+                    if self.sim.omega != self.sim.target:
+                        self._clear_spiral()
+                    elif self.sim.t >= self._spiral_next and self.sim.omega > 0.0:
+                        self._record_spiral()
                 if self.waterfall.feed(r.t[pick], vib[:, 0::2] + 1j * vib[:, 1::2], cols[:, OMEGA]):
                     self._waterfall_drawn = False
         touched = self._journal_touched()
@@ -2595,10 +2608,35 @@ class RotorPage(QtWidgets.QWidget):
         self.readout.setText(" · ".join(parts))
 
     def _draw_push(self, t: np.ndarray | None = None, hist: np.ndarray | None = None) -> None:
-        """The Rub tab's plot of the ring's push, over the strip chart's window (`t`, `hist` from the history)."""
+        """The Rub tab's plot of the ring's push, over the strip chart's window (`t`, `hist` from the history),
+        and its Newkirk spiral."""
         if t is None:
             t, hist = self.history.window(self.window.value())
         self.rub_panel.update_contact(t, hist[:, PUSH], self.window.value())
+        if self.sim.thermal:
+            vectors, bows = self._spiral
+            self.rub_panel.update_spiral(np.array(vectors, dtype=complex), np.array(bows, dtype=complex), self._heat)
+
+    def _clear_spiral(self) -> None:
+        self._spiral = ([], [])
+        self._spiral_next = self.sim.t
+
+    def _record_spiral(self) -> None:
+        """Add the Newkirk spiral's next point: the disc's 1X vector over the last revolution, and the thermal
+        bow, both at the probe's direction."""
+        _, y = self.history.window(2.0 * math.pi / abs(self.sim.omega))
+        if y.shape[0] < 8:
+            return
+        self._spiral_next = self.sim.t + SPIRAL_DT
+        disc = self._vibration(y)[:, 2:4]
+        X = 2.0 * np.mean(disc * np.exp(-1j * y[:, PHASE])[:, None], axis=0)
+        direction = self._probe()[1]
+        b = self.sim.thermal_bow
+        vectors, bows = self._spiral
+        vectors.append(complex(probe(X, direction)))
+        bows.append(complex(probe(np.array([b, -1j * b]), direction)))  # the bow's runout: x = Re(b e^{iφ})
+        if len(vectors) > SPIRAL_POINTS:
+            del vectors[1::2], bows[1::2]
 
     def _ring(self, q: np.ndarray) -> tuple[float, float, float] | None:
         """The stator ring as drawn with the rotor at q (shown with its sag or without): its centre, pushed out

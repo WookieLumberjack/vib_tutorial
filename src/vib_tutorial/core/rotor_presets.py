@@ -141,6 +141,16 @@ def rotor_presets() -> list[RotorPreset]:
             "ring back far past its clearance: dry whirl, which would wreck a real machine.",
         ),
         RotorPreset(
+            "Newkirk effect (thermal bow)",
+            RotorSystem(unbalance=5e-6, stator=Stator(clearance=15e-6, stiffness=2e4, friction=0.2, offset=10e-6,
+                                                      thermal_gain=120e-6, thermal_lag=5.0)),
+            10_000.0, 1300.0,
+            "A seal 15 µm round the disc, set 10 µm low, so at 1300 rpm, below the 1584 rpm critical, the disc "
+            "brushes its bottom. The rub heats the shaft at its high spot and bows it that way, which moves the "
+            "high spot further out: the 1X vector spirals out, past 100 µm by 18 s, its lag growing from 13° to "
+            "40°, turning against the spin (the Rub tab's polar plot). Above the critical the same rub heals.",
+        ),
+        RotorPreset(
             "Magnetic bearings",
             RotorSystem(position=1.15, bearing_a=MAGNETIC_BEARING, bearing_b=MAGNETIC_BEARING, gravity=9.81),
             20_000.0, 6000.0,

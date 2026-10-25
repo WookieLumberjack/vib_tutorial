@@ -3,7 +3,8 @@
 The ring's clearance, offset, mount and friction (core/rotor.py's `Stator`), what
 they mean for the rotor at rest (the gap left under its sag, the disc's frequency
 on the ring), and the ring's normal force on the disc over the strip chart's
-window. The rub is in the time response only: the Campbell diagram, the
+window. With a thermal gain the rub's heat bows the shaft (the Newkirk effect),
+and a polar plot follows the disc's 1X vector and the thermal bow as they spiral. The rub is in the time response only: the Campbell diagram, the
 stability map and the steady-state curves are the rotor's without the ring.
 """
 
@@ -41,7 +42,19 @@ INPUT_TIPS = {
     "damping": "<p>Damping in the ring's mount, while the disc pushes on it.</p>",
     "friction": "<p>The friction coefficient μ between the rim and the ring: the drag is μ times the ring's "
                 "push, against the rim's slip over the ring (Coulomb's, smoothed over 1 cm/s).</p>",
+    "thermal_gain": "<p>The Newkirk effect: the drag's heat goes into the shaft where it rubs, and a shaft "
+                    "hotter on one side bows toward it. β is the bow at the disc per watt of heat, once it has "
+                    "settled (0: no thermal bow). A real shaft's is set by its size, material and cooling.</p>",
+    "thermal_lag": "<p>How slowly the bow follows the heat: a first-order lag, τ b' = β H − b. Real shafts "
+                   "take minutes; a few seconds here keeps the spiral watchable.</p>",
 }
+SPIRAL_TIP = (
+    "<p>The Newkirk spiral: the disc's 1X vector (at the probe direction chosen under Run-up and coast-down), "
+    "each revolution's since the speed settled, and the thermal bow's, as 1X runout in the same direction. Angles clockwise from the "
+    "right are phase lag, as on the polar plot. Below the critical the bow pushes the high spot toward the hot "
+    "spot, so both grow and turn, against the spin (more lag); above it the bow pushes the high spot away, and "
+    "the rub heals.</p>")
+SPIRAL_POINTS = 4000  # the spiral keeps at most this many points (halving its density as it fills)
 
 
 class RubPanel(QtWidgets.QWidget):
@@ -58,16 +71,20 @@ class RubPanel(QtWidgets.QWidget):
         self.clearance = spin(1.0, 10_000.0, s.clearance * 1e6, 1, " µm")
         self.offset = spin(0.0, 10_000.0, s.offset * 1e6, 1, " µm")
         self.offset_angle = spin(-180.0, 180.0, math.degrees(s.offset_angle), 0, "°")
-        self.stiffness = spin(0.01, 1000.0, s.stiffness / 1e6, 2, " MN/m")
+        self.stiffness = spin(1.0, 1e6, s.stiffness / 1e3, 0, " kN/m")
         self.damping = spin(0.0, 1e5, s.damping, 0, " N·s/m")
         self.friction = spin(0.0, 2.0, s.friction, 2)
         self.friction.setSingleStep(0.05)
+        self.thermal_gain = spin(0.0, 10_000.0, s.thermal_gain * 1e6, 1, " µm/W")
+        self.thermal_lag = spin(0.1, 1000.0, s.thermal_lag, 1, " s")
         form = QtWidgets.QGridLayout()
         rows = (("Clearance:", (self.clearance,), "clearance"),
                 ("Offset:", (self.offset, "at", self.offset_angle), "offset"),
                 ("Mount stiffness:", (self.stiffness,), "stiffness"),
                 ("Mount damping:", (self.damping,), "damping"),
-                ("Friction μ:", (self.friction,), "friction"))
+                ("Friction μ:", (self.friction,), "friction"),
+                ("Thermal bow β:", (self.thermal_gain,), "thermal_gain"),
+                ("Thermal lag τ:", (self.thermal_lag,), "thermal_lag"))
         for r, (text, boxes, key) in enumerate(rows):
             label = QtWidgets.QLabel(text)
             label.setToolTip(INPUT_TIPS[key])
@@ -101,6 +118,24 @@ class RubPanel(QtWidgets.QWidget):
         plot_height(self.plot, 160)
         self.contact = QtWidgets.QLabel()
         self.contact.setWordWrap(True)
+        self.spiral = pg.PlotWidget()
+        self.spiral.setMenuEnabled(False)
+        self.spiral.setMouseEnabled(x=False, y=False)
+        self.spiral.hideButtons()
+        self.spiral.setAspectLocked(True)
+        self.spiral.showGrid(x=True, y=True, alpha=0.15)
+        self.spiral.setLabel("left", "Im", units="m")
+        self.spiral.setLabel("bottom", "Re", units="m")
+        self.spiral.setToolTip(SPIRAL_TIP)
+        self.vector_curve = pg.PlotDataItem()
+        self.bow_curve = pg.PlotDataItem()
+        self.ends = pg.ScatterPlotItem(size=8)
+        for item in (self.vector_curve, self.bow_curve, self.ends):
+            self.spiral.addItem(item)
+        plot_height(self.spiral, 200)
+        self.spiral_note = QtWidgets.QLabel()
+        self.spiral_note.setWordWrap(True)
+        self.spiral_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self.note = QtWidgets.QLabel(NOTE)
         self.note.setWordWrap(True)
         mute(self.note)
@@ -111,6 +146,8 @@ class RubPanel(QtWidgets.QWidget):
         layout.addWidget(self.readout)
         layout.addWidget(self.plot, 1)
         layout.addWidget(self.contact)
+        layout.addWidget(self.spiral, 1)
+        layout.addWidget(self.spiral_note)
         layout.addWidget(self.note)
         self.apply_theme()
         self._on_params(notify=False)
@@ -119,14 +156,15 @@ class RubPanel(QtWidgets.QWidget):
         """The ring the inputs describe, or None if there is none (or it is not allowed)."""
         if not (self.enabled.isChecked() and self.enabled.isEnabled()):
             return None
-        return Stator(clearance=self.clearance.value() / 1e6, stiffness=self.stiffness.value() * 1e6,
+        return Stator(clearance=self.clearance.value() / 1e6, stiffness=self.stiffness.value() * 1e3,
                       damping=self.damping.value(), friction=self.friction.value(),
-                      offset=self.offset.value() / 1e6, offset_angle=math.radians(self.offset_angle.value()))
+                      offset=self.offset.value() / 1e6, offset_angle=math.radians(self.offset_angle.value()),
+                      thermal_gain=self.thermal_gain.value() / 1e6, thermal_lag=self.thermal_lag.value())
 
     def set_stator(self, stator: Stator | None) -> None:
         """Show `stator` (None: no ring, the inputs kept), without telling the page."""
         boxes = (self.enabled, self.clearance, self.offset, self.offset_angle, self.stiffness, self.damping,
-                 self.friction)
+                 self.friction, self.thermal_gain, self.thermal_lag)
         for w in boxes:
             w.blockSignals(True)
         self.enabled.setChecked(stator is not None)
@@ -134,9 +172,11 @@ class RubPanel(QtWidgets.QWidget):
             self.clearance.setValue(stator.clearance * 1e6)
             self.offset.setValue(stator.offset * 1e6)
             self.offset_angle.setValue(math.degrees(stator.offset_angle))
-            self.stiffness.setValue(stator.stiffness / 1e6)
+            self.stiffness.setValue(stator.stiffness / 1e3)
             self.damping.setValue(stator.damping)
             self.friction.setValue(stator.friction)
+            self.thermal_gain.setValue(stator.thermal_gain * 1e6)
+            self.thermal_lag.setValue(stator.thermal_lag)
         for w in boxes:
             w.blockSignals(False)
         self._on_params(notify=False)
@@ -152,9 +192,14 @@ class RubPanel(QtWidgets.QWidget):
 
     def _on_params(self, *_, notify: bool = True) -> None:
         on = self.enabled.isChecked() and self.enabled.isEnabled()
-        for w in (self.clearance, self.offset, self.offset_angle, self.stiffness, self.damping, self.friction):
+        for w in (self.clearance, self.offset, self.offset_angle, self.stiffness, self.damping, self.friction,
+                  self.thermal_gain, self.thermal_lag):
             w.setEnabled(on)
         self.offset_angle.setEnabled(on and self.offset.value() > 0.0)
+        self.thermal_lag.setEnabled(on and self.thermal_gain.value() > 0.0)
+        thermal = on and self.thermal_gain.value() > 0.0
+        self.spiral.setVisible(thermal)
+        self.spiral_note.setVisible(thermal)
         if notify:
             self.changed.emit()
 
@@ -206,8 +251,31 @@ class RubPanel(QtWidgets.QWidget):
             self.curve.setData([], [])
             self.contact.setText("")
 
+    def update_spiral(self, vectors: np.ndarray, bows: np.ndarray, heat: float) -> None:
+        """The 1X vectors and thermal bows recorded (complex, m, as 1X at the probe), and the heat now (W)."""
+        if not vectors.size:
+            for item in (self.vector_curve, self.bow_curve, self.ends):
+                item.setData([], [])
+            self.spiral_note.setText("The spiral is recorded at a steady speed: it starts once the speed "
+                                     "reaches its target.")
+            return
+        self.vector_curve.setData(vectors.real, vectors.imag)
+        self.bow_curve.setData(bows.real, bows.imag)
+        self.ends.setData([vectors[-1].real, bows[-1].real], [vectors[-1].imag, bows[-1].imag],
+                          brush=[pg.mkBrush(colors.mass[1]), pg.mkBrush(colors.force)])
+        turned = math.degrees(np.unwrap(np.angle(vectors))[-1] - np.angle(vectors[0]))
+        self.spiral_note.setText(
+            f"<span style='color:{colors.mass[1]}'><b>1X</b></span> {_fmt_um(abs(vectors[-1]))} at "
+            f"{-math.degrees(np.angle(vectors[-1])):.0f}° lag (from {_fmt_um(abs(vectors[0]))}, "
+            f"{'more' if turned < 0 else 'less'} lag by {abs(turned):.0f}°) · "
+            f"<span style='color:{colors.force}'><b>thermal bow</b></span> {_fmt_um(abs(bows[-1]))} · "
+            f"rub heat {_si(heat, 'W')}")
+
     def apply_theme(self) -> None:
         self.curve.setPen(pg.mkPen(colors.force, width=1.5))
+        self.vector_curve.setPen(pg.mkPen(colors.mass[1], width=1.5))
+        self.bow_curve.setPen(pg.mkPen(colors.force, width=1.5, style=QtCore.Qt.PenStyle.DashLine))
+        self.ends.setPen(pg.mkPen(colors.background, width=1))
 
 
 def _fmt_um(meters: float) -> str:

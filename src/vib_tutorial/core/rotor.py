@@ -201,6 +201,7 @@ FILM_CORRECTION = 1e-4  # a Newton correction this small (over the same) is take
 SLIP = 0.01  # m/s: the rim's friction reaches 0.71 μ N at this slip (s/√(s² + SLIP²), smoothed Coulomb)
 RUB_TOL = 1e-9  # Newton stops when the contact force's residual is this small, over (1 N + k clearance)
 RUB_ITERATIONS = 30
+THERMAL_STEPS = 200  # a thermal bow is updated at least this often per time constant
 
 
 def _edge_crack_factor(s: np.ndarray, bending: bool) -> np.ndarray:
@@ -287,6 +288,11 @@ class Stator:
     ring's centre, by δ, the ring pushes it back with N = k δ + c δ' (never
     pulling), and drags its rim against the slip with μ N, the slip being the rim's
     speed over the ring, R Ω plus the disc's whirl along the ring.
+
+    The drag heats the shaft where it rubs, and a shaft hotter on one side bows
+    toward it (the Newkirk effect): with a `thermal_gain` β, the bow at the disc
+    settles to β times the rub's heat, in the direction of the hot spot on the
+    shaft, lagging it by the `thermal_lag` τ (a first-order lag, τ b' = β H - b).
     """
 
     clearance: float = 2e-4  # m, radial
@@ -295,6 +301,8 @@ class Stator:
     friction: float = 0.1  # μ, the rim on the ring
     offset: float = 0.0  # m, of the ring's centre from the bearings' line
     offset_angle: float = -0.5 * math.pi  # rad, its direction in fixed axes
+    thermal_gain: float = 0.0  # m/W: the bow at the disc per watt of rub heat (0: no thermal bow)
+    thermal_lag: float = 10.0  # s, the bow's time constant
 
     @property
     def centre(self) -> tuple[float, float]:
@@ -475,8 +483,10 @@ class RotorSystem:
             st = self.stator
             if st.clearance <= 0.0 or st.stiffness <= 0.0:
                 raise ValueError("the stator's clearance and contact stiffness must be positive")
-            if min(st.damping, st.friction, st.offset) < 0.0:
-                raise ValueError("the stator's damping, friction and offset cannot be negative")
+            if min(st.damping, st.friction, st.offset, st.thermal_gain) < 0.0:
+                raise ValueError("the stator's damping, friction, offset and thermal gain cannot be negative")
+            if st.thermal_lag <= 0.0:
+                raise ValueError("the thermal bow's time constant must be positive")
             if self.periodic or self.whole_films:
                 raise ValueError("a stator rubs only on a round shaft, with its oil films linearized")
 
@@ -510,6 +520,11 @@ class RotorSystem:
     def ei(self) -> float:
         """Bending stiffness EI (N·m²) of the round shaft."""
         return self.youngs * math.pi * self.diameter**4 / 64.0
+
+    @cached_property
+    def bow_load(self) -> np.ndarray:
+        """One plane's load (4 + r,) of a unit bow at the disc on a round shaft, K_shaft q_bow per metre."""
+        return self.shaft_stiffness() @ self.bow_shape()
 
     @property
     def disc_radius(self) -> float:
@@ -1855,7 +1870,9 @@ class RotorSamples:
     q: np.ndarray  # (k, n_dof) displacements
     omega: np.ndarray  # (k,) spin speed (rad/s)
     phase: np.ndarray  # (k,) angle φ of the keyphasor mark (rad, unwrapped)
-    rub: np.ndarray | None = None  # (k, 3) with a stator: its force on the disc (f_x, f_y) and the normal force N
+    rub: np.ndarray | None = None  # (k, 4) with a stator: its force on the disc (f_x, f_y), the normal force N
+    # and the friction's heat (W)
+    bow: np.ndarray | None = None  # (k,) complex with a thermal bow: the bow at the disc (m), from the mark
 
 
 class _Films:
@@ -2041,6 +2058,7 @@ class RotorSimulator:
         self._f_at: dict[float, float] = {}  # with oil films: the highest frequency at each top speed asked
         self._f_still = self._highest_freq(0.0)
         self._films = _Films(self.system) if self.system.whole_films else None
+        self.thermal_bow = 0j  # the rub's thermal bow at the disc (m), turning with the shaft, from the mark
 
     # ------------------------------------------------------------- setup
     def set_system(self, system: RotorSystem) -> None:
@@ -2070,6 +2088,13 @@ class RotorSimulator:
         self._f_at.clear()
         self._f_still = self._highest_freq(0.0)
         self._films = _Films(system) if system.whole_films else None
+        if not self.thermal:
+            self.thermal_bow = 0j
+
+    @property
+    def thermal(self) -> bool:
+        """True if the rub bows the shaft (a stator with a thermal gain)."""
+        return self.system.stator is not None and self.system.stator.thermal_gain > 0.0
 
     def _rest(self) -> np.ndarray:
         """The state at rest: the shaft in its bowed shape (which loads nothing), sagging under gravity."""
@@ -2083,6 +2108,7 @@ class RotorSimulator:
     def reset(self) -> None:
         """Back to rest, not spinning (the target speed is kept)."""
         self.t = self.phase = self.omega = self._alpha = 0.0
+        self.thermal_bow = 0j
         self.state = self._rest()
 
     def tap(self, impulse_x: float = 0.0, impulse_y: float = 0.0) -> None:
@@ -2179,7 +2205,10 @@ class RotorSimulator:
 
         Gravity's load with oil films is taken at the speed `held`, as A(Ω) is.
         """
-        p = self.system.rotating_load(omega, alpha) * np.exp(1j * np.asarray(phase))[..., None]
+        p = self.system.rotating_load(omega, alpha)
+        if self.thermal_bow:  # the thermal bow loads the shaft as the residual bow does
+            p = p + self.thermal_bow * self.system.bow_load
+        p = p * np.exp(1j * np.asarray(phase))[..., None]
         return self.system.plane_load(p) + self._gravity(held)
 
     def _gravity(self, omega: float) -> np.ndarray:
@@ -2204,12 +2233,15 @@ class RotorSimulator:
         n_dof = self.system.n_dof
         ts, qs = np.empty(steps), np.empty((steps, n_dof))
         ws, phis = np.empty(steps), np.empty(steps)
-        rubs = np.zeros((steps, 3)) if self.system.stator is not None else None
+        rubs = np.zeros((steps, 4)) if self.system.stator is not None else None
+        bows = np.empty(steps, dtype=complex) if self.thermal else None
         chunk = max(1, int(CHUNK_TIME / h))
+        # A thermal bow is held over each chunk, then moved on by the chunk's heat.
+        warm = max(1, int(self.system.stator.thermal_lag / (THERMAL_STEPS * h))) if self.thermal else steps
         k = 0
         while k < steps:
             steady = self.omega == self.target
-            n = steps - k if steady else min(steps - k, chunk)
+            n = min(steps - k, warm) if steady else min(steps - k, chunk, warm)
             w1 = self._speeds(h, n)
             w0 = np.concatenate([[self.omega], w1[:-1]])
             alpha = (w1 - w0) / h
@@ -2235,12 +2267,28 @@ class RotorSimulator:
                         z = Phi @ z + drive[:, j]
                         qs[k + j] = z[:n_dof]
             self.state = z
+            if bows is not None:
+                bows[k:k + n] = self.thermal_bow
+                self._warm(n * h, rubs[k:k + n, 3], qs[k:k + n], phi1)
             ts[k : k + n] = self.t + h * np.arange(1, n + 1)
             ws[k : k + n], phis[k : k + n] = w1, phi1
             self.t = float(ts[k + n - 1])
             self.omega, self.phase, self._alpha = float(w1[-1]), float(phi1[-1]), float(alpha[-1])
             k += n
-        return RotorSamples(ts, qs, ws, phis, rubs)
+        return RotorSamples(ts, qs, ws, phis, rubs, bows)
+
+    def _warm(self, span: float, heat: np.ndarray, q: np.ndarray, phase: np.ndarray) -> None:
+        """Move the thermal bow on over `span` s of the rub's `heat` (W) at each step, the disc at q.
+
+        The heat goes into the shaft where it touches the ring: toward the disc's
+        centre's direction from the ring's, seen on the shaft (from the mark). Its
+        mean over the span drives τ b' = β H - b, exact for it held.
+        """
+        stator = self.system.stator
+        cx, cy = stator.centre
+        hot = heat * np.exp(1j * (np.arctan2(q[:, YD] - cy, q[:, XD] - cx) - phase))
+        decay = math.exp(-span / stator.thermal_lag)
+        self.thermal_bow = self.thermal_bow * decay + stator.thermal_gain * (1.0 - decay) * complex(np.mean(hot))
 
     def _rub_steps(self, Phi: np.ndarray, G0: np.ndarray, G1: np.ndarray, drive: np.ndarray, w1: np.ndarray,
                    out: np.ndarray, rubs: np.ndarray) -> np.ndarray:
@@ -2268,7 +2316,14 @@ class RotorSimulator:
             r, normal = _rub_solve(stator, radius, zb[rows], E, r, float(w1[j]), tol)
             z = zb + R1 @ r
             out[j] = z[:n]
-            rubs[j] = r[0], r[1], normal
+            heat = 0.0
+            if normal:  # the drag's work on the slip, μ N sat(s) s
+                x, y, vx, vy = z[rows].tolist()
+                cx, cy = stator.centre
+                rho = math.hypot(x - cx, y - cy)
+                slip = radius * w1[j] + ((x - cx) * vy - (y - cy) * vx) / rho
+                heat = stator.friction * normal * slip * slip / math.sqrt(slip * slip + SLIP * SLIP)
+            rubs[j] = r[0], r[1], normal, heat
         return z
 
     def _film_steps(self, h: float, held: float, w1: np.ndarray, u0: np.ndarray, u: np.ndarray,

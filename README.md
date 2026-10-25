@@ -500,8 +500,8 @@ the speed ramps to a target.
   overhung rotor, a long shaft whose own mass matters, a two-pole rotor with an asymmetric shaft,
   a cracked shaft, oil swirl at λ = ½, and plain journal bearings, both going into oil whip, an
   upright rotor in oil whirl, an overhung rotor on magnetic bearings that its controller's lag
-  makes unstable, and two rotors rubbing a stator ring: a partial rub with ½X, and a full rub that
-  flips into backward whirl. Each loads a rotor with a speed range to suit it and a note on what to look for.
+  makes unstable, and three rotors rubbing a stator ring: a partial rub with ½X, a full rub that
+  flips into backward whirl, and a light rub that bows the shaft (the Newkirk effect). Each loads a rotor with a speed range to suit it and a note on what to look for.
 - **Shaft mass**: tick it (and set the density) and the shaft gets its mass, its sections'
   rotary inertia and their gyroscopic moment. It is then 2 to 60 Euler–Bernoulli beam elements
   with consistent or lumped mass, reduced Craig–Bampton style to the stations and the shaft's
@@ -622,7 +622,10 @@ the speed ramps to a target.
   the critical, ½X and ⅓X; held against it all round, enough friction flips the whirl backward, at the
   disc's frequency on the ring, until the rim rolls round it (dry whirl). The tab gives the gap at
   rest and the disc's frequency on the ring, and plots the ring's push; the ring is drawn round the
-  disc in the 3D view and on its orbit. The ring is in the time response only.
+  disc in the 3D view and on its orbit. The ring is in the time response only. Give it a thermal gain
+  and the rub's heat bows the shaft toward where it rubs, with a thermal lag (the Newkirk effect): a
+  polar plot follows the disc's 1X vector and the bow, which spiral out below the critical speed and
+  heal above it.
 - **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
   the shaft's beam stiffness (condensed, or with mass reduced to the stations and the shaft's modes), the state matrix A(Ω), and the modes at the current
   speed. G is skew-symmetric: it sits beside C but does no work.
@@ -640,7 +643,7 @@ the speed ramps to a target.
   fluid-film bearing (the film's sideways push, the locus, the coefficients and the threshold), active
   magnetic bearings (the negative stiffness, the PID's frequency-dependent stiffness and damping, and
   phase-lag instability), rotor–stator rub (partial rub and its sub-harmonics, the full rub's friction
-  as a cross-coupling, and dry whirl), waterfall and
+  as a cross-coupling, dry whirl, and the Newkirk effect's spiral), waterfall and
   cascade plots (a measured Campbell diagram; block length against ramp rate), the shaft's own mass
   (beam elements, consistent against lumped mass, the reduction), and why the solution uses state
   space. Three figures, drawn in the current theme, show the heavy and high spots, a schematic
@@ -724,6 +727,12 @@ ring and, past about 4000 rpm, hits it every other turn: the orbit closes every 
 the spectrum shows ½X, the sub-harmonic that flags a rub. The *Full rub* preset's tighter ring holds
 the disc all round, and its friction, pulling the rim backward, flips the whirl at 1545 rpm into
 backward whirl at 227 Hz, the disc's frequency on the ring, rolling round it on an orbit of 7.3 mm.
+
+![Newkirk effect preset at 1300 rpm, below the critical: a light rub on a seal set 10 µm low heats the shaft at its high spot and bows it that way. On the Rub tab's polar plot the disc's 1X vector and the thermal bow spiral out together, the 1X from 9.6 µm to 149 µm in 15 s, its lag growing by 26°](docs/images/jeffcott_newkirk.png)
+
+The rub's heat bows the shaft toward where it rubs. Below the critical speed that pushes the high
+spot further into the rub, and the *Newkirk effect* preset's 1X vector spirals out, turning against
+the spin; above the critical the bow pulls the high spot away, and the same rub heals.
 
 ![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1947 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
 
