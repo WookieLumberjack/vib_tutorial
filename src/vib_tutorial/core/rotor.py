@@ -2292,6 +2292,20 @@ class RotorSimulator:
 
     def _rub_steps(self, Phi: np.ndarray, G0: np.ndarray, G1: np.ndarray, drive: np.ndarray, w1: np.ndarray,
                    out: np.ndarray, rubs: np.ndarray) -> np.ndarray:
+        """`_rub_steps_reference`'s steps, by the Rust kernel (`native.module.RubSteps`) where it's built."""
+        if native.module is None:
+            return self._rub_steps_reference(Phi, G0, G1, drive, w1, out, rubs)
+        system = self.system
+        stator = system.stator
+        kernel = native.module.RubSteps(
+            Phi, G0, G1, system.n_dof, XD, YD,
+            (stator.clearance, stator.stiffness, stator.damping, stator.friction, *stator.centre),
+            SLIP, system.disc_radius, RUB_TOL * (1.0 + stator.stiffness * stator.clearance), RUB_ITERATIONS)
+        return np.asarray(kernel.steps(self.state, drive, np.ascontiguousarray(w1, dtype=float), self.omega,
+                                       out, rubs))
+
+    def _rub_steps_reference(self, Phi: np.ndarray, G0: np.ndarray, G1: np.ndarray, drive: np.ndarray,
+                             w1: np.ndarray, out: np.ndarray, rubs: np.ndarray) -> np.ndarray:
         """Steps with the disc rubbing on the stator; fills out (n, n_dof) and rubs (n, 3), returns the last state.
 
         The ring's force r on the disc goes in as a load, linear over the step as

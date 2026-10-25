@@ -13,7 +13,7 @@ from vib_tutorial.core import fluid_bearing, native
 from vib_tutorial.core.forcing import ForceKind
 from vib_tutorial.core.model import ChainSystem
 from vib_tutorial.core.rotor import RPM, RotorSimulator, RotorSystem
-from vib_tutorial.core.rotor_presets import JOURNAL_BEARING
+from vib_tutorial.core.rotor_presets import JOURNAL_BEARING, rotor_presets
 from vib_tutorial.core.simulator import Simulator, foh_discretize
 
 needs_native = pytest.mark.skipif(native.module is None, reason="Rust kernels not loaded")
@@ -152,6 +152,36 @@ def test_film_steps_match_the_reference(gravity, density, rpm, drifts):
                                        atol=1e-10 * np.abs(sims[1].state).max())
     # At speed the kernel keeps its bound from one advance to the next, and retakes it as the journals drift.
     assert (sims[0]._films.kernel.takes > takes) == drifts
+
+
+@needs_native
+@pytest.mark.parametrize("name, density, rpm", [
+    ("Partial rub (½X)", 0.0, 4400.0),  # under gravity, hitting the ring's bottom now and then
+    ("Full rub (backward whirl)", 0.0, 2000.0),  # held against it all round, the friction's drag stiff
+    ("Full rub (backward whirl)", 7800.0, 2000.0),  # a shaft with mass: more states than the stations'
+    ("Newkirk effect (thermal bow)", 0.0, 1300.0),  # the thermal bow moving the load between chunks
+])
+def test_rub_steps_match_the_reference(name, density, rpm):
+    # The kernel steps as _rub_steps_reference does, Newton and all: the same motion, push and heat to
+    # rounding error, while ramping and at a steady speed.
+    system = next(p for p in rotor_presets() if p.name == name).system.with_(density=density)
+    sims = [RotorSimulator(system), RotorSimulator(system)]
+    sims[1]._rub_steps = sims[1]._rub_steps_reference
+    for sim in sims:
+        sim.omega, sim.target = 0.9 * rpm / RPM, rpm / RPM
+        sim.accel = 0.1 * rpm / RPM / 0.25  # at speed 0.25 s into the first stretch
+        sim.tap(0.02, 0.0)  # into the ring at once
+    for steady in (False, True):
+        assert (sims[0].omega == sims[0].target) == steady
+        for _ in range(2):
+            got, want = sims[0].advance(0.15), sims[1].advance(0.15)
+            assert want.rub[:, 2].max() > 0.0
+            np.testing.assert_allclose(got.q, want.q, rtol=0, atol=1e-9 * np.abs(want.q).max())
+            gap = np.abs(got.rub - want.rub).max(axis=0) / np.maximum(np.abs(want.rub).max(axis=0), 1e-300)
+            assert gap.max() < 1e-9, gap  # each column: f_x, f_y, N, heat
+            np.testing.assert_allclose(sims[0].state, sims[1].state, rtol=0,
+                                       atol=1e-9 * np.abs(sims[1].state).max())
+    assert sims[0].thermal_bow == pytest.approx(sims[1].thermal_bow, rel=1e-9)
 
 
 def _forced(system, freq, amplitude, base=False):
