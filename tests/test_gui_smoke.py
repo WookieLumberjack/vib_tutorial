@@ -2179,11 +2179,23 @@ def test_window_fits_a_1280_px_screen(app):
     p.orbits.set_midspan_shown(True)  # four orbits
     app.processEvents()
     size = w.minimumSizeHint()
-    assert size.width() <= 1280 and size.height() <= 720, _widest(w.pages, size.width() // 3)
+    assert size.width() <= 1280 and size.height() <= 720, _widest(w.pages, size.width() // 3) + "\n" + _font_report(app)
     names = [p.tabs.tabText(i) for i in range(p.tabs.count())]
     bar = p.tabs.tabBar()
     assert sum(bar.tabSizeHint(i).width() for i in range(bar.count())) < p.tabs.minimumSizeHint().width(), names
     w.close()
+
+
+def _font_report(app) -> str:
+    from PySide6 import QtGui
+
+    font = app.font()
+    screen = app.primaryScreen()
+    sample = QtGui.QFontMetrics(font).horizontalAdvance("Number of masses:")
+    return (f"font {font.family()!r} {font.pointSizeF()} pt / {font.pixelSize()} px, resolved "
+            f"{QtGui.QFontInfo(font).family()!r}; screen dpi {screen.logicalDotsPerInch()} "
+            f"(physical {screen.physicalDotsPerInch()}), ratio {screen.devicePixelRatio()}; "
+            f"'Number of masses:' {sample} px; platform {app.platformName()}, style {app.style().name()}")
 
 
 def _least_width(widget) -> int:
