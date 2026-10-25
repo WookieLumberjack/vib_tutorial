@@ -2908,3 +2908,60 @@ def test_duffing_page(app):
     p.stiffness.setValue(0.0)  # a softening spring with nothing to soften: kept as it was
     assert p.sim.osc.stiffness == 500.0 and "keeps the last" in p.osc_info.text()
     w.close()
+
+
+def test_mathieu_on_the_duffing_page(app):
+    """Pumped, the page draws the half-harmonic branches and measures the ½X swing, its branch buttons start the
+    pump's swings, the Ince–Strutt chart shows the tongues and a click pumps there, and a linear spring's swing
+    grows until the page pauses."""
+    from PySide6.QtCore import QPointF
+
+    from vib_tutorial.core.duffing import Sweep
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.duffing_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    p._timer.stop()
+    assert w.pages.tabText(w.pages.currentIndex()) == "Duffing && Mathieu"
+
+    p.preset.setCurrentText("Parametric resonance, hardening")
+    assert p.pumped_only and p.sim.drive.mode is Sweep.HOLD
+    names = [label.text for _, label in p.legend.items]
+    assert "Pumped, ½X" in names and "Sweeping up" not in names
+    assert [b.isEnabled() for b in p.branch_buttons] == [True, False, True]  # rest, the swing
+    assert "rest (unstable)" in p.branch_note.text()
+    for _ in range(30):
+        p.step(2.0)
+    assert p.cycles[-1].half == pytest.approx(0.0275, rel=0.02)
+    assert len(p.half_items["hold"].data) > 50 and not len(p.hold_item.data)
+    p.start_on_branch(0)  # back to rest: unstable, so the noise grows again
+    assert p.sim.x == 0 and p.sim.v == 0
+
+    p.tabs.setCurrentWidget(p.chart_tab)
+    assert p.chart_image.image is not None and p.chart_image.image.shape == (186, 61)
+    assert "rest is unstable" in p.chart_note.text()
+    vb = p.chart.getPlotItem().getViewBox()
+
+    class Click:
+        def scenePos(self):  # noqa: N802 (Qt's name)
+            return vb.mapViewToScene(QPointF(1.0, 0.8))
+
+    p._on_chart_click(Click())  # the second tongue, at the natural frequency
+    assert p.pump.value() == pytest.approx(0.8) and p.freq.value() == pytest.approx(3.183, abs=1e-3)
+    assert p.preset.currentText() == "Custom" and "rest is unstable" in p.chart_note.text()
+    p.damping.setValue(4.0)  # more damping lifts the tongue off the pump
+    assert "rest is stable" in p.chart_note.text()
+
+    p.preset.setCurrentText("Parametric resonance")
+    while p.running:
+        p.step(5.0)
+    assert p.sim.escaped and "without bound" in p.readout.text() and "km" in p.readout.text()
+
+    p.preset.setCurrentText("Parametric sweep: the jump")
+    assert p.sim.drive.mode is Sweep.DOWN_UP and p.sim.drive.leg == "down" and p.freq.value() == 8.0
+    w.set_theme("Dark")
+    p.step(1.0)
+    w.close()

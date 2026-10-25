@@ -14,10 +14,14 @@ from vib_tutorial.core.duffing import (
     DuffingSimulator,
     Sweep,
     amplitudes,
+    floquet_growth,
     linear_response,
     measured_jump,
+    parametric_amplitudes,
+    parametric_curve,
     response_curve,
     steady_phase,
+    tongue_hz,
 )
 
 PRESET = {p.name: p for p in PRESETS}
@@ -175,7 +179,7 @@ def test_drive_legs():
 
 
 def test_presets_show_what_their_notes_say():
-    assert len(PRESET) == 6
+    assert len(PRESET) == 9
     hard = response_curve(PRESET["Hardening spring: the jump"].osc, 6.0)
     assert round(PRESET["Hardening spring: the jump"].osc.natural_hz, 2) == 3.18
     assert [round(f, 2) for f in hard.band()] == [3.64, 4.45]
@@ -204,3 +208,86 @@ def test_hardening_never_escapes_and_softening_needs_a_stiffness():
     assert not sim.escaped and math.isinf(sim.osc.escape)
     with pytest.raises(ValueError):
         Duffing(stiffness=0.0, cubic=-1.0)
+
+
+# ------------------------------------------------------------------ parametric excitation
+PUMPED = Duffing(cubic=0.0, force=0.0, pump=0.3)  # zeta = 2.5 %, f_n = 3.18 Hz
+
+
+def test_floquet_chart_matches_the_first_tongue():
+    """At Omega = 2 omega_n the growth is mu/4 - zeta (to first order in mu); unpumped it decays at zeta;
+    the chart's edges are harmonic balance's, to its first-order accuracy."""
+    z = PUMPED.zeta
+    assert floquet_growth(z, [2.0], [0.3])[0, 0] == pytest.approx(0.3 / 4 - z, abs=5e-4)
+    assert floquet_growth(z, np.linspace(0.3, 4, 9), [0.0]) == pytest.approx(np.full((1, 9), -z), abs=1e-9)
+    r = np.linspace(1.7, 2.3, 6001)
+    row = floquet_growth(z, r, [0.3])[0]
+    edges = r[np.flatnonzero(np.diff(np.sign(row)))] * PUMPED.natural_hz
+    lo, hi = tongue_hz(PUMPED)
+    assert (round(lo, 2), round(hi, 2)) == (5.89, 6.80)
+    assert edges == pytest.approx([lo, hi], rel=5e-3)
+    assert floquet_growth(z, [1.0], [0.6])[0, 0] > 0 > floquet_growth(z, [1.0], [0.2])[0, 0]  # the second tongue
+
+
+def test_pumped_linear_spring_grows_at_the_floquet_rate():
+    sim = DuffingSimulator(PUMPED, Drive(freq_hz=2 * PUMPED.natural_hz))
+    sim.set_state(1e-3, 0.0)
+    cycles = run(sim, 8.0)
+    t = np.array([c.t for c in cycles[10:]])
+    rate = np.polyfit(t, np.log([c.half for c in cycles[10:]]), 1)[0] / (TWO_PI * PUMPED.natural_hz)
+    assert rate == pytest.approx(floquet_growth(PUMPED.zeta, [2.0], [0.3])[0, 0], rel=0.01)
+    # all at half the pump's frequency (the swing grows by a third over a pair of cycles, so a little leaks)
+    assert max(c.amplitude / c.half for c in cycles[10:]) < 0.1
+
+
+def test_cubic_spring_settles_on_the_parametric_branch():
+    """Hardening or softening, the swing grows out of the noise and settles where harmonic balance says;
+    started there, it stays."""
+    for cubic in (1e5, -2e4):
+        osc = Duffing(cubic=cubic, force=0.0, pump=0.3, noise=1e-3)
+        a, stable = parametric_amplitudes(osc, 6.37)
+        assert list(stable) == [False, True]  # rest is unstable inside the tongue
+        sim = DuffingSimulator(osc, Drive(freq_hz=6.37))
+        assert np.mean([c.half for c in run(sim, 60.0)[-10:]]) == pytest.approx(a[1], rel=0.01)
+        sim = DuffingSimulator(osc.with_(noise=0.0), Drive(freq_hz=6.37))
+        sim.start_on(a[1], half=True)
+        assert np.mean([c.half for c in run(sim, 10.0)[-10:]]) == pytest.approx(a[1], rel=0.01)
+
+
+def test_parametric_curve_and_its_jump():
+    osc = Duffing(force=0.0, pump=0.3)
+    curve = parametric_curve(osc, 8.0)
+    assert [stable for _, a, stable in curve.pieces if not a.any()] == [True, False, True]  # rest
+    (fold,) = curve.folds  # sweeping down, rest goes unstable at the upper edge and jumps up
+    assert fold.freq_hz == pytest.approx(tongue_hz(osc)[1]) and fold.amplitude == 0
+    assert fold.lands_at == pytest.approx(0.0387, abs=1e-4)
+    _, stable = parametric_amplitudes(osc, 7.5)  # past the tongue: rest, the unstable swing, the stable one
+    assert list(stable) == [True, False, True]
+    for f, amp, ok in curve.pieces:
+        good = np.isfinite(amp) & (amp > 0)
+        if good.any():
+            w = TWO_PI * f[good]
+            lhs = (osc.kappa(amp[good]) - osc.mass * w * w / 4) ** 2 + (osc.damping * w / 2) ** 2
+            assert lhs == pytest.approx(np.full(good.sum(), (osc.pump * osc.stiffness / 2) ** 2), rel=1e-9)
+
+
+def test_parametric_presets():
+    p = PRESET["Parametric resonance"]
+    sim = DuffingSimulator(p.osc, Drive(freq_hz=p.freq_hz))
+    run(sim, 60.0)
+    assert sim.escaped and abs(sim.x) > 100.0  # a linear spring: nothing stops it
+    assert p.freq_hz == pytest.approx(6.37, abs=0.005)
+    p = PRESET["Parametric resonance, hardening"]
+    assert parametric_amplitudes(p.osc, p.freq_hz)[0][-1] == pytest.approx(0.0275, abs=1e-4)
+
+    p = PRESET["Parametric sweep: the jump"]
+    sim = DuffingSimulator(p.osc, Drive(start_hz=p.start_hz, end_hz=p.end_hz, sweep_time=p.sweep_time))
+    sim.drive.start(p.mode)
+    cycles = run(sim, 2 * p.sweep_time)
+    lo, hi = tongue_hz(p.osc)
+    floor = 0.05 * parametric_curve(p.osc, p.end_hz).tip
+    down = measured_jump(cycles, "down", half=True, floor=floor)
+    up = measured_jump(cycles, "up", half=True, floor=floor)
+    assert hi - 0.4 < down < hi and lo < up < lo + 0.4
+    top = [c for c in cycles if c.leg == "up"][-5:]  # 8 Hz, far past the tongue, still on the branch
+    assert np.mean([c.half for c in top]) == pytest.approx(parametric_amplitudes(p.osc, 7.95)[0][-1], rel=0.03)

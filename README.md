@@ -46,8 +46,9 @@ Four more pages work on the same chain, in order from analysis to simplification
 **Substructuring (CMS)** reduces the chain by component mode synthesis (Craig–Bampton, Rubin or
 MacNeal), and **Virtual modal test** measures the FRF from simulated force and response signals,
 as in a lab. The **Jeffcott rotor** page leaves the chain for a
-spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing oscillator**
-page for a single mass on a nonlinear spring, swept through its jump (all below).
+spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
+page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
+resonance (all below).
 
 ### Themes
 
@@ -781,11 +782,13 @@ third of it, which the asymmetric shaft has none of. The *Cracked shaft* preset'
 37.6 µm at 2X at 783 rpm and 18.6 µm at 3X at 522 rpm, and its 1X at the critical is 164 µm
 against 54 µm uncracked. Held open, the crack is an asymmetric shaft: no 3X, and twice the 2X.
 
-### Duffing oscillator
+### Duffing & Mathieu
 
-The **Duffing oscillator** page drives one mass on a spring with a cubic term,
-m x″ + c x′ + k x + k<sub>3</sub> x³ = F cos φ, that hardens (k<sub>3</sub> > 0) or softens
-(k<sub>3</sub> < 0) as it stretches, and sweeps the drive's frequency slowly up and then down.
+The **Duffing & Mathieu** page drives one mass on a spring with a cubic term,
+m x″ + c x′ + k(1 + μ cos φ) x + k<sub>3</sub> x³ = F cos φ, that hardens (k<sub>3</sub> > 0) or
+softens (k<sub>3</sub> < 0) as it stretches, and sweeps the drive's frequency slowly up and down.
+The pump μ makes the stiffness itself pulse at that frequency (parametric excitation, the Mathieu
+equation), and a small random force gives an unstable rest something to grow from.
 
 - **Harmonic balance**: the first harmonic's steady amplitude against frequency, solid where
   stable and dashed where not, with the backbone (the free oscillation's frequency at each
@@ -795,21 +798,42 @@ m x″ + c x′ + k x + k<sub>3</sub> x³ = F cos φ, that hardens (k<sub>3</sub
   top of the curve, with the measured jump frequencies beside the folds'. Hold the frequency
   inside the band and *Start on a branch* puts the mass on the lower, middle or upper steady
   state.
+- **Parametric resonance**: pumped, harmonic balance's half-harmonic response (rest, unstable
+  inside the tongue, and a cubic spring's swinging branches, in closed form), with each cycle's
+  measured ½X amplitude (both harmonics are taken over pairs of cycles, so a swing at Ω/2 doesn't
+  leak into the first).
+- **Ince–Strutt chart**: the pumped linear spring's growth rate against the pump's frequency and
+  depth at the page's damping, from the Floquet multipliers of every cell at once; the tongues
+  reach down to Ω = 2ω<sub>n</sub>/n, with harmonic balance's first tongue dashed over them.
+  Click to pump there.
 - **Phase plane**: the last few cycles' trajectory and, while the frequency is held, the
   Poincaré section (the state once per drive cycle).
 - **Presets**: hardening and softening jumps, a linear spring for comparison, two stable states
   at one frequency, a softening spring thrown over its potential's hilltop (the page pauses when
-  it escapes), and Ueda's chaotic oscillator.
+  it escapes), parametric resonance on a linear spring (it grows until the page pauses) and on a
+  hardening one (it settles), a parametric sweep with its jump, and Ueda's chaotic oscillator.
 - **Notes**: harmonic balance, the backbone, the jump and its stability, sweep rate and
-  critical slowing down, superharmonics, subharmonics and chaos.
+  critical slowing down, superharmonics, subharmonics and chaos, parametric excitation,
+  Floquet theory and the Ince–Strutt chart.
 
-![Duffing oscillator, hardening spring (k = 400 N/m, k3 = 10^5 N/m³, c = 1 N·s/m, F = 2 N) swept from 2 to 6 Hz and back at 120 s a leg: harmonic balance gives two stable amplitudes between the folds at 3.64 and 4.45 Hz; the sweep up rides the upper branch to 71 mm and drops at 4.7 Hz, the sweep down follows the lower branch and jumps up at 3.57 Hz](docs/images/duffing_jump.png)
+![Duffing & Mathieu page, hardening spring (k = 400 N/m, k3 = 10^5 N/m³, c = 1 N·s/m, F = 2 N) swept from 2 to 6 Hz and back at 120 s a leg: harmonic balance gives two stable amplitudes between the folds at 3.64 and 4.45 Hz; the sweep up rides the upper branch to 71 mm and drops at 4.62 Hz, the sweep down follows the lower branch and jumps up at 3.56 Hz](docs/images/duffing_jump.png)
 
 A hardening spring's resonance leans toward higher frequencies, because a bigger swing is a
 stiffer one. Sweeping up, the mass rides the upper branch past the linear resonance (3.18 Hz) to
 its fold at 4.45 Hz, then drops to the lower branch. Sweeping down, it follows the lower branch to
 the other fold, at 3.64 Hz, and jumps up. Near a fold the steady state is barely stable, so a
-sweep overruns it before the mass leaves: here it drops at 4.7 Hz and jumps up at 3.57 Hz.
+sweep overruns it before the mass leaves: here it drops at 4.62 Hz and jumps up at 3.56 Hz.
+
+![Parametric sweep on the hardening spring, no force, the stiffness pulsing ±30 %, swept down from 8 to 5 Hz from rest and back up at 180 s a leg: rest is unstable between 5.89 and 6.80 Hz; sweeping down it stays at rest to 6.57 Hz, then jumps up to the branch; back up it grows at 6.11 Hz and rides the branch to 62 mm at 8 Hz, far past the tongue. Beside it the Ince–Strutt chart at ζ = 2.5 %, its first tongue's tip lifted to μ = 0.1](docs/images/mathieu_sweep.png)
+
+Pump the spring's stiffness instead of pushing the mass and rest itself turns unstable near twice
+the natural frequency: the mass swings at half the pump's frequency. On a linear spring the swing
+grows for ever (as e<sup>0.05ω<sub>n</sub>t</sup> with μ = 0.3 and ζ = 2.5 %, which the
+simulation and the Floquet multipliers agree on), and damping needs a pump deeper than 4ζ to
+start it. A hardening spring's swing detunes itself out of the tongue and settles, which makes a
+jump of its own: sweeping down from rest, nothing happens until rest turns unstable at the
+tongue's upper edge, and then the swing leaps up to a branch that the sweep back up rides far past
+the tongue.
 
 ## The math, briefly
 
@@ -977,9 +1001,10 @@ $F_f$ times the distance slid, so the energy balance still closes.
   samples are fed in, each with the free whirl frequencies at its speed, and the latest run-up
   or coast-down among them.
 - `core/duffing.py`: the Duffing oscillator: harmonic balance's response curve (traced by
-  amplitude, unstable branch included) with its folds and backbone, the swept drive, an exact FOH
-  stepper with the cubic's force found by Newton each step, each drive cycle's first harmonic,
-  and the page's presets.
+  amplitude, unstable branch included) with its folds and backbone, the pumped spring's
+  half-harmonic response and first tongue, the Floquet growth rate over the Ince–Strutt chart, the
+  swept drive, an exact FOH stepper with the cubic's and the pump's forces found by Newton each
+  step, each drive cycle's first and half harmonics, and the page's presets.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and
