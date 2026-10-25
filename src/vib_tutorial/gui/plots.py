@@ -582,6 +582,7 @@ class FrfPlot(pg.GraphicsLayoutWidget):
         self.mode_lines: list[pg.InfiniteLine] = []
         self.friction_curves: list[tuple[pg.PlotItem, pg.PlotDataItem]] = []
         self._friction_args: tuple | None = None  # what the friction curves need; drawn when shown
+        self._friction_stale = False  # the curves don't match _friction_args yet
         self.drive_lines = [pg.InfiniteLine(angle=90) for _ in range(2)]
         self.mag.addItem(self.drive_lines[0])
         self.phase.addItem(self.drive_lines[1])
@@ -655,6 +656,7 @@ class FrfPlot(pg.GraphicsLayoutWidget):
             amount = f"{1e3 * friction_amplitude:.3g} mm" if base else f"{friction_amplitude:.3g} N"
             with_friction = f" · dash-dot: friction at {amount}"
             self._friction_args = (system, frequency_grid(result, FRICTION_POINTS), input_dof, base, friction_amplitude)
+        self._friction_stale = True
         self.mag.setTitle(f"{source} · dotted: fₙ · dashed: drive{without}{with_friction}", size="10pt")
         self.mag.setXRange(math.log10(lo), math.log10(hi), padding=0)
         self._draw_friction()
@@ -665,10 +667,13 @@ class FrfPlot(pg.GraphicsLayoutWidget):
 
     def _draw_friction(self) -> None:
         """The describing-function curves, if they're wanted, out of date and the plot is on screen."""
+        if not (self._friction_stale and self.isVisible()):
+            return  # up to date, or drawn when shown
+        self._friction_stale = False
         for plot, curve in self.friction_curves:
             plot.removeItem(curve)
         self.friction_curves = []
-        if self._friction_args is None or not self.isVisible():
+        if self._friction_args is None:
             return
         system, f, input_dof, base, amplitude = self._friction_args
         response = (
