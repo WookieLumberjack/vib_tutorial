@@ -423,7 +423,7 @@ def jeffcott_bow():
     page.start_sweep()
     while page.run_up is not None:
         page.step(0.02)
-    page.tabs.setCurrentWidget(page.polar.parentWidget())
+    page.tabs.show_page(page.polar.parentWidget())
     page._draw()
     save(w, "jeffcott_bow")
 
@@ -439,7 +439,7 @@ def jeffcott_balancing():
     page._refresh_analysis()
     page.ramp.setValue(5000.0)
     b = page.balancing
-    page.tabs.setCurrentWidget(b)
+    page.tabs.show_page(b)
     b.station.setCurrentIndex(1)  # the disc
     for button in b.step_buttons:
         button.click()
@@ -460,7 +460,7 @@ def jeffcott_two_plane():
     page._refresh_analysis()
     page.ramp.setValue(5000.0)
     b = page.balancing
-    page.tabs.setCurrentWidget(b)
+    page.tabs.show_page(b)
     b.mode.setCurrentIndex(1)  # the disc's faces, 40 mm apart; probes at A and B
     for button in b.step_buttons:
         button.click()
@@ -486,7 +486,7 @@ def jeffcott_stability():
     page.tap()
     for _ in range(60):
         page.step(0.02)
-    page.tabs.setCurrentWidget(page.spectrum.parentWidget())
+    page.tabs.show_page(page.spectrum.parentWidget())
     page._draw()
     save(w, "jeffcott_stability")
 
@@ -504,7 +504,7 @@ def jeffcott_oil_whirl():
     page.set_target_rpm(3500.0)
     for _ in range(500):  # 10 s: the whirl sets in and settles to its limit cycle
         page.step(0.02)
-    page.tabs.setCurrentWidget(page.spectrum.parentWidget())
+    page.tabs.show_page(page.spectrum.parentWidget())
     page._draw()
     save(w, "jeffcott_oil_whirl")
 
@@ -525,7 +525,7 @@ def jeffcott_magnetic():
     page.tap()
     for _ in range(75):  # 1.5 s: the forward tilting mode grows from the tap
         page.step(0.02)
-    page.tabs.setCurrentWidget(page.magnet_panel)
+    page.tabs.show_page(page.magnet_panel)
     page._draw()
     print(page.readout.text())
     save(w, "jeffcott_magnetic")
@@ -559,7 +559,7 @@ def jeffcott_waterfall():
     page.load_preset("Overhung rotor")
     page._refresh_analysis()
     page.ramp.setValue(200.0)
-    page.tabs.setCurrentWidget(page.waterfall_plot.parentWidget())
+    page.tabs.show_page(page.waterfall_plot.parentWidget())
     page.repeat_taps.setChecked(True)
     page.set_target_rpm(2500.0)
     while page.sim.omega < page.sim.target:
@@ -621,7 +621,7 @@ def jeffcott_asymmetry_chart():
     page.running = False
     page.load_preset("Two-pole rotor (asymmetric shaft)")
     page._refresh_analysis()
-    page.tabs.setCurrentWidget(page.spectrum.parentWidget())
+    page.tabs.show_page(page.spectrum.parentWidget())
     page.measure.setCurrentIndex(2)  # the asymmetry chart
     page.asym_chart.run()
     page.ramp.setValue(2000.0)

@@ -18,6 +18,7 @@ from ..core import CMSModel
 from ..core.back_expansion import RECOVERIES, RECOVERY_NAMES, RecoveryResponse
 from .animation import ChainView
 from .cms_time import MIN_SPAN, CMSRunView, SampleBuffer, _fmt
+from .layouts import FlowLayout, group
 from .style import colors
 from .theming import add_legend, mute
 
@@ -56,7 +57,7 @@ class BackExpansionView(CMSRunView):
         self._n = self._nr = 0
         self._interior = np.zeros(0, dtype=int)
 
-        pick = QtWidgets.QHBoxLayout()
+        pick = FlowLayout()
         self.mass_box = QtWidgets.QComboBox()
         self.mass_box.setToolTip("The interior mass whose recovered motion is plotted")
         self.spring_box = QtWidgets.QComboBox()
@@ -65,12 +66,8 @@ class BackExpansionView(CMSRunView):
         for key in RECOVERIES:
             self.chain_box.addItem(RECOVERY_NAMES[key], key)
         self.chain_box.setToolTip("Which recovery the lower chain shows")
-        for w in (QtWidgets.QLabel("Interior mass:"), self.mass_box, QtWidgets.QLabel("Spring:"),
-                  self.spring_box):
-            pick.addWidget(w)
-        pick.addStretch(1)
-        pick.addWidget(QtWidgets.QLabel("Lower chain:"))
-        pick.addWidget(self.chain_box)
+        pick.add(group("Interior mass:", self.mass_box), group("Spring:", self.spring_box),
+                 group("Lower chain:", self.chain_box))
 
         self.full_view = ChainView(draggable=False)
         self.rec_view = ChainView(draggable=False)

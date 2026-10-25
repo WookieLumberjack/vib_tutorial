@@ -20,8 +20,10 @@ from PySide6 import QtCore, QtWidgets
 from ..core.rotor import RPM, PlaneWeight
 from ..core.rotor_balance import PROBES, corrections, influence_matrix, weight, weight_parts
 from ..core.rotor_sweep import STATIONS, lag_degrees, probe, steady_vectors
+from .layouts import FlowLayout, group, plot_height
 from .panels import spin
 from .style import colors
+from .tab_groups import tucked_away
 from .theming import mute
 
 DASH = QtCore.Qt.PenStyle.DashLine
@@ -100,13 +102,9 @@ class BalancingPanel(QtWidgets.QWidget):
         self.plane_z = [spin(0.0, 1e4, z, 0, " mm") for z in SHAFT_PLANES]
         for box in self.plane_z:
             box.setToolTip("<p>Where the plane is along the shaft, from bearing A.</p>")
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(self.mode, 2)
-        row.addWidget(self.spacing, 1)
         self.plane_labels = [QtWidgets.QLabel(t) for t in ("at", "and")]
-        for label, box in zip(self.plane_labels, self.plane_z):
-            row.addWidget(label)
-            row.addWidget(box, 1)
+        row = FlowLayout()
+        row.add(self.mode, self.spacing, group(*(w for pair in zip(self.plane_labels, self.plane_z) for w in pair)))
         form.addRow("Planes:", row)
         self.mode.currentIndexChanged.connect(self._on_mode)
         for box in (self.spacing, *self.plane_z):
@@ -123,14 +121,10 @@ class BalancingPanel(QtWidgets.QWidget):
         self.direction2.addItems([f"{d} probe" for d in PROBES])
         for c in (self.station, self.direction, self.station2, self.direction2):
             c.currentIndexChanged.connect(self.refresh)
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(self.station, 1)
-        row.addWidget(self.direction, 1)
         self.second_label = QtWidgets.QLabel("and")
         self.second_label.setToolTip("The second probe's readings are drawn dashed, their names primed")
-        row.addWidget(self.second_label)
-        row.addWidget(self.station2, 1)
-        row.addWidget(self.direction2, 1)
+        row = FlowLayout()
+        row.add(group(self.station, self.direction), group(self.second_label, self.station2, self.direction2))
         form.addRow("Probe:", row)
         self.speed = spin(60.0, 10_000.0, BALANCE_RPM, 0, " rpm")
         self.speed.setToolTip("The speed the rotor is balanced at")
@@ -146,11 +140,8 @@ class BalancingPanel(QtWidgets.QWidget):
             "removes. Untick to balance the raw reading to zero at the balancing speed instead.</p>"
         )
         self.subtract.toggled.connect(self.refresh)
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(self.speed, 1)
-        row.addWidget(QtWidgets.QLabel("slow roll"))
-        row.addWidget(self.slow_speed, 1)
-        row.addWidget(self.subtract)
+        row = FlowLayout()
+        row.add(group(self.speed, "slow roll", self.slow_speed), self.subtract)
         form.addRow("Balancing at:", row)
         self.trial_mass = spin(0.01, 100.0, 0.5, 2, " g")
         self.trial_radius = spin(1.0, 500.0, 20.0, 0, " mm")
@@ -158,22 +149,18 @@ class BalancingPanel(QtWidgets.QWidget):
         self.trial_angle.setWrapping(True)
         self.trial_angle.setStepType(QtWidgets.QAbstractSpinBox.StepType.DefaultStepType)
         self.trial_angle.setSingleStep(15.0)
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(self.trial_mass, 1)
-        row.addWidget(QtWidgets.QLabel("at radius"))
-        row.addWidget(self.trial_radius, 1)
-        row.addWidget(QtWidgets.QLabel("angle"))
-        row.addWidget(self.trial_angle, 1)
+        row = FlowLayout()
+        row.add(group(self.trial_mass, "at radius", self.trial_radius), group("angle", self.trial_angle))
         form.addRow("Trial weight:", row)
 
-        steps = QtWidgets.QGridLayout()
+        steps = FlowLayout()
         self._buttons = {key: QtWidgets.QPushButton() for key in ("slow", "found", "trial", "trial2", "verify")}
         actions = {"slow": self.measure_slow, "found": self.measure_found, "trial": lambda: self.measure_trial(0),
                    "trial2": lambda: self.measure_trial(1), "verify": self.measure_verify}
-        for i, (key, b) in enumerate(self._buttons.items()):
+        for key, b in self._buttons.items():
             b.setToolTip(STEPS_TIP)
             b.clicked.connect(actions[key])
-            steps.addWidget(b, 0, i)
+            steps.addWidget(b)
         self.mystery = QtWidgets.QPushButton("Mystery unbalance")
         self.mystery.setToolTip(MYSTERY_TIP)
         self.mystery.clicked.connect(self.new_mystery)
@@ -187,8 +174,8 @@ class BalancingPanel(QtWidgets.QWidget):
         self.show_heavy.setChecked(True)
         self.show_heavy.setToolTip("Draw the heavy spot on the disc and its line on the disc's orbit")
         self.show_heavy.toggled.connect(page.set_heavy_shown)
-        for i, w in enumerate((self.mystery, self.reveal, self.remove, self.show_heavy)):
-            steps.addWidget(w, 1, i)
+        extras = FlowLayout()
+        extras.add(self.mystery, self.reveal, self.remove, self.show_heavy)
         self.status = QtWidgets.QLabel()
         mute(self.status)
 
@@ -243,7 +230,10 @@ class BalancingPanel(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(form)
         layout.addLayout(steps)
+        layout.addLayout(extras)
         layout.addWidget(self.status)
+        plot_height(self.vector_plot, 220)
+        plot_height(self.curve_plot, 160)
         layout.addWidget(self.vector_plot, 3)
         layout.addWidget(self.results)
         layout.addWidget(self.curve_plot, 2)
@@ -482,7 +472,7 @@ class BalancingPanel(QtWidgets.QWidget):
         """Redraw the vectors, the results and the curves from the readings kept."""
         if self.page.measurement is None:
             self._enable(True)
-        self._stale = self.isHidden()  # a tab not showing: draw when it does
+        self._stale = tucked_away(self)  # a tab not showing: draw when it does
         if self._stale:
             return
         values = {key: self.readings(key) for key, _, _ in READINGS}
