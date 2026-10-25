@@ -37,6 +37,7 @@ from ..core.rotor import (
     Campbell,
     RotorSimulator,
     RotorSystem,
+    Stator,
     whirl_modes,
 )
 from ..core.rotor_sweep import (
@@ -62,6 +63,7 @@ from .panels import spin
 from .rotor_balance import BalancingPanel
 from .rotor_bearing import BearingPanel
 from .rotor_magnet import MagnetPanel
+from .rotor_rub import RubPanel
 from .rotor_bode import SWEEP_COLORS, BodePlots, PolarPlot, SweepPlots, nice_marks
 from .rotor_figures import FigureBrowser
 from .rotor_notes import THEORY_HTML, matrices_html, whirl_name
@@ -77,8 +79,9 @@ MAX_TOP_RPM = 60_000.0  # the widest it can be set to
 ORDERS = {2.0: "2X", 3.0: "3X", 0.5: "½X"}
 CUSTOM = "Custom"  # the preset box's entry for a rotor that is none of the presets  # other orders of the speed the Campbell diagram can draw
 DIRECTION_NAMES = ("x (horizontal probe)", "y (vertical probe)", "Orbit (major axis)")
-# Columns of the history: (x, y) at each station, then the unbalance's angle φ and the speed Ω.
-PHASE, OMEGA = 8, 9
+# Columns of the history: (x, y) at each station, then the unbalance's angle φ, the speed Ω, and a stator
+# ring's push on the disc (the largest over the steps each sample stands for).
+PHASE, OMEGA, PUSH = 8, 9, 10
 STORE_DT = 2.5e-4  # s; samples kept for the plots are at least this far apart
 MIN_PEAK = 1e-9  # m; never magnify motion smaller than this
 TAP_IMPULSE = 0.005  # N·s, downward on the disc
@@ -344,12 +347,14 @@ class RotorView(pg.PlotWidget):
         self.mark = pg.PlotCurveItem()  # the keyphasor mark: a tick across the disc's rim
         self.stiff_axis = pg.PlotCurveItem()  # an asymmetric shaft's stiff axis: a diameter across the disc
         self.crack_mark = pg.PlotCurveItem()  # a crack: a tick on the shaft toward its mouth
+        self.stator_ring = pg.PlotCurveItem(connect="finite")  # a stator ring round the disc, on a pedestal
+        self.ring: tuple[float, float, float] | None = None  # its centre (x, y) and clearance (m), as drawn
         self.show_heavy = True
         self.stations = pg.ScatterPlotItem(size=8)
         self.triad = pg.PlotCurveItem(connect="pairs")
         self.triad_labels = [pg.TextItem(t, anchor=(0.5, 0.5)) for t in ("x", "y", "z")]
         self.end_labels = [pg.TextItem(t, anchor=(0.5, 0.0)) for t in ("A", "B")]
-        for item in (self.frame, self.axis, self.supports, *self.trails, self.shaft, self.disc,
+        for item in (self.frame, self.axis, self.supports, self.stator_ring, *self.trails, self.shaft, self.disc,
                      self.spoke, self.stiff_axis, self.crack_mark, self.heavy, self.weight_dots, self.mark, self.stations, self.triad, *self.triad_labels, *self.end_labels):
             plot.addItem(item)
         self.scale_label = pg.TextItem(anchor=(1.0, 0.0))
@@ -423,6 +428,7 @@ class RotorView(pg.PlotWidget):
         self.frame.setPen(pg.mkPen(colors.faint, width=1))
         self.axis.setPen(pg.mkPen(colors.faint, width=1, style=DASH))
         self.supports.setPen(pg.mkPen(colors.structure, width=1))
+        self.stator_ring.setPen(pg.mkPen(colors.structure, width=2))
         for curve, i in zip(self.trails, range(len(STATIONS))):
             curve.setPen(pg.mkPen(colors.mass[i], width=1))
         self.shaft.setPen(pg.mkPen(colors.structure, width=3))
@@ -453,6 +459,8 @@ class RotorView(pg.PlotWidget):
         axis = np.array([q[2], q[6]]) + s.skew * np.array([math.cos(phase + s.skew_angle),
                                                            math.sin(phase + s.skew_angle)])
         peak = max(peak, float(np.hypot(*axis)) * self.disc_radius * self._metres)
+        if self.ring is not None:  # the ring in view too
+            peak = max(peak, math.hypot(self.ring[0], self.ring[1]) + self.ring[2])
         target = SWING / max(peak, MIN_PEAK)
         # Shrink at once (keep the motion on screen), grow slowly (no flicker as it settles).
         self.gain = target if target < self.gain else self.gain + 0.08 * (target - self.gain)
@@ -562,6 +570,15 @@ class RotorView(pg.PlotWidget):
             for end in (ground_y, ground_x):
                 parts += _spring_and_damper(j, end)
         self.supports.setData(*self._segments(parts))
+        if self.ring is not None:
+            cx, cy, clearance = self.ring
+            r = self.disc_radius + clearance * g
+            zd = float(self._z(s.a))
+            circle = np.column_stack([cx * g + r * np.cos(ring), cy * g + r * np.sin(ring), np.full_like(ring, zd)])
+            pedestal = np.array([[cx * g, cy * g - r, zd], [cx * g, -GROUND, zd]])
+            self.stator_ring.setData(*self._segments([circle, pedestal]))
+        else:
+            self.stator_ring.setData([], [])
 
     # ------------------------------------------------------------- mouse
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
@@ -664,6 +681,7 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
             self.plots.append(p)
             self.ci.layout.setColumnStretchFactor(i, 1)  # equal shares, whatever the width
         self.heavy = self.plots[1].plot()
+        self.ring = self.plots[1].plot()  # a stator ring's clearance round the disc
         self.apply_theme()
         self._fit_width()
 
@@ -679,6 +697,7 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
             self.keys[i].setBrush(pg.mkBrush(None))
             self.keys[i].setPen(pg.mkPen(colors.foreground, width=1))
         self.heavy.setPen(pg.mkPen(colors.force, width=2))
+        self.ring.setPen(pg.mkPen(colors.structure, width=2))
 
     def _title(self, i: int) -> str:
         if i == 1 and not self.plots[2].isVisible():
@@ -704,10 +723,17 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
         self.setMinimumWidth(math.ceil(least) + 2 * self.frameWidth())
 
     def update_orbits(self, trails: list[np.ndarray], keys: list[np.ndarray], heavy_angle: float | None,
-                      centre: tuple[float, float] = (0.0, 0.0)) -> None:
+                      centre: tuple[float, float] = (0.0, 0.0),
+                      ring: tuple[float, float, float] | None = None) -> None:
         """Each station's trail (k, 2), its keyphasor points, and the heavy spot's angle now, drawn from
-        `centre` on the disc's orbit (where it whirls about: its sag, if drawn)."""
+        `centre` on the disc's orbit (where it whirls about: its sag, if drawn), with a stator `ring`'s
+        clearance round the disc (centre x, y and radius)."""
         peaks = [float(np.abs(xy).max()) if xy.size else 0.0 for xy in trails]
+        if ring is not None:  # drawn, but not taken into the range: the orbit, not the ring, sets the scale
+            t = np.linspace(0.0, 2.0 * math.pi, 97)
+            self.ring.setData(ring[0] + ring[2] * np.cos(t), ring[1] + ring[2] * np.sin(t))
+        elif self.ring.xData is not None and self.ring.xData.size:
+            self.ring.setData([], [])
         if self.same_scale:
             shown = [p for i, p in enumerate(peaks) if self.plots[i].isVisible()]
             peaks = [max(shown)] * len(peaks)
@@ -977,7 +1003,7 @@ class RotorPage(QtWidgets.QWidget):
         super().__init__(parent)
         self.sim = RotorSimulator()
         self.sim.target = 1000.0 / RPM
-        self.history = SampleBuffer(10)
+        self.history = SampleBuffer(11)
         self.campbell: Campbell | None = None
         self.top_rpm = TOP_RPM  # the speed range: Campbell diagram, stability map, Bode plot, speed controls
         self.running = True
@@ -1175,6 +1201,8 @@ class RotorPage(QtWidgets.QWidget):
         self.magnet_panel = MagnetPanel()
         self.magnet_panel.set_top_rpm(self.top_rpm)
         self.magnet_panel.changed.connect(lambda: self._on_bearing_tab(MAGNETS))
+        self.rub_panel = RubPanel()
+        self.rub_panel.changed.connect(self._on_params)
         self.matrices = QtWidgets.QTextBrowser()
         self.theory = FigureBrowser()
         self.theory.setHtml(THEORY_HTML)
@@ -1185,6 +1213,7 @@ class RotorPage(QtWidgets.QWidget):
         self.tabs.add_group("Balancing", (ColumnScroll(self.balancing), "Balancing"))
         self.tabs.add_group("Bearings", (ColumnScroll(self.bearing_panel), "Fluid-film bearing"),
                             (ColumnScroll(self.magnet_panel), "Magnetic bearing"))
+        self.tabs.add_group("Rub", (ColumnScroll(self.rub_panel), "Rub"))
         self.tabs.add_group("Theory", (self.theory, "Theory"), (self.matrices, "Equations && matrices"))
         self.tabs.changed.connect(self._catch_up_tab)
         self.tabs.changed.connect(self._refresh_matrices)
@@ -1569,8 +1598,10 @@ class RotorPage(QtWidgets.QWidget):
                 w.setEnabled(not (same and r == 1) and not (iso and c in (1, 3)) and not (film and c != 4))
         for w in (self.isotropic, self.same_bearings):
             w.setEnabled(not film)
-        # A turning shaft's split time step keeps the films linearized.
-        self.nonlinear_film.setEnabled(kind == FILMS and not self.asymmetry.value() and not self.crack_depth.value())
+        # A turning shaft's split time step keeps the films linearized, and has no stator ring.
+        round_shaft = not self.asymmetry.value() and not self.crack_depth.value()
+        self.nonlinear_film.setEnabled(kind == FILMS and round_shaft)
+        self.rub_panel.set_allowed(round_shaft and not (kind == FILMS and self.nonlinear_film.isChecked()))
         self.nonlinear_film.setVisible(kind == FILMS)
         oil = self.bearing_panel.bearing(rotor=False) if kind == FILMS else None
         magnet = self.magnet_panel.bearing() if kind == MAGNETS else None
@@ -1607,6 +1638,7 @@ class RotorPage(QtWidgets.QWidget):
             elements=self.elements.value(),
             lumped=self.mass_matrix.currentIndex() == 1,
             nonlinear_films=kind == FILMS and self.nonlinear_film.isChecked(),
+            stator=self.rub_panel.stator(),
         ).with_(**(self._hidden or {}))
 
     def _crack(self) -> Crack:
@@ -1672,6 +1704,7 @@ class RotorPage(QtWidgets.QWidget):
             self.bearing_panel.set_bearing(A.film, notify=False)
         if A.magnet is not None:
             self.magnet_panel.set_bearing(A.magnet, notify=False)
+        self.rub_panel.set_stator(system.stator)
         for w in boxes:
             w.blockSignals(False)
         self._on_params()
@@ -1773,6 +1806,7 @@ class RotorPage(QtWidgets.QWidget):
         self.sim.set_system(system)
         self.bearing_panel.set_rotor(system.bearing_loads if system.films else None)
         self.magnet_panel.set_rotor(system if system.magnets else None)
+        self.rub_panel.update_info(system)
         self._show_preset(system)
         self.view.set_system(system)
         self.orbits.set_midspan_shown(abs(system.position - 0.5) > 1e-9)
@@ -2003,6 +2037,8 @@ class RotorPage(QtWidgets.QWidget):
         tab = self.tabs.current_page()
         if tab in (self.balancing, self.bearing_panel, self.magnet_panel):
             tab.catch_up()
+        elif tab is self.rub_panel:
+            self._draw_push()
 
     def _show_bearing_speed(self) -> None:
         if self.tabs.current_page() is self.bearing_panel:
@@ -2033,6 +2069,7 @@ class RotorPage(QtWidgets.QWidget):
         self.balancing.apply_theme()
         self.bearing_panel.apply_theme()
         self.magnet_panel.apply_theme()
+        self.rub_panel.apply_theme()
         self._draw_tracking(full=True)
         scroll = self.theory.verticalScrollBar().value()
         self.theory.setHtml(THEORY_HTML)
@@ -2408,6 +2445,10 @@ class RotorPage(QtWidgets.QWidget):
             self._carry = (r.t.size - 1 - pick[-1]) if pick.size else self._carry + r.t.size
             if pick.size:
                 cols = self._columns(r.q[pick], r.phase[pick], r.omega[pick])
+                push = np.zeros(pick.size)
+                if r.rub is not None:  # the largest push since the last sample kept, so no hit is missed
+                    push = np.maximum.reduceat(r.rub[:, 2], np.concatenate([[0], pick[:-1] + 1]))
+                cols = np.column_stack([cols, push])
                 self.history.extend(r.t[pick], cols)
                 vib = self._vibration(cols)
                 if self.waterfall.feed(r.t[pick], vib[:, 0::2] + 1j * vib[:, 1::2], cols[:, OMEGA]):
@@ -2455,6 +2496,8 @@ class RotorPage(QtWidgets.QWidget):
         q_shown = sim.q if self.show_sag.isChecked() else q_vib
         here = self._columns(q_shown[None, :], np.array([sim.phase]), np.array([sim.omega]))[0]
         peak = max([float(np.abs(t).max()) for t in trails if t.size] + [float(np.abs(here[:8]).max())])
+        ring = self._ring(q_shown)
+        self.view.ring = ring
         self.view.update_state(q_shown, sim.phase, trails, peak)
         steady = sim.omega == sim.target and w > 0
         here = self._columns(q_vib[None, :], np.array([sim.phase]), np.array([sim.omega]))[0]
@@ -2464,12 +2507,14 @@ class RotorPage(QtWidgets.QWidget):
         if self._sag is not None and self.show_sag.isChecked():
             sag = self._sag_at(np.array([sim.omega]))[0]
             centre = (float(sag[2]), float(sag[3]))
-        self.orbits.update_orbits(trails, keys, heavy if w > 0 else None, centre)
+        self.orbits.update_orbits(trails, keys, heavy if w > 0 else None, centre, ring)
 
         t, hist = self.history.window(self.window.value())
         st = self.station.currentIndex()
         self.time.update_curves(t, self._shown(hist)[:, 2 * st : 2 * st + 2], hist[:, OMEGA] * RPM,
                                 self.window.value())
+        if self.tabs.current_page() is self.rub_panel:
+            self._draw_push(t, hist)
         self.campbell_plot.set_speed(sim.omega * RPM)
         self.stability_map.set_speed(sim.omega * RPM)
         self._show_bearing_speed()
@@ -2502,9 +2547,13 @@ class RotorPage(QtWidgets.QWidget):
                 swept = float(np.sum(disc[:-1, 0] * np.diff(disc[:, 1]) - disc[:-1, 1] * np.diff(disc[:, 0])))
                 text += ", whirling " + ("forward" if swept > 0 else "backward")
             parts.append(text)
+        rubbing = sim.system.stator is not None and y.shape[0] and y[:, PUSH].max() > 0.0
+        if rubbing:
+            parts.append(f"<span style='color:{colors.force}'>rubbing the stator ring</span>")
         growing = self.onset is not None and sim.omega >= self.onset.omega and least_damped(sim.system, w)[0] < 0
         # (Not where a turning shaft's weight drives 2X: the disc's position then says little of the 1X.)
-        if (heavy is not None and steady and not growing and not (sim.system.periodic and sim.system.gravity)
+        if (heavy is not None and steady and not growing and not rubbing
+                and not (sim.system.periodic and sim.system.gravity)
                 and r_disc > 1e-3 * max(abs(sim.system.mass_unbalance) / sim.system.disc_mass, MIN_PEAK)):
             lag = math.degrees(heavy - math.atan2(here[3], here[2])) % 360.0
             parts.append(f"heavy spot leads the high spot by {lag:.0f}°")
@@ -2530,6 +2579,10 @@ class RotorPage(QtWidgets.QWidget):
                      "linearized (about where the journal rests), so it would let it through. Tick <i>Nonlinear "
                      "film</i> to step the film's whole force. "
                      if self.touched else
+                     f"the whirl passed {_fmt_len(RUB * sim.system.length)} ({RUB:.0%} of the span), "
+                     f"{_fmt_len(RUB * sim.system.length - sim.system.stator.clearance)} past the stator ring's "
+                     "clearance: its mount would have given way long before, and the machine been wrecked. "
+                     if sim.system.stator is not None else
                      f"the whirl passed {_fmt_len(RUB * sim.system.length)} ({RUB:.0%} of the span), where a real "
                      "rotor would rub its seals or wreck its bearings. "
                      + ("The oil films hold the journals inside their clearance, but not the shaft's bending, so "
@@ -2540,6 +2593,29 @@ class RotorPage(QtWidgets.QWidget):
                 + ("Set the target outside the unstable range" if self.onset is not None and math.isfinite(self.onset.end)
                    else "Lower the target below the onset") + " and Reset.</span>")
         self.readout.setText(" · ".join(parts))
+
+    def _draw_push(self, t: np.ndarray | None = None, hist: np.ndarray | None = None) -> None:
+        """The Rub tab's plot of the ring's push, over the strip chart's window (`t`, `hist` from the history)."""
+        if t is None:
+            t, hist = self.history.window(self.window.value())
+        self.rub_panel.update_contact(t, hist[:, PUSH], self.window.value())
+
+    def _ring(self, q: np.ndarray) -> tuple[float, float, float] | None:
+        """The stator ring as drawn with the rotor at q (shown with its sag or without): its centre, pushed out
+        by the disc where it overlaps it, and its clearance (m)."""
+        stator = self.sim.system.stator
+        if stator is None:
+            return None
+        cx, cy = stator.centre
+        if not self.show_sag.isChecked() and self.sim.system.gravity:  # drawn about the sag: move the ring too
+            sag = self.sim.system.static_deflection(self.sim.omega)
+            cx, cy = cx - sag[XD], cy - sag[YD]
+        dx, dy = q[XD] - cx, q[YD] - cy
+        rho = math.hypot(dx, dy)
+        over = rho - stator.clearance
+        if over > 0.0:
+            cx, cy = cx + over * dx / rho, cy + over * dy / rho
+        return cx, cy, stator.clearance
 
     def _heavy_angle(self) -> float | None:
         """The heavy spot's angle now (rad), or None if it is hidden or there is no unbalance."""
@@ -2700,7 +2776,7 @@ def _same_rotor(a: RotorSystem, b: RotorSystem) -> bool:
     def close(u, v) -> bool:
         if u is None or v is None:
             return u is v
-        if isinstance(u, (Bearing, JournalBearing, MagneticBearing, Crack)):
+        if isinstance(u, (Bearing, JournalBearing, MagneticBearing, Crack, Stator)):
             # A film's own load is not used on the rotor: each bearing carries its share of the weight.
             return type(u) is type(v) and all(close(getattr(u, f.name), getattr(v, f.name)) for f in fields(u)
                                               if not (isinstance(u, JournalBearing) and f.name == "load"))

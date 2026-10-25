@@ -531,6 +531,25 @@ def jeffcott_magnetic():
     save(w, "jeffcott_magnetic")
 
 
+def jeffcott_rub():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.load_preset("Partial rub (½X)")
+    page._refresh_analysis()
+    for _ in range(650):  # 13 s: up to 4400 rpm at 500 rpm/s, and settled into hitting the ring every other turn
+        page.step(0.02)
+    page.show_sag.setChecked(False)  # the orbit about the sag, the ring's bottom across it
+    page.tabs.show_page(page.spectrum.parentWidget())
+    for _ in range(50):  # the orbits' scale shrinks gradually to the orbit without the sag
+        page._draw()
+    print(page.readout.text())
+    save(w, "jeffcott_rub")
+
+
 def jeffcott_overhung():
     w = window()
     page = w.rotor_page
@@ -662,7 +681,7 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
-         jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_overhung, jeffcott_waterfall,
+         jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked]
 
 

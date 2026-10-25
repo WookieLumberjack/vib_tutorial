@@ -143,12 +143,20 @@ by harmonic balance over every harmonic. Its weight then drives 1X, 2X and 3X,
 the last two most near a half and a third of a critical speed. An open crack
 (not breathing, a notch) turns with the shaft as the asymmetric shaft does.
 
+A stator ring (`stator`, a seal or a casing) may sit round the disc, a clearance
+larger than it. Once the disc's centre moves past the clearance from the ring's
+centre, the ring pushes it back and its friction drags the disc's rim against
+its slip over the ring (stator_force). That is not linear in anything, so the
+ring is in the time response only; every analysis is the rotor's without it.
+
 Time stepping uses the state z = [q, q'], z' = A(Ω) z + B u, with the same exact
 first-order-hold matrix-exponential update as the chain's Simulator. A depends
 on Ω, so while the speed ramps A is held at the speed at the middle of each short
 chunk of steps (CHUNK_TIME), and the unbalance force follows the exact phase.
 An asymmetric or cracked shaft's turning stiffness is split off each step as a
 kick to the velocities at mid-step, between two exact half steps of the rest.
+The oil films' whole force and a stator ring's are loads found by Newton each
+step beside the exact update.
 """
 
 from __future__ import annotations
@@ -189,6 +197,10 @@ FILM_DRIFT = 0.3  # the films' damping bound is taken afresh once it has moved t
 FILM_TOL = 1e-7  # Newton stops when the remainder's residual is this small, over (1 N + the largest load)
 FILM_ITERATIONS = 12  # and after this many iterations at most
 FILM_CORRECTION = 1e-4  # a Newton correction this small (over the same) is taken without checking: it converges
+# Rub on a stator ring (RotorSystem.stator), see RotorSimulator._rub_steps:
+SLIP = 0.01  # m/s: the rim's friction reaches 0.71 μ N at this slip (s/√(s² + SLIP²), smoothed Coulomb)
+RUB_TOL = 1e-9  # Newton stops when the contact force's residual is this small, over (1 N + k clearance)
+RUB_ITERATIONS = 30
 
 
 def _edge_crack_factor(s: np.ndarray, bending: bool) -> np.ndarray:
@@ -263,6 +275,71 @@ class Crack:
     angle: float = 0.0  # rad, of the crack's mouth from the keyphasor mark, in the direction of spin
     breathing: bool = True
     compliance: tuple[float, float] | None = None
+
+
+@dataclass(frozen=True)
+class Stator:
+    """A rigid ring round the disc (a seal or a casing), which the disc's rim rubs once it reaches it.
+
+    The ring is `clearance` larger in radius than the disc, its centre `offset`
+    from the bearings' line toward `offset_angle` (fixed axes, from +x toward +y;
+    -90°: down). Where the disc's centre is further than the clearance from the
+    ring's centre, by δ, the ring pushes it back with N = k δ + c δ' (never
+    pulling), and drags its rim against the slip with μ N, the slip being the rim's
+    speed over the ring, R Ω plus the disc's whirl along the ring.
+    """
+
+    clearance: float = 2e-4  # m, radial
+    stiffness: float = 2e6  # N/m, the ring's contact stiffness
+    damping: float = 100.0  # N·s/m, in contact
+    friction: float = 0.1  # μ, the rim on the ring
+    offset: float = 0.0  # m, of the ring's centre from the bearings' line
+    offset_angle: float = -0.5 * math.pi  # rad, its direction in fixed axes
+
+    @property
+    def centre(self) -> tuple[float, float]:
+        """The ring's centre (x, y), m."""
+        return self.offset * math.cos(self.offset_angle), self.offset * math.sin(self.offset_angle)
+
+
+def stator_force(stator: Stator, radius: float, x: float, y: float, vx: float, vy: float,
+                 omega: float) -> tuple[float, float, float, list[float]]:
+    """(f_x, f_y, N, J): the ring's force on the disc at (x, y) moving at (x', y'), the normal force N,
+    and the force's derivatives J = d(f_x, f_y)/d(x, y, x', y') (row by row, 8 numbers).
+
+    The friction is Coulomb's smoothed over SLIP: μ N s/√(s² + SLIP²), s = R Ω + v_t,
+    the rim's slip along the ring (v_t the disc's velocity along it, in the direction of spin).
+    """
+    cx, cy = stator.centre
+    dx, dy = x - cx, y - cy
+    rho = math.hypot(dx, dy)
+    pen = rho - stator.clearance
+    if pen <= 0.0 or rho == 0.0:
+        return 0.0, 0.0, 0.0, [0.0] * 8
+    nx, ny = dx / rho, dy / rho  # out from the ring's centre
+    tx, ty = -ny, nx  # along the ring, in the direction of spin
+    vn, vt = nx * vx + ny * vy, tx * vx + ty * vy
+    normal = stator.stiffness * pen + stator.damping * vn
+    if normal <= 0.0:  # pulling away faster than the ring springs back: no contact
+        return 0.0, 0.0, 0.0, [0.0] * 8
+    s = radius * omega + vt
+    root = math.sqrt(s * s + SLIP * SLIP)
+    sat, dsat = s / root, SLIP * SLIP / root**3
+    mu = stator.friction
+    gx, gy = nx + mu * sat * tx, ny + mu * sat * ty  # f = -N g
+    # n and t turn as the disc moves round the ring: dn/dd = t tᵀ/ρ, dt/dd = -n tᵀ/ρ.
+    # dδ'/dd = vᵀ t tᵀ/ρ = (v_t/ρ) tᵀ, dv_t/dd = -(v_n/ρ) tᵀ.
+    k, c = stator.stiffness, stator.damping
+    dN = (k * nx + c * vt / rho * tx, k * ny + c * vt / rho * ty, c * nx, c * ny)  # dN/d(x, y, x', y')
+    ds = (-vn / rho * tx, -vn / rho * ty, tx, ty)  # ds/d(x, y, x', y')
+    J = []
+    for g, n_, t_ in ((gx, nx, tx), (gy, ny, ty)):
+        # dg/dd = (t_ - μ σ n_) tᵀ/ρ + μ t_ σ' ds/dd;  dg/dv = μ t_ σ' ds/dv
+        turn = (t_ - mu * sat * n_) / rho
+        dg = (turn * tx + mu * t_ * dsat * ds[0], turn * ty + mu * t_ * dsat * ds[1],
+              mu * t_ * dsat * ds[2], mu * t_ * dsat * ds[3])
+        J.extend(-(g * dN[i] + normal * dg[i]) for i in range(4))
+    return -normal * gx, -normal * gy, normal, J
 
 
 @dataclass(frozen=True)
@@ -363,6 +440,7 @@ class RotorSystem:
     asymmetry_angle: float = 0.0  # rad, α: the stiff axis's angle from the keyphasor mark
     crack: Crack | None = None  # a transverse crack in the shaft
     nonlinear_films: bool = False  # the time response takes the oil films' whole force, not their linearization
+    stator: Stator | None = None  # a ring round the disc that it rubs on (time response only)
 
     def __post_init__(self) -> None:
         if min(abs(self.position), abs(self.position - 1.0)) < MIN_GAP:
@@ -393,6 +471,14 @@ class RotorSystem:
                 raise ValueError(f"the crack's depth a/D is in [0, {CRACK_DEPTH_MAX}]")
             if not lo < self.crack.position * self.length < hi:
                 raise ValueError("the crack is in the shaft, between its ends")
+        if self.stator is not None:
+            st = self.stator
+            if st.clearance <= 0.0 or st.stiffness <= 0.0:
+                raise ValueError("the stator's clearance and contact stiffness must be positive")
+            if min(st.damping, st.friction, st.offset) < 0.0:
+                raise ValueError("the stator's damping, friction and offset cannot be negative")
+            if self.periodic or self.whole_films:
+                raise ValueError("a stator rubs only on a round shaft, with its oil films linearized")
 
     def with_(self, **changes) -> RotorSystem:
         return replace(self, **changes)
@@ -424,6 +510,11 @@ class RotorSystem:
     def ei(self) -> float:
         """Bending stiffness EI (N·m²) of the round shaft."""
         return self.youngs * math.pi * self.diameter**4 / 64.0
+
+    @property
+    def disc_radius(self) -> float:
+        """The disc's radius (m), a uniform thin disc's from its mass and I_p = m R²/2."""
+        return math.sqrt(2.0 * self.ip / self.disc_mass)
 
     @property
     def a(self) -> float:
@@ -1764,6 +1855,7 @@ class RotorSamples:
     q: np.ndarray  # (k, n_dof) displacements
     omega: np.ndarray  # (k,) spin speed (rad/s)
     phase: np.ndarray  # (k,) angle φ of the keyphasor mark (rad, unwrapped)
+    rub: np.ndarray | None = None  # (k, 3) with a stator: its force on the disc (f_x, f_y) and the normal force N
 
 
 class _Films:
@@ -1907,6 +1999,31 @@ class _Films:
         return r
 
 
+def _rub_solve(stator: Stator, radius: float, yb: np.ndarray, E: np.ndarray, r: np.ndarray, omega: float,
+               tol: float) -> tuple[np.ndarray, float]:
+    """(r, N): the ring's force on the disc at the step's end, where the disc's (x, y, x', y') = yb + E r, by
+    Newton from the guess r (each step cut back until it shrinks the residual), and its normal force."""
+
+    def at(r: np.ndarray) -> tuple[np.ndarray, list[float], float]:
+        fx, fy, normal, J = stator_force(stator, radius, *(yb + E @ r).tolist(), omega)
+        return r - (fx, fy), J, normal
+
+    R, J, normal = at(r)
+    for _ in range(RUB_ITERATIONS):
+        size = np.abs(R).max()
+        if size <= tol:
+            break
+        dr = -np.linalg.solve(np.eye(2) - np.reshape(J, (2, 4)) @ E, R)
+        t = 1.0
+        while True:
+            Rt, Jt, nt = at(r + t * dr)
+            if np.abs(Rt).max() < size or t < 1e-3:
+                break
+            t *= 0.5
+        r, R, J, normal = r + t * dr, Rt, Jt, nt
+    return r, normal
+
+
 class RotorSimulator:
     """Steps the rotor exactly (FOH matrix exponential) while its speed follows a target."""
 
@@ -2035,6 +2152,8 @@ class RotorSimulator:
             fmax = max(fmax, self._f_at[top])
         if self._films is not None:
             fmax = max(spin, fmax * FILM_MODE_STEPS / STEPS_PER_PERIOD)
+        if self.system.stator is not None:  # the disc bouncing on the ring
+            fmax = math.hypot(fmax, math.sqrt(self.system.stator.stiffness / self.system.disc_mass) / (2.0 * math.pi))
         h = MAX_STEP if fmax <= 0 else min(MAX_STEP, 1.0 / (STEPS_PER_PERIOD * fmax))
         return 2.0 ** math.floor(math.log2(h))
 
@@ -2085,6 +2204,7 @@ class RotorSimulator:
         n_dof = self.system.n_dof
         ts, qs = np.empty(steps), np.empty((steps, n_dof))
         ws, phis = np.empty(steps), np.empty(steps)
+        rubs = np.zeros((steps, 3)) if self.system.stator is not None else None
         chunk = max(1, int(CHUNK_TIME / h))
         k = 0
         while k < steps:
@@ -2107,17 +2227,49 @@ class RotorSimulator:
             else:
                 Phi, G0, G1 = self._discrete(h, held, steady, self.phase if still else None)
                 drive = G0 @ np.vstack([u0, u[:-1]]).T + G1 @ u.T
-                z = self.state
-                for j in range(n):
-                    z = Phi @ z + drive[:, j]
-                    qs[k + j] = z[:n_dof]
+                if rubs is not None:
+                    z = self._rub_steps(Phi, G0, G1, drive, w1, qs[k:k + n], rubs[k:k + n])
+                else:
+                    z = self.state
+                    for j in range(n):
+                        z = Phi @ z + drive[:, j]
+                        qs[k + j] = z[:n_dof]
             self.state = z
             ts[k : k + n] = self.t + h * np.arange(1, n + 1)
             ws[k : k + n], phis[k : k + n] = w1, phi1
             self.t = float(ts[k + n - 1])
             self.omega, self.phase, self._alpha = float(w1[-1]), float(phi1[-1]), float(alpha[-1])
             k += n
-        return RotorSamples(ts, qs, ws, phis)
+        return RotorSamples(ts, qs, ws, phis, rubs)
+
+    def _rub_steps(self, Phi: np.ndarray, G0: np.ndarray, G1: np.ndarray, drive: np.ndarray, w1: np.ndarray,
+                   out: np.ndarray, rubs: np.ndarray) -> np.ndarray:
+        """Steps with the disc rubbing on the stator; fills out (n, n_dof) and rubs (n, 3), returns the last state.
+
+        The ring's force r on the disc goes in as a load, linear over the step as
+        the FOH takes the loads:
+
+            z1 = Φ z0 + Γ0 (u0 + r0) + Γ1 (u1 + r1),
+
+        r1 found by Newton, since it depends on z1 (the trapezoidal rule on r: the
+        friction's slope, μ N / SLIP, would ring an explicit step). The step resolves
+        the disc bouncing on the ring's stiffness (step_size).
+        """
+        system = self.system
+        n, stator, radius = system.n_dof, system.stator, system.disc_radius
+        rows = [XD, YD, n + XD, n + YD]
+        R0, R1 = G0[:, [XD, YD]], G1[:, [XD, YD]]
+        E = R1[rows]
+        tol = RUB_TOL * (1.0 + stator.stiffness * stator.clearance)
+        z = self.state
+        r = np.array(stator_force(stator, radius, *z[rows].tolist(), self.omega)[:2])
+        for j in range(w1.size):
+            zb = Phi @ z + drive[:, j] + R0 @ r
+            r, normal = _rub_solve(stator, radius, zb[rows], E, r, float(w1[j]), tol)
+            z = zb + R1 @ r
+            out[j] = z[:n]
+            rubs[j] = r[0], r[1], normal
+        return z
 
     def _film_steps(self, h: float, held: float, w1: np.ndarray, u0: np.ndarray, u: np.ndarray,
                     out: np.ndarray) -> np.ndarray:

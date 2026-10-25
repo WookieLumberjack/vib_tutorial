@@ -499,8 +499,9 @@ the speed ramps to a target.
 - **Presets**: the classic Jeffcott rotor, an off-centre disc, anisotropic supports, an
   overhung rotor, a long shaft whose own mass matters, a two-pole rotor with an asymmetric shaft,
   a cracked shaft, oil swirl at λ = ½, and plain journal bearings, both going into oil whip, an
-  upright rotor in oil whirl, and an overhung rotor on magnetic bearings that its controller's lag
-  makes unstable. Each loads a rotor with a speed range to suit it and a note on what to look for.
+  upright rotor in oil whirl, an overhung rotor on magnetic bearings that its controller's lag
+  makes unstable, and two rotors rubbing a stator ring: a partial rub with ½X, and a full rub that
+  flips into backward whirl. Each loads a rotor with a speed range to suit it and a note on what to look for.
 - **Shaft mass**: tick it (and set the density) and the shaft gets its mass, its sections'
   rotary inertia and their gyroscopic moment. It is then 2 to 60 Euler–Bernoulli beam elements
   with consistent or lumped mass, reduced Craig–Bampton style to the stations and the shaft's
@@ -614,6 +615,14 @@ the speed ramps to a target.
   the journals at the centre under gravity, and a mode that moves out of the damped band, such as a
   forward tilting mode rising with the speed, grows. The page pauses when a journal lands on its
   backup bearing.
+- **Rub**: a stator ring round the disc (a seal or a casing), with its clearance, its offset from the
+  bearings' line, its mount's stiffness and damping, and the friction of the disc's rim on it. Once the
+  whirl reaches it, the ring pushes the disc back and drags its rim against the slip, stepped by
+  Newton's method beside the exact update. Brushing it on one side gives harmonics and, above twice
+  the critical, ½X and ⅓X; held against it all round, enough friction flips the whirl backward, at the
+  disc's frequency on the ring, until the rim rolls round it (dry whirl). The tab gives the gap at
+  rest and the disc's frequency on the ring, and plots the ring's push; the ring is drawn round the
+  disc in the 3D view and on its orbit. The ring is in the time response only.
 - **Equations & matrices**: M, C, G, K and the circulatory matrix H with the current numbers,
   the shaft's beam stiffness (condensed, or with mass reduced to the stations and the shaft's modes), the state matrix A(Ω), and the modes at the current
   speed. G is skew-symmetric: it sits beside C but does no work.
@@ -630,7 +639,8 @@ the speed ramps to a target.
   c<sub>e</sub>/c<sub>i</sub>) of internal-damping whirl, oil whirl and whip at λΩ = ω), the
   fluid-film bearing (the film's sideways push, the locus, the coefficients and the threshold), active
   magnetic bearings (the negative stiffness, the PID's frequency-dependent stiffness and damping, and
-  phase-lag instability), waterfall and
+  phase-lag instability), rotor–stator rub (partial rub and its sub-harmonics, the full rub's friction
+  as a cross-coupling, and dry whirl), waterfall and
   cascade plots (a measured Campbell diagram; block length against ramp rate), the shaft's own mass
   (beam elements, consistent against lumped mass, the reduction), and why the solution uses state
   space. Three figures, drawn in the current theme, show the heavy and high spots, a schematic
@@ -706,6 +716,14 @@ On magnetic bearings the stiffness and damping come from a controller, and they 
 frequency. In the *Magnetic bearings* preset the amplifier's lag turns the damping negative above
 739 Hz. The disc's forward tilting mode rises with the speed, and at 8894 rpm it crosses into that band
 and goes unstable, exactly where the bearings' damping changes sign.
+
+![Partial rub preset at 4400 rpm: the horizontal rotor sags 378 µm into a 385 µm seal ring and hits its bottom every other turn. The disc's orbit, drawn about the sag with the ring's bottom across it, closes every two revolutions (its keyphasor dots in two places), and the full spectrum's tallest lines are ½X, ±36.7 Hz](docs/images/jeffcott_rub.png)
+
+A rotor that reaches its seals rubs them. The *Partial rub* preset sags into the bottom of its seal
+ring and, past about 4000 rpm, hits it every other turn: the orbit closes every two revolutions and
+the spectrum shows ½X, the sub-harmonic that flags a rub. The *Full rub* preset's tighter ring holds
+the disc all round, and its friction, pulling the rim backward, flips the whirl at 1545 rpm into
+backward whirl at 227 Hz, the disc's frequency on the ring, rolling round it on an orbit of 7.3 mm.
 
 ![Bode plot of the disc's 1X response, run up and coasted down between 800 and 2400 rpm at 500 and 5000 rpm/s over the steady-state curve: the steady peak is 217 µm at 1590 rpm; the 500 rpm/s run-up reaches 95% of it at 1672 rpm, the 5000 rpm/s run-up 62% at 1947 rpm, and the coast-downs peak lower and below the critical speed](docs/images/jeffcott_run_up.png)
 

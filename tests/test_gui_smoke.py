@@ -2436,6 +2436,56 @@ def test_rotor_on_magnetic_bearings(app):
     w.set_theme("Dark")
 
 
+def test_rotor_rub(app):
+    from vib_tutorial.core.rotor import Stator
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.rotor import CUSTOM, FILMS, PUSH
+
+    w = MainWindow()
+    p = w.rotor_page
+    w.pages.setCurrentWidget(p)
+    p._timer.stop()
+    panel = p.rub_panel
+    assert p.sim.system.stator is None and not panel.clearance.isEnabled()
+    # Ticking the ring puts it on the rotor (the user's own rotor), drawn round the disc.
+    panel.enabled.setChecked(True)
+    assert p.sim.system.stator == Stator() and p.preset.currentText() == CUSTOM
+    assert "At rest it has 200 µm to the ring" in panel.readout.text() and "227 Hz" in panel.readout.text()
+    panel.friction.setValue(0.2)
+    assert p.sim.system.stator.friction == 0.2
+    # A turning shaft, or the oil films' whole force, can't have one.
+    p.asymmetry.setValue(10.0)
+    assert p.sim.system.stator is None and not panel.enabled.isEnabled()
+    p.asymmetry.setValue(0.0)
+    assert p.sim.system.stator is not None
+    p.supports.setCurrentIndex(FILMS)
+    assert p.nonlinear_film.isChecked() and p.sim.system.stator is None
+    p.nonlinear_film.setChecked(False)
+    assert p.sim.system.stator is not None and p.sim.system.films
+    # The preset: rubbing under the sag; the push plotted while the tab shows.
+    p.load_preset("Partial rub (½X)")
+    assert panel.enabled.isChecked() and panel.clearance.value() == 385.0 and p.preset.currentText() == "Partial rub (½X)"
+    assert "sags 378 µm" in panel.readout.text() and "leaving 7.06 µm" in panel.readout.text()
+    p.tabs.show_page(panel)
+    p._catch_up_tab()
+    while p.sim.t < 6.0:
+        p.step(0.25)
+    t, hist = p.history.window(p.window.value())
+    assert hist[:, PUSH].max() > 0.0
+    assert panel.curve.xData is not None and panel.curve.xData.size == t.size
+    assert "In contact" in panel.contact.text()
+    assert "rubbing the stator ring" in p.readout.text()
+    assert p.view.ring is not None and p.view.stator_ring.xData.size and p.orbits.ring.xData.size
+    p.show_sag.setChecked(False)  # drawn about the sag: the ring moves up by it
+    p._draw()
+    assert p.view.ring[1] > 300e-6
+    # Off again: nothing drawn.
+    panel.enabled.setChecked(False)
+    p._draw()
+    assert p.view.ring is None and (p.orbits.ring.xData is None or not p.orbits.ring.xData.size)
+    w.set_theme("Dark")
+
+
 def test_rotor_theory_figures_follow_the_theme(app):
     # The Theory's figures are SVG drawn from the theme's colours, rendered as the notes are laid out.
     from PySide6 import QtCore, QtGui

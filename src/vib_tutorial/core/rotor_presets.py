@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from .fluid_bearing import JournalBearing
 from .magnetic_bearing import MagneticBearing
-from .rotor import STEEL, Bearing, Crack, RotorSystem
+from .rotor import STEEL, Bearing, Crack, RotorSystem, Stator
 
 # The overhung rotor: a 3 kg disc of radius 150 mm (I_p = m R²/2, I_d = m R²/4), 100 mm past
 # bearing B, on stiffer supports so that the shaft, not the supports, does the bending.
@@ -120,6 +120,25 @@ def rotor_presets() -> list[RotorPreset]:
             "stiffening toward the wall, hold it to a limit cycle with the journals circling past ε = 0.9. "
             "Past twice the first natural frequency, about 3700 rpm, the whirl locks at 30.8 Hz: oil whip, "
             "growing on.",
+        ),
+        RotorPreset(
+            "Partial rub (½X)",
+            RotorSystem(unbalance=10e-6, gravity=9.81, stator=Stator(clearance=385e-6)),
+            10_000.0, 4400.0,
+            "Horizontal, in a seal ring concentric with the bearings, 385 µm round the disc. The disc sags "
+            "378 µm under its weight, so above the critical its whirl brushes the bottom of the ring, once "
+            "a turn at first. Past about 4000 rpm it hits only every other turn: the orbit closes every two "
+            "revolutions, and the spectrum shows ½X (36.7 Hz at 4400 rpm) and its harmonics.",
+        ),
+        RotorPreset(
+            "Full rub (backward whirl)",
+            RotorSystem(stator=Stator(clearance=30e-6, friction=0.3)),
+            10_000.0, 2000.0,
+            "A tight ring, 30 µm round the disc, with dry friction μ = 0.3. Through the critical the whirl "
+            "reaches the ring, and the friction, dragging the disc's rim backward, flips it at 1545 rpm "
+            "into backward whirl at 227 Hz, the disc's frequency on the ring, far above the speed. The "
+            "rim rolls round the ring, so the orbit's radius is R Ω / ω, 7.3 mm at 2000 rpm, pushing the "
+            "ring back far past its clearance: dry whirl, which would wreck a real machine.",
         ),
         RotorPreset(
             "Magnetic bearings",
