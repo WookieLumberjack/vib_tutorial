@@ -693,13 +693,29 @@ def jeffcott_cracked():
     save(w, "jeffcott_cracked")
 
 
+def duffing_jump():
+    from vib_tutorial.core.duffing import Sweep
+
+    w = window()
+    page = w.duffing_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    while page.sim.drive.mode is not Sweep.HOLD:  # the preset's sweep up, then down
+        page.step(1.0)
+    print(page.readout.text())
+    save(w, "duffing_jump")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_newkirk, jeffcott_overhung, jeffcott_waterfall,
-         jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked]
+         jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked,
+         duffing_jump]
 
 
 def main(names: list[str]) -> None:

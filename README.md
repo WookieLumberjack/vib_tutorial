@@ -46,7 +46,8 @@ Four more pages work on the same chain, in order from analysis to simplification
 **Substructuring (CMS)** reduces the chain by component mode synthesis (Craig–Bampton, Rubin or
 MacNeal), and **Virtual modal test** measures the FRF from simulated force and response signals,
 as in a lab. The **Jeffcott rotor** page leaves the chain for a
-spinning shaft: a disc on a flexible shaft in flexible bearings (all below).
+spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing oscillator**
+page for a single mass on a nonlinear spring, swept through its jump (all below).
 
 ### Themes
 
@@ -780,6 +781,36 @@ third of it, which the asymmetric shaft has none of. The *Cracked shaft* preset'
 37.6 µm at 2X at 783 rpm and 18.6 µm at 3X at 522 rpm, and its 1X at the critical is 164 µm
 against 54 µm uncracked. Held open, the crack is an asymmetric shaft: no 3X, and twice the 2X.
 
+### Duffing oscillator
+
+The **Duffing oscillator** page drives one mass on a spring with a cubic term,
+m x″ + c x′ + k x + k<sub>3</sub> x³ = F cos φ, that hardens (k<sub>3</sub> > 0) or softens
+(k<sub>3</sub> < 0) as it stretches, and sweeps the drive's frequency slowly up and then down.
+
+- **Harmonic balance**: the first harmonic's steady amplitude against frequency, solid where
+  stable and dashed where not, with the backbone (the free oscillation's frequency at each
+  amplitude) and the linear spring's curve for comparison. Between the two folds there are three
+  amplitudes, the middle one unstable, and the arrows mark the jumps from each fold.
+- **Sweeps**: each drive cycle's measured first harmonic, coloured by the sweep's direction, on
+  top of the curve, with the measured jump frequencies beside the folds'. Hold the frequency
+  inside the band and *Start on a branch* puts the mass on the lower, middle or upper steady
+  state.
+- **Phase plane**: the last few cycles' trajectory and, while the frequency is held, the
+  Poincaré section (the state once per drive cycle).
+- **Presets**: hardening and softening jumps, a linear spring for comparison, two stable states
+  at one frequency, a softening spring thrown over its potential's hilltop (the page pauses when
+  it escapes), and Ueda's chaotic oscillator.
+- **Notes**: harmonic balance, the backbone, the jump and its stability, sweep rate and
+  critical slowing down, superharmonics, subharmonics and chaos.
+
+![Duffing oscillator, hardening spring (k = 400 N/m, k3 = 10^5 N/m³, c = 1 N·s/m, F = 2 N) swept from 2 to 6 Hz and back at 120 s a leg: harmonic balance gives two stable amplitudes between the folds at 3.64 and 4.45 Hz; the sweep up rides the upper branch to 71 mm and drops at 4.7 Hz, the sweep down follows the lower branch and jumps up at 3.57 Hz](docs/images/duffing_jump.png)
+
+A hardening spring's resonance leans toward higher frequencies, because a bigger swing is a
+stiffer one. Sweeping up, the mass rides the upper branch past the linear resonance (3.18 Hz) to
+its fold at 4.45 Hz, then drops to the lower branch. Sweeping down, it follows the lower branch to
+the other fold, at 3.64 Hz, and jumps up. Near a fold the steady state is barely stable, so a
+sweep overruns it before the mass leaves: here it drops at 4.7 Hz and jumps up at 3.57 Hz.
+
 ## The math, briefly
 
 The *Background* tab in the app explains this in more depth; this is the outline.
@@ -945,6 +976,10 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/rotor_waterfall.py`: `Waterfall`, full spectra of the orbits taken block by block as
   samples are fed in, each with the free whirl frequencies at its speed, and the latest run-up
   or coast-down among them.
+- `core/duffing.py`: the Duffing oscillator: harmonic balance's response curve (traced by
+  amplitude, unstable branch included) with its folds and backbone, the swept drive, an exact FOH
+  stepper with the cubic's force found by Newton each step, each drive cycle's first harmonic,
+  and the page's presets.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and

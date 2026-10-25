@@ -53,11 +53,12 @@ LAZY_PAGES = (
     ("cms_page", "Substructuring (CMS)"),
     ("test_page", "Virtual modal test"),
     ("rotor_page", "Jeffcott rotor"),
+    ("duffing_page", "Duffing oscillator"),
 )
 
 
 def _follows_chain(page: QtWidgets.QWidget) -> bool:
-    """Whether a page shows the chain (and is given it); the rotor page has a model of its own."""
+    """Whether a page shows the chain (and is given it); the rotor and Duffing pages have models of their own."""
     return getattr(page, "follows_chain", True)
 
 
@@ -72,6 +73,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "cms_page":
         from .substructuring import SubstructuringPage
         return SubstructuringPage
+    if name == "duffing_page":
+        from .duffing import DuffingPage
+        return DuffingPage
     if name == "rotor_page":
         from .rotor import RotorPage
         return RotorPage
@@ -432,6 +436,7 @@ class MainWindow(QtWidgets.QMainWindow):
     cms_page = property(lambda self: self._page("cms_page"))
     test_page = property(lambda self: self._page("test_page"))
     rotor_page = property(lambda self: self._page("rotor_page"))
+    duffing_page = property(lambda self: self._page("duffing_page"))
 
     def _page(self, name: str) -> QtWidgets.QWidget:
         """The page `name` from LAZY_PAGES, built and put in its tab on first use."""

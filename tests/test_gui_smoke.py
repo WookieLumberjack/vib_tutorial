@@ -2678,7 +2678,7 @@ def test_frame_timers_keep_the_frame_rate(app, monkeypatch):
     frame's computing comes out of the wait, not on top of it (16 ms + its work held the rotor at 47 fps)."""
     import time
 
-    from vib_tutorial.gui import cms_time, rotor
+    from vib_tutorial.gui import cms_time, duffing, rotor
     from vib_tutorial.gui.main_window import MainWindow
 
     w = MainWindow()
@@ -2686,8 +2686,9 @@ def test_frame_timers_keep_the_frame_rate(app, monkeypatch):
     w.pages.setCurrentWidget(w.cms_page)
     w.cms_page.tabs.setCurrentWidget(w.cms_page.time)
     app.processEvents()
-    for p, frame_ms in ((w.cms_page.time, cms_time.FRAME_MS), (w.rotor_page, rotor.FRAME_MS)):
-        w.pages.setCurrentWidget(p if p is w.rotor_page else w.cms_page)
+    for p, frame_ms in ((w.cms_page.time, cms_time.FRAME_MS), (w.rotor_page, rotor.FRAME_MS),
+                        (w.duffing_page, duffing.FRAME_MS)):
+        w.pages.setCurrentWidget(w.cms_page if p is w.cms_page.time else p)
         app.processEvents()
         monkeypatch.setattr(p, "step", lambda *_, **__: time.sleep(0.008))
         p._frame()
@@ -2854,4 +2855,56 @@ def test_simulation_page_keeps_to_its_compute_budget(app, monkeypatch):
     monkeypatch.setattr(w.sim, "collect", collect)
     tick()
     assert 0.0 < w._step_cost < slow_cost  # cheaper: gradually
+    w.close()
+
+
+def test_duffing_page(app):
+    """The Duffing page sweeps up and down over harmonic balance's curve, measures its jumps, starts the
+    mass on a branch, pauses when a softening spring's mass escapes, and keeps going across a theme switch."""
+    from vib_tutorial.core.duffing import Sweep
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.duffing_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    assert p.running and p._timer.isActive() and p.sim.drive.mode is Sweep.UP_DOWN
+    p._timer.stop()
+    assert p.preset.currentText() == "Hardening spring: the jump" and p.frame_context() == p.preset.currentText()
+    assert "3.64 and 4.45 Hz" in p.readout.text()
+    while p.sim.drive.mode is not Sweep.HOLD:
+        p.step(5.0)
+    legs = {c.leg for c in p.cycles}
+    assert {"up", "down"} <= legs and len(p.up_item.data) > 100 and len(p.down_item.data) > 100
+    assert "Measured: the jump at 4." in p.readout.text() and "and 3.5" in p.readout.text()
+    assert p.x_item.getData()[0].size <= 2 * 1200 + 2
+    assert len(p.section) == sum(c.leg == "hold" for c in p.cycles)  # Poincaré dots only once it holds
+
+    w.set_theme("Dark")
+    p.step(1.0)
+    w.set_theme("Light")
+
+    p.preset.setCurrentText("Two stable states")
+    assert p.sim.drive.mode is Sweep.HOLD and p.freq.value() == pytest.approx(4.0)
+    assert all(b.isEnabled() for b in p.branch_buttons)
+    p.start_on_branch(2)
+    for _ in range(20):
+        p.step(1.0)
+    assert p.cycles[-1].amplitude == pytest.approx(0.0583, rel=0.02)  # stays on the upper branch
+    assert len(p.section) >= 60 and np.ptp(np.array(p.section[-10:]), axis=0).max() < 1e-3  # one dot
+    p.freq.setValue(5.0)  # outside the band: one amplitude
+    assert not p.branch_buttons[1].isEnabled() and p.branch_buttons[0].isEnabled()
+
+    p.preset.setCurrentText("Escape from the well")
+    while p.running:
+        p.step(5.0)
+    assert p.sim.escaped and "ran away" in p.readout.text() and p.run_button.text() == "Run"
+    p.reset()
+    assert p.running and not p.sim.escaped and p.sim.t == 0 and not p.cycles
+
+    p.stiffness.setValue(500.0)  # an edit: Custom, the points cleared, the curve redrawn
+    assert p.preset.currentText() == "Custom" and p.sim.osc.stiffness == 500.0
+    p.stiffness.setValue(0.0)  # a softening spring with nothing to soften: kept as it was
+    assert p.sim.osc.stiffness == 500.0 and "keeps the last" in p.osc_info.text()
     w.close()
