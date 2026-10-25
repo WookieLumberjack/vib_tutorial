@@ -1319,7 +1319,8 @@ That is the trapezoidal rule on the ring's force: a rim rolling on the ring is h
 μN/s<sub>0</sub>, hundreds of kN·s/m in dry whirl, which would ring an explicit step. The step also resolves the disc
 bouncing on the ring, √(k<sub>s</sub>/m), as well as the rotor's own modes. Checked against the full rub's
 steady state above (a frictionless one and one with μ = 0.1, to a part in 10<sup>6</sup>) and against
-a step four times finer.</p>
+a step four times finer. The steps run in Rust, at well under a microsecond each, so even a full rub
+runs in real time.</p>
 
 <h3>Keeping a shaft with mass fast</h3>
 <p>Every beam element adds modes. The highest are at tens of kHz, far above anything the rotor does at
