@@ -48,7 +48,8 @@ MacNeal), and **Virtual modal test** measures the FRF from simulated force and r
 as in a lab. The **Jeffcott rotor** page leaves the chain for a
 spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
 page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
-resonance (all below).
+resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes
+(all below).
 
 ### Themes
 
@@ -835,6 +836,38 @@ jump of its own: sweeping down from rest, nothing happens until rest turns unsta
 tongue's upper edge, and then the swing leaps up to a branch that the sweep back up rides far past
 the tongue.
 
+### Torsional vibration
+
+The **Torsional vibration** page takes a drive train apart: a line of discs (a motor, couplings,
+gears, a fan, an engine's cranks, a generator) on shafts, each disc twisting against the next. Gear
+meshes keep both gears' inertias and join them by the teeth's stiffness along the line of action, so
+the far shaft turns at z<sub>in</sub>/z<sub>out</sub> times the near one's speed.
+
+- **The train**: pick a disc or a link (or click it in the *Drive train* drawing) to change its
+  inertia, stiffness or damping; make a shaft a gear mesh (teeth, base radius, mesh stiffness,
+  transmission error) or a mesh a shaft; add and remove discs.
+- **The interference diagram**: the natural frequencies, flat since nothing depends on the speed,
+  against the orders that excite them: the train's own pulsating torque (an engine's firing
+  orders, a compressor's, a misaligned coupling's 2×), each mesh's tooth-pass, and 1× and 2× of
+  each shaft's speed. Where an order crosses a mode is a torsional critical speed; those within
+  ±10 % of the running speed are filled red. Log scales show a mesh's kilohertz mode with the
+  couplings'.
+- **The steady response**: the dynamic torque in any shaft or mesh against the motor's speed,
+  each order on its own and their sum, from (K − ω²M + iωC) Θ = T at each speed.
+- **Mode shapes**: each mode's swing referred to the motor's shaft and which link it twists, and
+  the n² reflection checked: the train referred to one shaft (inertias and stiffnesses × s²) has
+  the same frequencies, while making the gears rigid keeps the lower modes and loses the mesh's.
+- **Presets**: a motor and fan on a coupling (two inertias, against the closed form), a geared
+  compressor whose tooth-pass meets its mesh mode near the running speed, and a diesel generator
+  set's firing orders against its crankshaft and flexible coupling.
+
+![Torsional vibration page, the Geared compressor preset: a 10 kg·m² motor drives a 4:1 speed-up gearbox and a compressor through two couplings. On the log-log interference diagram the modes at 38.9 and 83.1 Hz (the couplings) and 2688 Hz (the mesh) cross the orders; the tooth-pass (120× the motor's speed) meets the mesh mode at 1344 rpm, 9.8 % below the 1490 rpm running speed, inside the ±10 % band](docs/images/torsional_compressor.png)
+
+The geared compressor's couplings make two modes, at 38.9 and 83.1 Hz, and the teeth a third, the
+two gears bouncing on the mesh at 2688 Hz. Made rigid, the n² reflection keeps the first two to
+within 0.1 % but loses that one, and it is the one the tooth-pass meets at 1344 rpm, inside the
+band round the 1490 rpm running speed.
+
 ## The math, briefly
 
 The *Background* tab in the app explains this in more depth; this is the outline.
@@ -1005,6 +1038,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
   half-harmonic response and first tongue, the Floquet growth rate over the Ince–Strutt chart, the
   swept drive, an exact FOH stepper with the cubic's and the pump's forces found by Newton each
   step, each drive cycle's first and half harmonics, and the page's presets.
+- `core/torsional.py`: torsional drive trains: discs, shafts and gear meshes (with transmission
+  error), the modes and their twist, the train referred to one shaft and with rigid gears, the
+  orders and torsional critical speeds, the steady forced response, and the page's presets.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and

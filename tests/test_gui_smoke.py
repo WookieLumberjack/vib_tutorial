@@ -2965,3 +2965,85 @@ def test_mathieu_on_the_duffing_page(app):
     w.set_theme("Dark")
     p.step(1.0)
     w.close()
+
+
+def test_torsional_page(app):
+    """The torsional page loads each preset's criticals and response, edits the train (a disc, a shaft made a
+    mesh and back, a disc added and removed, the excitation), picks elements by clicking the drawing, switches
+    log scales, and survives a theme switch."""
+    from PySide6.QtCore import QPointF
+
+    from vib_tutorial.core.torsional import Mesh, Shaft
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.torsional_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    assert w.pages.tabText(w.pages.currentIndex()) == "Torsional vibration"
+    assert p.preset.currentText() == "Motor and fan: two inertias" and p.frame_context() == p.preset.currentText()
+    assert "Misalignment 2× meets mode 1 (52.3 Hz) at 1569 rpm" in p.readout.text()
+    assert "6.0 % above" in p.readout.text() and not p.log_scales.isChecked()
+    assert "Coupling: ±72.1 N·m at 1480 rpm" in p.response_note.text()
+
+    p.preset.setCurrentText("Geared compressor")
+    assert p.log_scales.isChecked() and "Tooth pass (Gear mesh) meets mode 3 (2688 Hz) at 1344 rpm" in p.readout.text()
+    assert p.response_link.currentText() == "High-speed coupling"  # the slowest mode's
+    assert "38.92, 83.09, 2688 Hz, the same" in p.check.text() and "1 mode lost" in p.check.text()
+    p.log_scales.setChecked(False)
+    p.log_scales.setChecked(True)
+
+    p.preset.setCurrentText("Diesel generator set")
+    assert "No torsional critical within ±10 % of 1500 rpm" in p.readout.text()
+    assert "6 faster modes no order reaches" in p.readout.text()
+    assert p.response_link.currentText() == "Flexible coupling"
+
+    # edit the fan's coupling: Custom, and the mode moves as sqrt(k)
+    p.preset.setCurrentText("Motor and fan: two inertias")
+    p.select(1)
+    assert p.editor.currentIndex() == 1 and p.shaft_stiffness.value() == pytest.approx(180.0)
+    p.shaft_stiffness.setValue(120.0)
+    assert p.preset.currentText() == "Custom" and p.train.links[0].stiffness == pytest.approx(1.2e5)
+    assert "No torsional critical within ±10 %" in p.readout.text()
+    f = p._modes[0].freq_hz
+    p.to_mesh.click()  # the same referred stiffness: the same mode
+    assert isinstance(p.train.links[0], Mesh) and p.editor.currentIndex() == 2
+    assert p._modes[0].freq_hz == pytest.approx(f, rel=1e-9)
+    p.teeth_out.setValue(80)  # a 2:1 reduction: the fan's inertia counts a quarter
+    assert p.train.speeds[1] == pytest.approx(0.5) and len(p._modes) == 1
+    p.to_shaft.click()
+    assert isinstance(p.train.links[0], Shaft)
+
+    p.select(2)  # the fan
+    p.add_button.click()
+    assert p.train.n == 3 and p.selected == 4 and p.element.count() == 5
+    p.remove_button.click()
+    assert p.train.n == 2 and not p.remove_button.isEnabled()
+
+    p.excite_disc.setCurrentIndex(0)  # None: no sources
+    assert p.train.excitation is None and "No excitation" in p.response_note.text()
+    p.excite_disc.setCurrentIndex(1)  # on the motor, a fresh 1×
+    assert p.train.excitation.disc == 0 and p.train.excitation.harmonics == ((1.0, 100.0),)
+
+    p.tabs.setCurrentWidget(p.drawing_tab)
+    app.processEvents()
+    vb = p.drawing.getPlotItem().getViewBox()
+    spots, _ = p._layout()
+
+    class Click:
+        def __init__(self, x, y):
+            self.at = vb.mapViewToScene(QPointF(x, y))
+
+        def scenePos(self):  # noqa: N802 (Qt's name)
+            return self.at
+
+    p._on_drawing_click(Click(*spots[1][:2]))
+    assert p.selected == 2 and p.editor.currentIndex() == 0
+    p._on_drawing_click(Click(0.5 * (spots[0][0] + spots[1][0]), spots[0][1]))
+    assert p.selected == 1
+
+    w.set_theme("Dark")
+    p.tabs.setCurrentWidget(p.shapes_tab)
+    w.set_theme("Light")
+    w.close()
