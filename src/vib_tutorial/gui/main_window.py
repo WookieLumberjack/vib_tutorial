@@ -53,12 +53,12 @@ LAZY_PAGES = (
     ("cms_page", "Substructuring (CMS)"),
     ("test_page", "Virtual modal test"),
     ("rotor_page", "Jeffcott rotor"),
-    ("duffing_page", "Duffing oscillator"),
+    ("duffing_page", "Duffing && Mathieu"),
 )
 
 
 def _follows_chain(page: QtWidgets.QWidget) -> bool:
-    """Whether a page shows the chain (and is given it); the rotor and Duffing pages have models of their own."""
+    """Whether a page shows the chain (and is given it); the rotor and Duffing & Mathieu pages have models of their own."""
     return getattr(page, "follows_chain", True)
 
 
