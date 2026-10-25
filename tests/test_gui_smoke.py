@@ -2,6 +2,7 @@
 
 import math
 import os
+import sys
 import tempfile
 
 import numpy as np
@@ -2164,11 +2165,13 @@ def test_rotor_hidden_tabs_draw_when_shown(app, monkeypatch):
     w.close()
 
 
-def test_window_fits_a_1280_px_screen(app):
+def test_window_fits_a_1280_px_screen(app, request):
     """No page holds the window wider than 1280 px or taller than 720, even with its widest controls showing."""
     from vib_tutorial.gui.main_window import MainWindow
     from vib_tutorial.gui.modes import Method
 
+    request.addfinalizer(lambda font=app.font(): app.setFont(font))
+    _windows_font(app)
     w = MainWindow()
     for i in range(w.pages.count()):
         w.pages.setCurrentIndex(i)  # builds each page
@@ -2184,6 +2187,22 @@ def test_window_fits_a_1280_px_screen(app):
     bar = p.tabs.tabBar()
     assert sum(bar.tabSizeHint(i).width() for i in range(bar.count())) < p.tabs.minimumSizeHint().width(), names
     w.close()
+
+
+def _windows_font(app) -> None:
+    """Measure in Segoe UI 9 pt, as on a Windows desktop, where the offscreen platform has no fonts.
+
+    It finds none on Windows and draws boxes ~1.8x as wide as the text, so every row of
+    controls would measure far wider than the app's on screen. Qt keeps 96 logical dpi
+    under Windows' display scaling (the scale goes in the pixel ratio), so 1280 here is
+    1280 logical pixels there: a 1920 px screen at 150%.
+    """
+    from PySide6 import QtGui
+
+    if QtGui.QFontInfo(app.font()).family() or sys.platform != "win32":
+        return
+    QtGui.QFontDatabase.addApplicationFont(os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "segoeui.ttf"))
+    app.setFont(QtGui.QFont("Segoe UI", 9))
 
 
 def _font_report(app) -> str:
