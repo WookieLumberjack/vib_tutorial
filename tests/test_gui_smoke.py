@@ -2,6 +2,7 @@
 
 import math
 import os
+import sys
 import tempfile
 
 import numpy as np
@@ -2164,11 +2165,13 @@ def test_rotor_hidden_tabs_draw_when_shown(app, monkeypatch):
     w.close()
 
 
-def test_window_fits_a_1280_px_screen(app):
+def test_window_fits_a_1280_px_screen(app, request):
     """No page holds the window wider than 1280 px or taller than 720, even with its widest controls showing."""
     from vib_tutorial.gui.main_window import MainWindow
     from vib_tutorial.gui.modes import Method
 
+    request.addfinalizer(lambda font=app.font(): app.setFont(font))
+    _windows_font(app)
     w = MainWindow()
     for i in range(w.pages.count()):
         w.pages.setCurrentIndex(i)  # builds each page
@@ -2179,11 +2182,57 @@ def test_window_fits_a_1280_px_screen(app):
     p.orbits.set_midspan_shown(True)  # four orbits
     app.processEvents()
     size = w.minimumSizeHint()
-    assert size.width() <= 1280 and size.height() <= 720
+    assert size.width() <= 1280 and size.height() <= 720, _widest(w.pages, size.width() // 3) + "\n" + _font_report(app)
     names = [p.tabs.tabText(i) for i in range(p.tabs.count())]
     bar = p.tabs.tabBar()
     assert sum(bar.tabSizeHint(i).width() for i in range(bar.count())) < p.tabs.minimumSizeHint().width(), names
     w.close()
+
+
+def _windows_font(app) -> None:
+    """Measure in Segoe UI 9 pt, as on a Windows desktop, where the offscreen platform has no fonts.
+
+    It finds none on Windows and draws boxes ~1.8x as wide as the text, so every row of
+    controls would measure far wider than the app's on screen. Qt keeps 96 logical dpi
+    under Windows' display scaling (the scale goes in the pixel ratio), so 1280 here is
+    1280 logical pixels there: a 1920 px screen at 150%.
+    """
+    from PySide6 import QtGui
+
+    if QtGui.QFontInfo(app.font()).family() or sys.platform != "win32":
+        return
+    QtGui.QFontDatabase.addApplicationFont(os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "segoeui.ttf"))
+    app.setFont(QtGui.QFont("Segoe UI", 9))
+
+
+def _font_report(app) -> str:
+    from PySide6 import QtGui
+
+    font = app.font()
+    screen = app.primaryScreen()
+    sample = QtGui.QFontMetrics(font).horizontalAdvance("Number of masses:")
+    return (f"font {font.family()!r} {font.pointSizeF()} pt / {font.pixelSize()} px, resolved "
+            f"{QtGui.QFontInfo(font).family()!r}; screen dpi {screen.logicalDotsPerInch()} "
+            f"(physical {screen.physicalDotsPerInch()}), ratio {screen.devicePixelRatio()}; "
+            f"'Number of masses:' {sample} px; platform {app.platformName()}, style {app.style().name()}")
+
+
+def _least_width(widget) -> int:
+    return max(widget.minimumSizeHint().width(), widget.minimumWidth())
+
+
+def _widest(widget, floor: int, depth: int = 0) -> str:
+    """What holds `widget` wide: each child at least `floor` px wide at its least, down the tree."""
+    lines = []
+    for child in widget.findChildren(QtWidgets.QWidget, options=QtCore.Qt.FindChildOption.FindDirectChildrenOnly):
+        least = _least_width(child)
+        if least >= floor and not child.isWindow():
+            text = getattr(child, "text", None)
+            label = f" {text()[:30]!r}" if callable(text) and isinstance(text(), str) else ""
+            lines.append(f"{'  ' * depth}{type(child).__name__}{label}: {least} (hint {child.sizeHint().width()})")
+            if depth < 12:
+                lines.append(_widest(child, floor, depth + 1))
+    return "\n".join(line for line in lines if line)
 
 
 def test_flow_layout_wraps_when_narrow(app):
