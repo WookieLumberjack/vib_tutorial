@@ -20,9 +20,11 @@ from PySide6 import QtCore, QtWidgets
 from ..core.magnetic_bearing import MagneticBearing
 from ..core.rotor import RPM, RotorSystem, whirl_modes
 from ..core.rotor_stability import Onset
+from .layouts import plot_height
 from .panels import spin
 from .rotor_bearing import _si
 from .style import colors
+from .tab_groups import tucked_away
 from .theming import mute
 
 DASH = QtCore.Qt.PenStyle.DashLine
@@ -95,7 +97,9 @@ class MagnetPanel(QtWidgets.QWidget):
                  ("Amplifier f<sub>a</sub>:", self.amplifier, "amplifier"))
         heads = ("<b>Actuator</b> (a magnet pair on each axis)", "<b>Controller</b> (on each axis)")
         for col, text in enumerate(heads):
-            form.addWidget(QtWidgets.QLabel(text), 0, 2 * col, 1, 2)
+            head = QtWidgets.QLabel(text)
+            head.setWordWrap(True)  # no wider than its two columns
+            form.addWidget(head, 0, 2 * col, 1, 2)
         for i, (text, box, key) in enumerate(boxes):
             label = QtWidgets.QLabel(text)
             for w in (label, box):
@@ -144,6 +148,7 @@ class MagnetPanel(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(self.readout)
+        plot_height(self.plots, 300)  # the two plots together
         layout.addWidget(self.plots, 1)
         layout.addWidget(self.note)
         self.apply_theme()
@@ -221,7 +226,7 @@ class MagnetPanel(QtWidgets.QWidget):
         return LOWEST, 10.0 ** math.ceil(math.log10(top))
 
     def _redraw(self) -> None:
-        self._stale = self.isHidden()  # a tab not showing: draw when it does
+        self._stale = tucked_away(self)  # a tab not showing: draw when it does
         if self._stale:
             return
         m = self.bearing()
@@ -294,7 +299,7 @@ class MagnetPanel(QtWidgets.QWidget):
                 lines.append(line)
 
     def _write(self) -> None:
-        if self.isHidden():
+        if tucked_away(self):
             self._stale = True
             return
         m = self.bearing()

@@ -15,6 +15,7 @@ from ..core import CMSModel, ForceController, ForceKind, ForceSettings, ModalRes
 from ..core.cms_response import CMSResponse
 from . import frame_stats, settle_plots
 from .animation import ChainView
+from .layouts import FlowLayout, group
 from .panels import spin
 from .style import colors
 from .theming import add_legend, mute
@@ -58,7 +59,6 @@ class CMSRunView(QtWidgets.QWidget):
         self.header.setWordWrap(True)
         self.header.setToolTip(self.tip)
 
-        self.controls = row = QtWidgets.QHBoxLayout()
         self.kind = QtWidgets.QComboBox()
         for k in KINDS:
             self.kind.addItem(k.value.split("  ")[0], k)
@@ -79,12 +79,10 @@ class CMSRunView(QtWidgets.QWidget):
         self.window = spin(0.1, 60.0, 5.0, 1, " s")
         self.window.setToolTip("Plot window")
         self.freq_label, self.duration_label = QtWidgets.QLabel("at"), QtWidgets.QLabel("for")
-        for w in (QtWidgets.QLabel("Force at tip:"), self.kind, self.amplitude, self.freq_label, self.freq,
-                  self.tune, self.duration_label, self.duration, self.button, self.reset_button):
-            row.addWidget(w)
-        row.addStretch(1)
-        for w in (QtWidgets.QLabel("Speed:"), self.speed, QtWidgets.QLabel("Window:"), self.window):
-            row.addWidget(w)
+        self.controls = FlowLayout()
+        self.controls.add(group("Force at tip:", self.kind, self.amplitude),
+                          group(self.freq_label, self.freq, self.tune), group(self.duration_label, self.duration),
+                          group(self.button, self.reset_button), group("Speed:", self.speed, "Window:", self.window))
 
         self.kind.currentIndexChanged.connect(self._apply)
         for box in (self.amplitude, self.freq, self.duration):

@@ -7,6 +7,7 @@ from PySide6 import QtCore, QtWidgets
 from ..core import ChainSystem, ForceController, ForceKind, ForceSettings
 from ..core.model import DEFAULT_DAMPING, DEFAULT_MASS, DEFAULT_STIFFNESS
 from ..core.presets import Preset, presets
+from .layouts import FlowLayout, group
 from .modes import ModeEntry
 from .style import MAX_DOF, colors, text_on
 from .theming import mute
@@ -104,22 +105,18 @@ class ParameterPanel(QtWidgets.QGroupBox):
         mute(self.preset_note)
         layout.addWidget(self.preset_note)
 
-        top = QtWidgets.QHBoxLayout()
-        top.addWidget(QtWidgets.QLabel("Number of masses:"))
         self.dof = QtWidgets.QSpinBox()
         self.dof.setRange(1, MAX_DOF)
         self.dof.setValue(system.n)
         self.dof.valueChanged.connect(self._on_dof)
-        top.addWidget(self.dof)
-        top.addStretch(1)
         reset = QtWidgets.QPushButton("Defaults")
         reset.setToolTip("Reset every mass, spring and damper to its default value, without friction")
         reset.clicked.connect(self._reset_defaults)
-        top.addWidget(reset)
         uniform = QtWidgets.QPushButton("Copy row 1 → all")
         uniform.setToolTip("Make the chain uniform using the first row's values")
         uniform.clicked.connect(self._copy_first_row)
-        top.addWidget(uniform)
+        top = FlowLayout()
+        top.add(group("Number of masses:", self.dof), group(reset, uniform))
         layout.addLayout(top)
 
         self.grid = QtWidgets.QGridLayout()

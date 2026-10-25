@@ -56,6 +56,8 @@ from ..core.rotor_stability import AsymmetryChart, Onset, full_spectrum, least_d
 from ..core.rotor_waterfall import Waterfall
 from . import frame_stats, settle_plots
 from .cms_time import SampleBuffer
+from .layouts import ColumnScroll, FlowLayout, group
+from .tab_groups import TabGroups
 from .panels import spin
 from .rotor_balance import BalancingPanel
 from .rotor_bearing import BearingPanel
@@ -100,6 +102,7 @@ BUSY_NOTE_S = 0.3  # s an analysis runs before the page says it is working on it
 RESTART_S = 0.5  # s a superseded analysis has run past which the worker drops it rather than see it out
 BEARING_WIDTHS = (56, 56, 50, 50, 46, 56, 40)  # px, the bearing table's columns: kx, ky, cx, cy, m, kxy, λ
 BEARING_GAP = 0.02  # of the span: the closest the disc may be put to a bearing
+QWIDGETSIZE_MAX = (1 << 24) - 1  # Qt's "no maximum"
 RUB = 0.02  # of the span: a whirl this large pauses the simulation (a real rotor would rub)
 GRAVITY = 9.81  # m/s²
 SAG_SPEEDS = 201  # speeds the static sag is worked out at, with internal damping, and interpolated
@@ -614,6 +617,17 @@ def _round_gain(g: float) -> str:
     return f"{g:,.0f}" if g >= 10 else f"{g:.2g}"
 
 
+def _clip_title(label: pg.LabelItem) -> None:
+    """Let a plot's title be cut off when the plot is narrow, rather than set how narrow it can be."""
+    update_min = label.updateMin
+
+    def height_only() -> None:  # LabelItem sets its least size to its text's whenever it lays out
+        update_min()
+        label.setMinimumWidth(0)
+
+    label.updateMin = height_only
+
+
 class OrbitPlots(pg.GraphicsLayoutWidget):
     """The orbit at each station, seen from the B end; the disc's with its heavy spot."""
 
@@ -632,6 +646,7 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
             p.setMouseEnabled(x=False, y=False)
             p.hideButtons()
             p.setMenuEnabled(False)
+            _clip_title(p.titleLabel)
             p.setLabel("bottom", "x", units="m")
             p.setLabel("left", "y", units="m")
             # Not narrowing the axes when the labels do: as the orbits rescale each frame, a
@@ -647,8 +662,10 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
             p.addItem(self.keys[-1])
             p.addItem(self.dots[-1])
             self.plots.append(p)
+            self.ci.layout.setColumnStretchFactor(i, 1)  # equal shares, whatever the width
         self.heavy = self.plots[1].plot()
         self.apply_theme()
+        self._fit_width()
 
     def apply_theme(self) -> None:
         for i, p in enumerate(self.plots):
@@ -675,8 +692,16 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
         self.plots[2].setVisible(shown)
         layout = self.ci.layout
         layout.setColumnStretchFactor(2, 1 if shown else 0)
-        layout.setColumnMaximumWidth(2, 1e6 if shown else 0)
+        # The plot's own width, not the column's: a column is never narrower than what's in it.
+        self.plots[2].setMaximumWidth(QWIDGETSIZE_MAX if shown else 0)
         self.apply_theme()
+        self._fit_width()
+
+    def _fit_width(self) -> None:
+        """At least as wide as the plots can be: a view narrower than its scene's layout cuts the last off."""
+        self.ci.layout.invalidate()  # the sizes it holds are from before the change
+        least = self.ci.effectiveSizeHint(QtCore.Qt.SizeHint.MinimumSize).width()
+        self.setMinimumWidth(math.ceil(least) + 2 * self.frameWidth())
 
     def update_orbits(self, trails: list[np.ndarray], keys: list[np.ndarray], heavy_angle: float | None,
                       centre: tuple[float, float] = (0.0, 0.0)) -> None:
@@ -996,10 +1021,7 @@ class RotorPage(QtWidgets.QWidget):
         self.crit_label.setWordWrap(True)
         lv.addWidget(self.crit_label)
         lv.addStretch(1)
-        left_scroll = QtWidgets.QScrollArea()
-        left_scroll.setWidget(left)
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setMinimumWidth(470)
+        left_scroll = ColumnScroll(left)
 
         # --- centre
         self.view = RotorView()
@@ -1018,15 +1040,9 @@ class RotorPage(QtWidgets.QWidget):
         self.show_sag.setEnabled(False)
         self.show_sag.setToolTip(SAG_TIP)
         self.show_sag.toggled.connect(lambda _: self._draw())
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(QtWidgets.QLabel("Orbits, seen from the B end:"))
-        row.addWidget(self.same_scale)
-        row.addWidget(self.show_sag)
-        row.addStretch(1)
-        row.addWidget(QtWidgets.QLabel("Strip chart:"))
-        row.addWidget(self.station)
-        row.addWidget(QtWidgets.QLabel("Window:"))
-        row.addWidget(self.window)
+        row = FlowLayout()
+        row.add(QtWidgets.QLabel("Orbits, seen from the B end:"), self.same_scale, self.show_sag,
+                group("Strip chart:", self.station, "Window:", self.window))
         center = QtWidgets.QWidget()
         cv = QtWidgets.QVBoxLayout(center)
         cv.setContentsMargins(0, 0, 0, 0)
@@ -1048,18 +1064,13 @@ class RotorPage(QtWidgets.QWidget):
             "of the speed controls.</p>")
         self.top_speed.valueChanged.connect(self.set_top_rpm)
         self.order_boxes = {}
-        order_row = QtWidgets.QHBoxLayout()
-        order_row.addWidget(QtWidgets.QLabel("Speeds up to:"))
-        order_row.addWidget(self.top_speed)
-        order_row.addSpacing(12)
-        order_row.addWidget(QtWidgets.QLabel("Also draw:"))
         for order, name in ORDERS.items():
             box_ = QtWidgets.QCheckBox(name)
             box_.setToolTip(ORDER_TIPS[order])
             box_.toggled.connect(self._on_orders)
-            order_row.addWidget(box_)
             self.order_boxes[order] = box_
-        order_row.addStretch(1)
+        order_row = FlowLayout()
+        order_row.add(group("Speeds up to:", self.top_speed), group("Also draw:", *self.order_boxes.values()))
         campbell_tab = QtWidgets.QWidget()
         ct = QtWidgets.QVBoxLayout(campbell_tab)
         ct.addLayout(order_row)
@@ -1151,15 +1162,10 @@ class RotorPage(QtWidgets.QWidget):
         mute(self.waterfall_note)
         waterfall_tab = QtWidgets.QWidget()
         wt = QtWidgets.QVBoxLayout(waterfall_tab)
-        for widgets in ((QtWidgets.QLabel("Orbit at:"), self.wf_station, QtWidgets.QLabel("Against:"),
-                         self.wf_against),
-                        (QtWidgets.QLabel("Amplitude:"), self.wf_scale, QtWidgets.QLabel("Block:"), self.wf_block,
-                         self.wf_marks, self.wf_clear)):
-            row = QtWidgets.QHBoxLayout()
-            for w_ in widgets:
-                row.addWidget(w_)
-            row.addStretch(1)
-            wt.addLayout(row)
+        row = FlowLayout()
+        row.add(group("Orbit at:", self.wf_station), group("Against:", self.wf_against),
+                group("Amplitude:", self.wf_scale), group("Block:", self.wf_block), self.wf_marks, self.wf_clear)
+        wt.addLayout(row)
         wt.addWidget(self.waterfall_plot, 1)
         wt.addWidget(self.waterfall_note)
         self.balancing = BalancingPanel(self)
@@ -1172,27 +1178,24 @@ class RotorPage(QtWidgets.QWidget):
         self.matrices = QtWidgets.QTextBrowser()
         self.theory = FigureBrowser()
         self.theory.setHtml(THEORY_HTML)
-        self.tabs = QtWidgets.QTabWidget()
-        self.tabs.addTab(campbell_tab, "Campbell diagram")
-        self.tabs.addTab(bode_tab, "Bode plot")
-        self.tabs.addTab(polar_tab, "Polar plot")
-        self.tabs.addTab(stability_tab, "Stability")
-        self.tabs.addTab(waterfall_tab, "Waterfall")
-        self.tabs.addTab(self.balancing, "Balancing")
-        self.tabs.addTab(self.bearing_panel, "Fluid-film bearing")
-        self.tabs.addTab(self.magnet_panel, "Magnetic bearing")
-        self.tabs.addTab(self.matrices, "Equations && matrices")
-        self.tabs.addTab(self.theory, "Theory")
-        self.tabs.currentChanged.connect(lambda _: self._catch_up_tab())
-        self.tabs.currentChanged.connect(lambda _: self._refresh_matrices())
-        self.tabs.currentChanged.connect(lambda _: self._draw_waterfall(only_new=True))
-        self.tabs.currentChanged.connect(lambda _: self._show_bearing_speed())
+        self.tabs = TabGroups()
+        self.tabs.add_group("Modes", (campbell_tab, "Campbell diagram"), (stability_tab, "Stability"))
+        self.tabs.add_group("Response", (bode_tab, "Bode plot"), (polar_tab, "Polar plot"), (waterfall_tab, "Waterfall"))
+        # The panels scroll when the window is short, rather than squeeze their plots or set its height.
+        self.tabs.add_group("Balancing", (ColumnScroll(self.balancing), "Balancing"))
+        self.tabs.add_group("Bearings", (ColumnScroll(self.bearing_panel), "Fluid-film bearing"),
+                            (ColumnScroll(self.magnet_panel), "Magnetic bearing"))
+        self.tabs.add_group("Theory", (self.theory, "Theory"), (self.matrices, "Equations && matrices"))
+        self.tabs.changed.connect(self._catch_up_tab)
+        self.tabs.changed.connect(self._refresh_matrices)
+        self.tabs.changed.connect(lambda: self._draw_waterfall(only_new=True))
+        self.tabs.changed.connect(self._show_bearing_speed)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)
         splitter.addWidget(center)
         splitter.addWidget(self.tabs)
-        splitter.setSizes([470, 720, 510])
+        splitter.setSizes([450, 650, 600])  # at 1700 px; narrower, each gives way in proportion
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
@@ -1981,7 +1984,7 @@ class RotorPage(QtWidgets.QWidget):
         """Fill in some more of the asymmetry chart, if it shows, and draw what is new."""
         chart = self.asym_chart
         if (chart is None or self.measure.currentIndex() != 2
-                or self.tabs.currentWidget() is not self.spectrum.parentWidget()):
+                or self.tabs.current_page() is not self.spectrum.parentWidget()):
             return
         if not chart.done:
             chart.work(CHART_BUDGET)
@@ -1997,19 +2000,19 @@ class RotorPage(QtWidgets.QWidget):
 
     def _catch_up_tab(self) -> None:
         """The Balancing and bearing tabs draw only while they show: bring the one showing up to date."""
-        tab = self.tabs.currentWidget()
+        tab = self.tabs.current_page()
         if tab in (self.balancing, self.bearing_panel, self.magnet_panel):
             tab.catch_up()
 
     def _show_bearing_speed(self) -> None:
-        if self.tabs.currentWidget() is self.bearing_panel:
+        if self.tabs.current_page() is self.bearing_panel:
             self.bearing_panel.set_speed(self.sim.omega * RPM)
-        elif self.tabs.currentWidget() is self.magnet_panel:
+        elif self.tabs.current_page() is self.magnet_panel:
             self.magnet_panel.set_speed(self.sim.omega * RPM)
 
     def _refresh_matrices(self) -> None:
         rpm = self.sim.omega * RPM
-        if self.tabs.currentWidget() is not self.matrices or abs(rpm - self._matrices_speed) < 25.0:
+        if self.tabs.current_page() is not self.matrices or abs(rpm - self._matrices_speed) < 25.0:
             return
         self._matrices_speed = rpm
         scroll = self.matrices.verticalScrollBar().value()
@@ -2165,8 +2168,8 @@ class RotorPage(QtWidgets.QWidget):
         self._sweep_pairs += 1
         self.sweep_button.setText("Stop sweep")
         self.ramp.setEnabled(False)  # each sweep is labelled with its rate
-        if self.tabs.currentWidget() is not self.polar.parentWidget():
-            self.tabs.setCurrentWidget(self.bode.parentWidget())
+        if self.tabs.current_page() is not self.polar.parentWidget():
+            self.tabs.show_page(self.bode.parentWidget())
         self._fit_tracking_range()
         self._update_sweep_status()
         self._start_timer()
@@ -2475,7 +2478,7 @@ class RotorPage(QtWidgets.QWidget):
         self._draw_tracking()
         self.balancing.update_status()
         self._frames += 1
-        if self.tabs.currentWidget() is self.spectrum.parentWidget() and (
+        if self.tabs.current_page() is self.spectrum.parentWidget() and (
                 self._frames % SPECTRUM_FRAMES == 0 or not self.running):
             self._draw_spectrum()
         if self._frames % WATERFALL_FRAMES == 0 or not self.running:
@@ -2600,7 +2603,7 @@ class RotorPage(QtWidgets.QWidget):
 
     def _draw_waterfall(self, only_new: bool = False) -> None:
         """Draw the waterfall if its tab is showing (with `only_new`, only if blocks came in since)."""
-        if self.tabs.currentWidget() is not self.waterfall_plot.parentWidget():
+        if self.tabs.current_page() is not self.waterfall_plot.parentWidget():
             return
         if only_new and self._waterfall_drawn:
             return

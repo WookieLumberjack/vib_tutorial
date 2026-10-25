@@ -39,6 +39,7 @@ from .axes import log_axes
 from .cms_notes import THEORY_HTML, matrices_html
 from .cms_recovery import BackExpansionView
 from .cms_time import CMSTimeView
+from .layouts import ColumnScroll
 from .style import MAX_DOF, colors, current, text_on
 from .theming import add_legend, mute, restyle_plot_item
 
@@ -843,10 +844,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         lv.addWidget(self.component_table)
         lv.addWidget(self.component_note)
         lv.addStretch(1)
-        left_scroll = QtWidgets.QScrollArea()
-        left_scroll.setWidget(left)
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setMinimumWidth(520)
+        left_scroll = ColumnScroll(left)
 
         # --- right: plots, matrices, theory
         self.plots = ComparisonPlots()
@@ -869,7 +867,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)
         splitter.addWidget(self.tabs)
-        splitter.setSizes([620, 1080])
+        splitter.setSizes([600, 1100])
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)

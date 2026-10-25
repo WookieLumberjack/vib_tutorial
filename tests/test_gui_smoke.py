@@ -1610,7 +1610,7 @@ def test_rotor_page(app):
     p.sweep_from.setValue(1200.0)
     p.sweep_to.setValue(2000.0)
     p.start_sweep()
-    assert p.tabs.currentWidget() is p.bode.parentWidget() and not p.ramp.isEnabled()
+    assert p.tabs.current_page() is p.bode.parentWidget() and not p.ramp.isEnabled()
     assert p.sweep_button.text() == "Stop sweep"
     for _ in range(100):
         if p.run_up is None:
@@ -1662,7 +1662,7 @@ def test_rotor_page(app):
     assert np.isfinite(p.sim.state).all()
 
     # The matrices at the current speed.
-    p.tabs.setCurrentWidget(p.matrices)
+    p.tabs.show_page(p.matrices)
     html = p.matrices.toHtml()
     assert "Ω G" in html and "backward" in html
 
@@ -1714,10 +1714,10 @@ def test_rotor_page(app):
     b.new_mystery()
     hidden_u = p.sim.system.mass_unbalance
     assert p.unbalance.text() == "hidden" and not p.unbalance.isEnabled() and not p.view.show_heavy
-    p.tabs.setCurrentWidget(p.matrices)
+    p.tabs.show_page(p.matrices)
     p._refresh_matrices()
     assert "hidden" in p.matrices.toPlainText() and f"{abs(hidden_u) * 1e6:.4g} g·mm" not in p.matrices.toPlainText()
-    p.tabs.setCurrentWidget(b)
+    p.tabs.show_page(b)
     p.ramp.setValue(5000.0)
     for i, button in enumerate(b.step_buttons):
         assert button.isEnabled()
@@ -1746,10 +1746,10 @@ def test_rotor_page(app):
     b.new_mystery()
     hidden = p.sim.system
     assert hidden.skew > 0 and p.skew.text() == "hidden" and not p.skew.isEnabled()
-    p.tabs.setCurrentWidget(p.matrices)
+    p.tabs.show_page(p.matrices)
     p._refresh_matrices()
     assert "skew τ (hidden)" in p.matrices.toPlainText()
-    p.tabs.setCurrentWidget(b)
+    p.tabs.show_page(b)
     for button in b.step_buttons:
         button.click()
         for _ in range(400):
@@ -1792,7 +1792,7 @@ def test_rotor_page(app):
     assert p.stability_map.onset_line.value() == pytest.approx(3910, abs=5)
     p.measure.setCurrentIndex(1)
     assert "Log decrement" in p.stability_map.plot.getAxis("left").labelText
-    p.tabs.setCurrentWidget(p.spectrum.parentWidget())
+    p.tabs.show_page(p.spectrum.parentWidget())
     p.ramp.setValue(20_000.0)
     p.set_target_rpm(5000.0)
     p.running = True
@@ -1815,7 +1815,7 @@ def test_rotor_page(app):
     system = RotorSystem(bearing_a=Bearing(kxy=-2e3), bearing_b=Bearing(kxy=5e3), internal_damping=7.5)
     p.set_system(system)
     assert p.sim.system == system
-    p.tabs.setCurrentWidget(p.matrices)
+    p.tabs.show_page(p.matrices)
     assert "Ω H" in p.matrices.toHtml()
 
 
@@ -1849,7 +1849,7 @@ def test_rotor_presets_speed_range_and_overhung_disc(app):
     assert "1,284 rpm" in p.crit_label.text()
     disc, bearing_b = p.view._z(p.sim.system.a), p.view._z(p.sim.system.length)
     assert disc > bearing_b and disc == pytest.approx(2.0)  # the overhang's end is the shaft's end
-    p.tabs.setCurrentWidget(p.matrices)
+    p.tabs.show_page(p.matrices)
     assert "overhang" in p.matrices.toHtml()
     # Editing a parameter makes it the user's own rotor.
     p.disc_mass.setValue(2.0)
@@ -1898,7 +1898,7 @@ def test_rotor_waterfall(app):
     p.load_preset("Overhung rotor")
     p._refresh_analysis()
     plot = p.waterfall_plot
-    p.tabs.setCurrentWidget(plot.parentWidget())
+    p.tabs.show_page(plot.parentWidget())
     assert "No run-up" in p.waterfall_note.text()
     # Repeated taps through a run-up: a cascade of spectra, one per half block, at rising speeds.
     p.ramp.setValue(1000.0)
@@ -1964,7 +1964,7 @@ def test_rotor_shaft_mass(app):
     assert "With a massless shaft (the Jeffcott model, dashed): 1,584 rpm" in p.crit_label.text()
     assert "1,458 rpm" in p.crit_label.text()
     p.step(0.2)
-    p.tabs.setCurrentWidget(p.matrices)
+    p.tabs.show_page(p.matrices)
     p._refresh_matrices()
     html = p.matrices.toHtml()
     text = p.matrices.toPlainText()
@@ -2027,7 +2027,7 @@ def test_rotor_asymmetric_shaft(app):
     assert p.view.stiff_axis.getData()[0].size == 2
     assert "heavy spot leads" not in p.readout.text()
     # The asymmetry chart fills in while the stability tab shows it.
-    p.tabs.setCurrentWidget(p.spectrum.parentWidget())
+    p.tabs.show_page(p.spectrum.parentWidget())
     p.measure.setCurrentIndex(2)
     assert p.stability_stack.currentWidget() is p.asymmetry_plot and p.asym_chart is not None
     chart = p.asym_chart
@@ -2048,7 +2048,7 @@ def test_rotor_asymmetric_shaft(app):
     p.measure.setCurrentIndex(0)
     assert p.stability_stack.currentWidget() is p.stability_map
     # The matrices tab shows the turning stiffness.
-    p.tabs.setCurrentWidget(p.matrices)
+    p.tabs.show_page(p.matrices)
     p._refresh_matrices()
     text = p.matrices.toPlainText()
     assert "ΔK(φ)" in text and "Floquet" in text
@@ -2096,12 +2096,12 @@ def test_rotor_cracked_shaft(app):
     p._draw()
     assert p.view.crack_mark.getData()[0].size == 2
     assert "heavy spot leads" not in p.readout.text()
-    p.tabs.setCurrentWidget(p.spectrum.parentWidget())
+    p.tabs.show_page(p.spectrum.parentWidget())
     p._draw_spectrum()
     assert all(line.isVisible() for line in p.spectrum.sync)
     w.set_theme("Dark")
     # The matrices tab explains the crack.
-    p.tabs.setCurrentWidget(p.matrices)
+    p.tabs.show_page(p.matrices)
     p._refresh_matrices()
     text = p.matrices.toPlainText()
     assert "The crack" in text and "It breathes" in text and "Floquet" in text
@@ -2147,13 +2147,61 @@ def test_rotor_hidden_tabs_draw_when_shown(app, monkeypatch):
     s = p.sim.system
     assert not drawn and p.bearing_panel._stale and p.balancing._stale
     assert p.bearing_panel.load.value() == pytest.approx(abs(s.bearing_loads[0]), abs=0.01)
-    p.tabs.setCurrentWidget(p.bearing_panel)
+    p.tabs.show_page(p.bearing_panel)
     assert drawn == ["_draw_locus"] and not p.bearing_panel._stale and "At rest" in p.bearing_panel.readout.text()
-    p.tabs.setCurrentWidget(p.balancing)
+    p.tabs.show_page(p.balancing)
     assert drawn == ["_draw_locus", "_draw_curves"] and not p.balancing._stale
-    p.tabs.setCurrentWidget(p.bearing_panel)  # nothing changed meanwhile
-    assert drawn == ["_draw_locus", "_draw_curves"]
+    p.tabs.show_page(p.bearing_panel)  # nothing changed meanwhile
+    assert drawn == ["_draw_locus", "_draw_curves"] and p.tabs.current_page() is p.bearing_panel
+    # Another group in front: the bearing tab is still its own group's current one, so not isHidden().
+    p.tabs.show_page(p.campbell_plot.parentWidget())
+    assert not p.bearing_panel.isHidden() and p.tabs.current_page() is not p.bearing_panel
+    p.load_preset("Classic Jeffcott rotor")
+    p._refresh_analysis()
+    assert drawn == ["_draw_locus", "_draw_curves"] and p.bearing_panel._stale
+    p.tabs.show_page(p.bearing_panel)
+    assert drawn[-1] == "_draw_locus" and not p.bearing_panel._stale
     w.close()
+
+
+def test_window_fits_a_1280_px_screen(app):
+    """No page holds the window wider than 1280 px or taller than 720, even with its widest controls showing."""
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.modes import Method
+
+    w = MainWindow()
+    for i in range(w.pages.count()):
+        w.pages.setCurrentIndex(i)  # builds each page
+    w.method_combo.setCurrentIndex(list(Method).index(Method.STATE_SPACE))  # the complex plane beside the shapes
+    p = w.rotor_page
+    p._timer.stop()
+    p.balancing.mode.setCurrentIndex(2)  # two planes on the shaft: two probes, five steps
+    p.orbits.set_midspan_shown(True)  # four orbits
+    app.processEvents()
+    size = w.minimumSizeHint()
+    assert size.width() <= 1280 and size.height() <= 720
+    names = [p.tabs.tabText(i) for i in range(p.tabs.count())]
+    bar = p.tabs.tabBar()
+    assert sum(bar.tabSizeHint(i).width() for i in range(bar.count())) < p.tabs.minimumSizeHint().width(), names
+    w.close()
+
+
+def test_flow_layout_wraps_when_narrow(app):
+    from vib_tutorial.gui.layouts import FlowLayout, group
+
+    holder = QtWidgets.QWidget()
+    row = FlowLayout(holder)
+    row.add(*(QtWidgets.QPushButton(f"Button number {i}") for i in range(3)), group("Label:", QtWidgets.QSpinBox()))
+    items = [row.itemAt(i) for i in range(row.count())]
+    widths = [i.sizeHint().width() for i in items]
+    line = max(i.sizeHint().height() for i in items)
+    assert row.minimumSize().width() == max(i.minimumSize().width() for i in items) < sum(widths)
+    assert row.heightForWidth(row.sizeHint().width()) == line  # room for all: one line
+    assert row.heightForWidth(max(widths)) > 3 * line  # room for one: one each
+    holder.resize(max(widths), row.heightForWidth(max(widths)))
+    row.setGeometry(holder.rect())
+    assert all(i.geometry().right() <= holder.width() for i in items)
+    assert len({i.geometry().y() for i in items}) == 4
 
 
 def test_rotor_fluid_film_bearing(app):
@@ -2166,7 +2214,7 @@ def test_rotor_fluid_film_bearing(app):
     p._timer.stop()
     p.running = False
     panel = p.bearing_panel
-    p.tabs.setCurrentWidget(panel)
+    p.tabs.show_page(panel)
     app.processEvents()
     assert panel.bearing() == JournalBearing()
     assert "At rest" in panel.readout.text() and "21,3" in panel.readout.text()  # stable over the range
@@ -2222,11 +2270,11 @@ def test_rotor_on_oil_film_bearings(app):
     assert panel.loads == s.bearing_loads and not panel.load.isEnabled() and panel.which.isVisibleTo(panel)
     assert panel.load.value() == pytest.approx(abs(s.bearing_loads[0]), abs=0.01)
     assert panel.onset is not None and round(panel.onset.omega * RPM) == 3576
-    p.tabs.setCurrentWidget(panel)
+    p.tabs.show_page(panel)
     p._draw()
     assert "goes unstable at <b>3,576 rpm</b>" in panel.readout.text()
     assert "oil-film bearings" in p._stability_note()
-    p.tabs.setCurrentWidget(p.matrices)
+    p.tabs.show_page(p.matrices)
     assert "The oil films" in p.matrices.toHtml()
     # Changing the bearing on the tab changes the rotor's (and makes it the user's own rotor).
     panel.clearance.setValue(20.0)
@@ -2283,7 +2331,7 @@ def test_rotor_on_magnetic_bearings(app):
     panel = p.magnet_panel
     assert panel.bearing() == MagneticBearing() and panel.system is None
     assert panel.note.text() == ""  # a tab not showing draws when it shows
-    p.tabs.setCurrentWidget(panel)
+    p.tabs.show_page(panel)
     assert "Choose <i>Magnetic bearings</i>" in panel.note.text()
     p.tabs.setCurrentIndex(0)  # hidden again while the preset loads
     # The preset floats on the tab's bearing (its amplifier slowed), the journals held at the centre.
@@ -2297,7 +2345,7 @@ def test_rotor_on_magnetic_bearings(app):
     assert row[4].isEnabled() and not any(row[c].isEnabled() for c in (0, 1, 2, 3, 5, 6))
     assert abs(p.sim.q[[XA, YA, XB, YB]]).max() < 1e-12 and p.sim.control.size == s.n_control
     assert panel.onset is not None and round(panel.onset.omega * RPM) == 8894
-    p.tabs.setCurrentWidget(panel)
+    p.tabs.show_page(panel)
     p._draw()
     text = panel.readout.text()
     assert "goes unstable at <b>8,894 rpm</b>" in text and "0.61 A at B" in text and "61% of the bias" in text
@@ -2481,7 +2529,7 @@ def test_rotor_plots_paint_once_per_frame(app):
     page = w.rotor_page
     w.pages.setCurrentWidget(page)
     page._refresh_analysis()
-    page.tabs.setCurrentWidget(page.bode.parentWidget())
+    page.tabs.show_page(page.bode.parentWidget())
     page.sim.omega = page.sim.target = page.target_rpm.value() / RPM  # at speed: the marker stands still
     run(1.0)
     # Building the page also handed the analysis to the worker, which can take seconds to spawn (Windows):

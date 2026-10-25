@@ -37,6 +37,7 @@ from ..core.modal_coupling import (
 from .animation import MASS_WIDTH, spring_path
 from .axes import log_axes
 from .coupling_notes import THEORY_HTML, matrices_html
+from .layouts import ColumnScroll
 from .style import MAX_DOF, colors, text_on
 from .substructuring import error_color, zeta_text
 from .theming import add_legend, mute
@@ -625,10 +626,7 @@ class ModalCouplingPage(QtWidgets.QWidget):
         lv.addWidget(self.sub_title)
         lv.addWidget(self.sub_table)
         lv.addStretch(1)
-        left_scroll = QtWidgets.QScrollArea()
-        left_scroll.setWidget(left)
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setMinimumWidth(520)
+        left_scroll = ColumnScroll(left)
 
         self.veering = VeeringPlot()
         self.veering.kind.currentIndexChanged.connect(self._on_sweep_kind)

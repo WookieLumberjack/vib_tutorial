@@ -29,6 +29,7 @@ from .animation import ChainView
 from .background import COUPLING_TIP, make_background_view
 from .energy import EnergyPanel, EnergyState
 from .history import History
+from .layouts import FlowLayout, ColumnScroll, group
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, PhasorPanel, TimeHistoryPlot
@@ -230,10 +231,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (self.params, self.force_panel, self.controls):
             lv.addWidget(w)
         lv.addStretch(1)
-        left_scroll = QtWidgets.QScrollArea()
-        left_scroll.setWidget(left)
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setMinimumWidth(380)
+        left_scroll = ColumnScroll(left)
 
         # --- center: animation + time histories
         self.chain = ChainView()
@@ -278,6 +276,9 @@ class MainWindow(QtWidgets.QMainWindow):
         for m in Method:
             self.method_combo.addItem(m.value, m)
         self.method_combo.setToolTip(METHOD_TIP)
+        # Cut short with "…" when the pane is narrow, rather than set its width (the list shows it all).
+        self.method_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.method_combo.setMinimumContentsLength(16)
         method_label = QtWidgets.QLabel("Method:")
         method_label.setToolTip(METHOD_TIP)
         self.table = ModalTable()
@@ -327,12 +328,8 @@ class MainWindow(QtWidgets.QMainWindow):
         plots_row.addWidget(self.mode_plot, 3)
         plots_row.addWidget(self.phasor_plot, 2)
         mv.addLayout(plots_row, 1)
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(self.animate_modes)
-        row.addStretch(1)
-        row.addWidget(amp_label)
-        row.addWidget(self.release_amp)
-        row.addWidget(release)
+        row = FlowLayout()
+        row.add(self.animate_modes, group(amp_label, self.release_amp, release))
         mv.addLayout(row)
 
         self.frf_plot = FrfPlot()

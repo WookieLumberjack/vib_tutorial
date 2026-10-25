@@ -17,6 +17,7 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..core import ChainSystem, ModalResult, ModalTerm, frf_matrix, modal_analysis, modal_frf_terms
+from .layouts import ColumnScroll
 from .plots import frequency_grid
 from .style import MAX_DOF, colors
 from .theming import add_legend, mute
@@ -457,10 +458,7 @@ class FrfMatrixPage(QtWidgets.QWidget):
         lv.addWidget(self.mode_box)
         lv.addWidget(io_box)
         lv.addStretch(1)
-        left_scroll = QtWidgets.QScrollArea()
-        left_scroll.setWidget(left)
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setMinimumWidth(340)
+        left_scroll = ColumnScroll(left)
         left_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         # --- centre: the grid

@@ -20,21 +20,25 @@ from PySide6 import QtCore, QtWidgets
 from ..core.fluid_bearing import GRAVITY, JournalBearing, attitude, rigid_threshold
 from ..core.rotor import RPM
 from ..core.rotor_stability import Onset
+from .layouts import plot_height
 from .panels import spin
 from .style import colors
+from .tab_groups import tucked_away
 from .theming import mute
 
 DASH = QtCore.Qt.PenStyle.DashLine
 SPEEDS = 300  # points on the coefficient curves
 LOCUS_POINTS = 200
 LOCUS_SIZE = 230  # px
+READOUT_WIDTH = 300  # px, the narrowest the readout goes beside the locus; narrower, it goes under it
+COEFF_MIN_HEIGHT = 360  # px, the two coefficient plots and their legends: shorter, the tab scrolls
 AXIS_WIDTH = 56  # px, the coefficient plots' left axes
 LABEL_GAP = 0.14  # of the clearance: speed labels on the locus are at least this far apart
 SHORT_RANGE = (0.001, 10.0)  # the dimensionless chart's span of S(L_b/D_b)²
 LOW_SPEED = 0.02  # of the top speed: the speed plot's range is scaled to the curves above this
 SHORT_LIMIT = 0.5  # L_b/D_b past which short-bearing theory is stretched
 THRESHOLD_TOP = 60_000.0  # rpm: the rigid rotor's threshold is looked for up to this (the page's widest range)
-AGAINST = ("Speed (N/m, N·s/m)", "Modified Sommerfeld number (dimensionless)")
+AGAINST = ("Speed", "Modified Sommerfeld number")
 # The coefficients drawn: (row, column) in K or C, label, colour index into colors.mode.
 STIFFNESS = (((0, 0), "k<sub>xx</sub>", 0), ((0, 1), "k<sub>xy</sub>", 1), ((1, 0), "k<sub>yx</sub>", 3),
              ((1, 1), "k<sub>yy</sub>", 5))
@@ -104,6 +108,9 @@ class BearingPanel(QtWidgets.QWidget):
         mute(self.rotor_note)
         self.against = QtWidgets.QComboBox()
         self.against.addItems(AGAINST)
+        # Cut short with "…" when the pane is narrow, rather than set its width (the list shows it all).
+        self.against.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.against.setMinimumContentsLength(8)
         self.against.setToolTip(COEFF_TIP)
         form = QtWidgets.QGridLayout()
         boxes = (("Diameter D<sub>b</sub>:", self.diameter, "diameter"), ("Length L<sub>b</sub>:", self.length, "length"),
@@ -152,9 +159,9 @@ class BearingPanel(QtWidgets.QWidget):
         self.readout.setWordWrap(True)
         self.readout.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self.readout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
-        top = QtWidgets.QHBoxLayout()
-        top.addWidget(self.locus, 0, QtCore.Qt.AlignmentFlag.AlignTop)
-        top.addWidget(self.readout, 1)
+        self.top = QtWidgets.QBoxLayout(QtWidgets.QBoxLayout.Direction.LeftToRight)  # see resizeEvent
+        self.top.addWidget(self.locus, 0, QtCore.Qt.AlignmentFlag.AlignTop)
+        self.top.addWidget(self.readout, 1)
 
         self.coeffs = pg.GraphicsLayoutWidget()
         self.coeffs.setToolTip(COEFF_TIP)
@@ -195,7 +202,8 @@ class BearingPanel(QtWidgets.QWidget):
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(form)
-        layout.addLayout(top, 2)
+        layout.addLayout(self.top, 2)
+        plot_height(self.coeffs, COEFF_MIN_HEIGHT)
         layout.addWidget(self.coeffs, 3)
         layout.addWidget(self.note)
         self.apply_theme()
@@ -267,7 +275,7 @@ class BearingPanel(QtWidgets.QWidget):
             self.load.blockSignals(True)
             self.load.setValue(b.load)
             self.load.blockSignals(False)
-        self._stale = self.isHidden()  # a tab not showing: draw when it does
+        self._stale = tucked_away(self)  # a tab not showing: draw when it does
         if self._stale:
             return
         threshold = b.threshold(max(self.top_rpm, THRESHOLD_TOP) / RPM)
@@ -288,6 +296,13 @@ class BearingPanel(QtWidgets.QWidget):
         self._show_speed()
 
     # ------------------------------------------------------------- drawing
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        # The readout beside the locus when there's room for it, else under it, at the full width.
+        wide = event.size().width() >= LOCUS_SIZE + READOUT_WIDTH
+        self.top.setDirection(QtWidgets.QBoxLayout.Direction.LeftToRight if wide
+                              else QtWidgets.QBoxLayout.Direction.TopToBottom)
+
     def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().showEvent(event)
         self.catch_up()

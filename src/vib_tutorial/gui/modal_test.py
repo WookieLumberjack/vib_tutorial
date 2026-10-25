@@ -53,6 +53,7 @@ from ..core.identification import (
 from ..core.measurement import AA_CUTOFF, FORCE_RMS, IMPACT_PEAK, SINE_AMPLITUDE
 from . import frame_stats, settle_plots
 from .axes import log_axes
+from .layouts import ColumnScroll
 from .modal_extraction import EXTRACTION_THEORY_HTML, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
 from .style import MAX_DOF, colors
@@ -698,10 +699,7 @@ class ModalTestPage(QtWidgets.QWidget):
         lv.addWidget(self.hold)
         lv.addWidget(self.extract)
         lv.addStretch(1)
-        left_scroll = QtWidgets.QScrollArea()
-        left_scroll.setWidget(left)
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setMinimumWidth(340)
+        left_scroll = ColumnScroll(left)
         left_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         # --- centre
