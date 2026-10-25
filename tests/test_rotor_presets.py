@@ -18,7 +18,7 @@ def criticals(name: str, forward: bool | None = None) -> list[int]:
 
 
 def test_every_preset_is_a_valid_rotor_with_its_target_in_range():
-    assert len(PRESETS) == 11
+    assert len(PRESETS) == 13
     for p in PRESETS.values():
         assert 0 < p.target_rpm < p.top_rpm and p.note
 
