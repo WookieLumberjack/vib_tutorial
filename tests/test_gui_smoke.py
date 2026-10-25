@@ -2179,11 +2179,29 @@ def test_window_fits_a_1280_px_screen(app):
     p.orbits.set_midspan_shown(True)  # four orbits
     app.processEvents()
     size = w.minimumSizeHint()
-    assert size.width() <= 1280 and size.height() <= 720
+    assert size.width() <= 1280 and size.height() <= 720, _widest(w.pages, size.width() // 3)
     names = [p.tabs.tabText(i) for i in range(p.tabs.count())]
     bar = p.tabs.tabBar()
     assert sum(bar.tabSizeHint(i).width() for i in range(bar.count())) < p.tabs.minimumSizeHint().width(), names
     w.close()
+
+
+def _least_width(widget) -> int:
+    return max(widget.minimumSizeHint().width(), widget.minimumWidth())
+
+
+def _widest(widget, floor: int, depth: int = 0) -> str:
+    """What holds `widget` wide: each child at least `floor` px wide at its least, down the tree."""
+    lines = []
+    for child in widget.findChildren(QtWidgets.QWidget, options=QtCore.Qt.FindChildOption.FindDirectChildrenOnly):
+        least = _least_width(child)
+        if least >= floor and not child.isWindow():
+            text = getattr(child, "text", None)
+            label = f" {text()[:30]!r}" if callable(text) and isinstance(text(), str) else ""
+            lines.append(f"{'  ' * depth}{type(child).__name__}{label}: {least} (hint {child.sizeHint().width()})")
+            if depth < 12:
+                lines.append(_widest(child, floor, depth + 1))
+    return "\n".join(line for line in lines if line)
 
 
 def test_flow_layout_wraps_when_narrow(app):
