@@ -1251,8 +1251,28 @@ keeps feeding it until the rim rolls round the ring without slipping: |ω|ρ = R
 RΩ/|ω|, set by the speed and not by the clearance: <b>dry whirl</b>, the most violent rub there is. On the
 <i>Full rub</i> preset (a 30 µm ring, μ = 0.3) the whirl flips at 1545 rpm, to 227 Hz backward, and at
 2000 rpm the orbit is 7.3 mm, the ring pushed back with 15 kN.</p>
+<h3>The Newkirk effect: a rub that bows the shaft</h3>
+<p>The rub's friction heats the shaft where it touches, and a shaft hotter on one side grows longer there
+and bows toward it. Newkirk (1926) saw what follows: below the critical speed the disc's high spot is
+close to its heavy spot, so the rub heats the high spot, the bow pushes the high spot further out, the
+rub gets harder, and the vibration grows without limit. Here the heat is the drag's work on the slip,
+H = μN·(RΩ + v<sub>t</sub>), taken on the shaft where it touches (from the mark, turning with it), and the
+bow b at the disc follows it with a first-order lag:</p>
+<p align='center'>τ b' = β H − b</p>
+<p>β is the bow per watt once it has settled, τ how slowly it does. The bow loads the shaft as a residual
+bow does (section 3), turning with it. Because the rotor's response lags the bow a little, each turn of
+the loop moves the high spot a little behind the hot spot: the 1X vector grows and turns <b>against</b>
+the spin, its lag growing, the <b>Newkirk spiral</b>. Above the critical the rotor's response to the bow
+is nearly opposite to it: the bow pulls the high spot away from the hot spot, the rub eases, and it heals
+itself. So the effect depends on which side of the critical the rotor runs, not on how hard it rubs. On
+the <i>Newkirk effect</i> preset (a seal 15 µm round the disc, set 10 µm low, β = 120 µm/W, τ = 5 s, so
+much faster than a real shaft's minutes) the 1X at 1300 rpm, 0.82 of the critical, grows from 10 µm past
+100 µm in 15 s, its lag from 13° to 40°. Run at 3200 rpm, the bow built going through the critical
+fades to 2.4 µm, and the disc runs at 5.9 µm.</p>
 <p><b>On the page.</b> The <i>Rub</i> tab sets the ring, says how much gap the disc has at rest and its
-frequency on the ring, and plots the ring's push on the disc. The ring is drawn round the disc in the 3D
+frequency on the ring, and plots the ring's push on the disc. With a thermal gain β it also draws the
+spiral: each revolution's 1X vector at the disc (in the probe's direction) and the thermal bow, from
+when the speed settled. The ring is drawn round the disc in the 3D
 view and on its orbit. A ring needs a round shaft, with the oil films linearized.</p>
 
 <h2>7. Numerics</h2>
@@ -1446,6 +1466,10 @@ disc's orbit close every two revolutions (its keyphasor dots in two places) and 
 line gives way at 1545 rpm to a line at −227 Hz, backward whirl at the disc's frequency on the ring.
 Set μ to 0.1 and Reset: the disc still reaches the ring, but whirls forward round it, held to about
 31 µm at 2000 rpm.</li>
+<li>Load the <i>Newkirk effect</i> preset, open the <i>Rub</i> tab and watch the polar plot: the 1X vector
+and the thermal bow spiral out together, turning clockwise (more lag), until the page pauses. Set the
+target to 3200 rpm and Reset: through the critical the bow grows to about 26 µm, and then fades, the disc
+settling at 5.9 µm with the bow at 2.4 µm. Set β to 0 and nothing grows below the critical either.</li>
 </ol>
 
 <h2>Notation</h2>
@@ -1514,6 +1538,7 @@ Set μ to 0.1 and Reset: the disc still reaches the ring, but whirls forward rou
 <tr><td>δ<sub>c</sub>, δ, ρ</td><td>the stator ring's radial clearance; how far the disc presses past it; the disc's distance from the ring's centre</td><td>m</td></tr>
 <tr><td>k<sub>s</sub>, c<sub>s</sub>, N</td><td>the ring's mount stiffness and damping; its push on the disc, k<sub>s</sub>δ + c<sub>s</sub>δ'</td><td>N/m, N·s/m, N</td></tr>
 <tr><td>μ, R, v<sub>t</sub>, s<sub>0</sub></td><td>friction coefficient of the rim on the ring; the disc's radius (√(2I<sub>p</sub>/m)); the disc's velocity along the ring; the slip over which the friction is smoothed</td><td>—, m, m/s, m/s</td></tr>
+<tr><td>H, b, β, τ</td><td>the rub's heat (the drag's work on the slip); the thermal bow at the disc; the bow per watt, settled; its time constant</td><td>W, m, m/W, s</td></tr>
 <tr><td>n, t, κ</td><td>unit vectors out from the ring's centre and along it (with the spin); the ring as a spring at the disc in a full rub, k<sub>s</sub>(1 − δ<sub>c</sub>/ρ)</td><td>—, —, N/m</td></tr>
 <tr><td colspan="3"><b>The magnetic bearing</b></td></tr>
 <tr><td>s<sub>0</sub>, i<sub>0</sub>, i, A, N</td><td>a magnet's air gap with the journal centred; the bias current; the control current; a pole face's area; the coil's turns</td><td>m, A, A, m², —</td></tr>

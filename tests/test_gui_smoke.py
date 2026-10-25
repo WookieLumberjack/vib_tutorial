@@ -2479,10 +2479,31 @@ def test_rotor_rub(app):
     p.show_sag.setChecked(False)  # drawn about the sag: the ring moves up by it
     p._draw()
     assert p.view.ring[1] > 300e-6
+    assert not panel.spiral.isVisibleTo(panel)  # no thermal bow
     # Off again: nothing drawn.
     panel.enabled.setChecked(False)
     p._draw()
     assert p.view.ring is None and (p.orbits.ring.xData is None or not p.orbits.ring.xData.size)
+    # The Newkirk preset: the spiral is recorded once the speed settles, and grows.
+    p.load_preset("Newkirk effect (thermal bow)")
+    assert panel.thermal_gain.value() == 120.0 and panel.stiffness.value() == 20.0 and p.sim.thermal
+    assert panel.spiral.isVisibleTo(panel)
+    while p.sim.t < 2.0:
+        p.step(0.25)
+    assert p._spiral == ([], [])  # still ramping
+    while p.sim.t < 12.0:
+        p.step(0.25)
+    vectors, bows = (np.array(a) for a in p._spiral)
+    assert len(vectors) > 30 and abs(vectors[-1]) > abs(vectors[0]) and abs(bows[-1]) > 1e-6
+    p._draw()
+    assert panel.vector_curve.xData.size == len(vectors) and "thermal bow" in panel.spiral_note.text()
+    p.set_target_rpm(1400.0)
+    p.step(0.05)
+    assert p._spiral == ([], [])  # a new speed starts it afresh
+    p.reset()
+    assert p.sim.thermal_bow == 0
+    panel.thermal_gain.setValue(0.0)
+    assert not p.sim.thermal and not panel.spiral.isVisibleTo(panel)
     w.set_theme("Dark")
 
 

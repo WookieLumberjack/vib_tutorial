@@ -550,6 +550,23 @@ def jeffcott_rub():
     save(w, "jeffcott_rub")
 
 
+def jeffcott_newkirk():
+    w = window()
+    page = w.rotor_page
+    w.pages.setCurrentWidget(page)
+    settle()
+    page._timer.stop()
+    page.running = False
+    page.load_preset("Newkirk effect (thermal bow)")
+    page._refresh_analysis()
+    page.tabs.show_page(page.rub_panel)
+    for _ in range(900):  # 18 s: up to 1300 rpm, and 15 s of the spiral
+        page.step(0.02)
+    page._draw()
+    print(page.rub_panel.spiral_note.text())
+    save(w, "jeffcott_newkirk")
+
+
 def jeffcott_overhung():
     w = window()
     page = w.rotor_page
@@ -681,7 +698,7 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
-         jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_overhung, jeffcott_waterfall,
+         jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_newkirk, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked]
 
 
