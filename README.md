@@ -40,12 +40,13 @@ uv run pytest         # run the tests
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
-Four more pages work on the same chain, in order from analysis to simplification to test:
+Five more pages work on the same chain, in order from analysis to simplification to test:
 **FRF matrix** shows every term of the receptance matrix and how the modes build it up,
 **Modal coupling** joins two halves of the chain one mode each, to show when their modes split,
 **Substructuring (CMS)** reduces the chain by component mode synthesis (Craig–Bampton, Rubin or
-MacNeal), and **Virtual modal test** measures the FRF from simulated force and response signals,
-as in a lab. The **Jeffcott rotor** page leaves the chain for a
+MacNeal), **Virtual modal test** measures the FRF from simulated force and response signals,
+as in a lab, and **Operational modal analysis** finds the modes from the responses to unmeasured
+ambient forces alone. The **Jeffcott rotor** page leaves the chain for a
 spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
 page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
 resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes,
@@ -486,6 +487,34 @@ exact modes:
   removed from the identified poles.
 
 ![Stabilization diagram of a noisy impact test: stable columns at modes 1 to 3, picked automatically; the fitted model over the measured FRF](docs/images/modal_extraction.png)
+
+### Operational modal analysis
+
+A bridge or a running machine can't be hammered: it is shaken by traffic, wind or its own
+working, forces nobody measures. The **Operational modal analysis** page drives the chain with
+random forces at every mass (or at one), records every mass's response only, and finds the modes
+from those responses.
+
+- **The record**: independent Gaussian forces, white or low-passed, through the same exact
+  update as the rest of the app, after the start-up transient has died away; then the anti-alias
+  filter, sampling, and sensor noise sized to each channel's RMS. The record length, sample rate
+  and block length are set from the chain's modes (two thousand periods of the slowest).
+- **Frequency domain decomposition (FDD)**: the responses' cross-spectral matrix by Welch's
+  method, and its singular values at each line. The first peaks at every mode, its singular
+  vector there the shape. Peaks are picked automatically; click to add or drop one.
+- **Enhanced FDD**: the lines round each peak whose singular vector still matches make the mode's
+  bell, and its inverse transform, the mode's autocorrelation, gives the damped frequency from
+  its zero crossings and the damping from its decay (*EFDD* tab).
+- **Against the exact modes**: f<sub>n</sub>, ζ and MAC, as on the virtual modal test, with the
+  shapes unscaled (no force, no modal mass).
+- **Things to try**: a short record, short blocks (leakage: too much damping), forces at a node
+  of a mode (it is missed), coloured forces, noisy sensors.
+
+![Operational modal analysis of the default chain: the first singular value of the responses' cross-spectral matrix peaks at all four modes, each with its shaded EFDD bell; mode 1 found at 1.106 Hz and 1.9 % damping against the exact 1.105 Hz and 1.7 %](docs/images/oma.png)
+
+The default chain's two lower modes come out within a fraction of a per cent in frequency and a
+tenth in damping. Modes 3 and 4 are close and heavily damped (7.7 and 9.4 %):
+their bells overlap and cut each other short, and EFDD's damping for them is poor.
 
 ### Jeffcott rotor
 
@@ -1001,6 +1030,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
   (the FOH update diagonalized into one first-order filter per eigenvalue, or the simulator's
   stick-slip stepping with friction), anti-alias
   filtering and sampling, noise, windows, and the H1/H2 and coherence estimates.
+- `core/oma.py`: operational modal analysis: the ambient record (random forces at every mass,
+  the exact response, anti-alias filter and sensor noise), the cross-spectral matrix, frequency
+  domain decomposition and enhanced FDD's bell and autocorrelation fit.
 - `core/identification.py`: modal parameter extraction from a measured FRF column: peak
   picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
   modes (MAC).

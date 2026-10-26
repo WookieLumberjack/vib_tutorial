@@ -376,6 +376,15 @@ def modal_extraction():
     save(test_page(1024, 0.0, 1.0, 100.0, "stab_plot", poles=3), "modal_extraction")
 
 
+def oma():
+    w = window()
+    p = w.oma_page
+    w.pages.setCurrentWidget(p)
+    settle()
+    print(p.readout.text())
+    save(w, "oma")
+
+
 # ------------------------------------------------------------------ Jeffcott rotor
 def jeffcott_rotor():
     w = window()
@@ -752,7 +761,7 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
-         virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
+         virtual_modal_test, modal_extraction, oma, jeffcott_rotor, jeffcott_run_up,
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_newkirk, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked,
          duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup]

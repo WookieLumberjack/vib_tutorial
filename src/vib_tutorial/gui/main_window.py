@@ -52,6 +52,7 @@ LAZY_PAGES = (
     ("coupling_page", "Modal coupling"),
     ("cms_page", "Substructuring (CMS)"),
     ("test_page", "Virtual modal test"),
+    ("oma_page", "Operational modal analysis"),
     ("rotor_page", "Jeffcott rotor"),
     ("duffing_page", "Duffing && Mathieu"),
     ("torsional_page", "Torsional vibration"),
@@ -59,7 +60,8 @@ LAZY_PAGES = (
 
 
 def _follows_chain(page: QtWidgets.QWidget) -> bool:
-    """Whether a page shows the chain (and is given it); the rotor, Duffing & Mathieu and torsional pages have models of their own."""
+    """Whether a page shows the chain (and is given it); the rotor, Duffing & Mathieu and torsional pages have models
+    of their own."""
     return getattr(page, "follows_chain", True)
 
 
@@ -83,6 +85,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "rotor_page":
         from .rotor import RotorPage
         return RotorPage
+    if name == "oma_page":
+        from .oma import OmaPage
+        return OmaPage
     from .modal_test import ModalTestPage
     return ModalTestPage
 MODE_ANIMATION_HZ = 0.5  # visual rate for the animated mode-shape plot
@@ -439,6 +444,7 @@ class MainWindow(QtWidgets.QMainWindow):
     coupling_page = property(lambda self: self._page("coupling_page"))
     cms_page = property(lambda self: self._page("cms_page"))
     test_page = property(lambda self: self._page("test_page"))
+    oma_page = property(lambda self: self._page("oma_page"))
     rotor_page = property(lambda self: self._page("rotor_page"))
     duffing_page = property(lambda self: self._page("duffing_page"))
     torsional_page = property(lambda self: self._page("torsional_page"))

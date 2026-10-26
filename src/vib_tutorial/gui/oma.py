@@ -1,0 +1,645 @@
+"""Operational modal analysis page: the chain's modes from its response to ambient forces alone.
+
+Left: the test (where the ambient forces act and their spectrum, the sensors), the
+acquisition (sample rate, record length, sensor noise) and the processing (block length,
+the EFDD bell's MAC threshold), and a few things to try. Centre: the singular values of the
+responses' cross-spectral matrix against frequency, the peaks picked (click to add or drop
+one) and their EFDD bells, over the exact natural frequencies; below, the responses. Right:
+the identified modes against the exact ones, the chosen mode's autocorrelation with the
+decay fitted, and the notes. The page follows the chain (core/oma.py).
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import pyqtgraph as pg
+from PySide6 import QtCore, QtWidgets
+
+from ..core.identification import mac_matrix
+from ..core.measurement import AA_CUTOFF, Response
+from ..core.modal import ModalResult, modal_analysis
+from ..core.model import ChainSystem
+from ..core.oma import (
+    MAC_MIN,
+    MAX_SAMPLES,
+    AmbientRecord,
+    AmbientSettings,
+    Colour,
+    Fdd,
+    FddMode,
+    ambient_record,
+    compare,
+    cross_spectra,
+    fdd,
+    identify,
+    pick_peaks,
+)
+from .layouts import ColumnScroll, FlowLayout, group, plot_height
+from .modal_extraction import ResultsView
+from .modal_test import suggested_fs
+from .panels import spin
+from .style import MAX_DOF, colors
+from .theming import add_legend, mute
+
+BLOCKS = (256, 512, 1024, 2048, 4096, 8192, 16384)
+CYCLES = 2000  # the record's default length, in periods of the slowest mode
+SHOWN_S = 60.0  # s of the record drawn
+RECOMPUTE_MS = 150  # the parameters settle this long before the record is made again
+
+TIPS = {
+    "input": "<p>Where the ambient forces act: independent random forces on every mass (wind, traffic, "
+             "people: what OMA assumes), or on one mass only. A mode with a node there isn't excited, and "
+             "no method finds it.</p>",
+    "colour": "<p>The forces' spectrum. OMA assumes it is flat (white) over the modes, so the responses' "
+              "spectra are the structure's. A low-pass input tilts them, and the modes above its corner "
+              "fade into the noise.</p>",
+    "response": "<p>What each sensor measures: displacement, or acceleration as accelerometers do (the "
+                "usual in OMA). The shapes and frequencies don't depend on it; the higher modes stand out "
+                "more in acceleration.</p>",
+    "fs": "<p>Samples per second on every channel. Set from the chain when it changes, so the highest mode "
+          f"is well inside the anti-alias filter's passband ({AA_CUTOFF:.0%} of Nyquist).</p>",
+    "duration": "<p>How long the structure is recorded. OMA needs long records, a thousand periods of the "
+                "slowest mode or more: the input is unknown and random, and only averaging many blocks makes "
+                "the spectra smooth. Set from the chain when it changes.</p>",
+    "noise": "<p>Random noise on each sensor, as a percentage of its channel's RMS. It fills the troughs "
+             "between the peaks, and the weakest modes sink into it.</p>",
+    "block": "<p>Samples per block in Welch's averaging. A long block resolves narrow peaks (the lines are "
+             "fs/N<sub>b</sub> apart) and leaks less, so the damping comes out right; a short one gives more "
+             "blocks to average, so the spectra are smoother. Set from the chain when it changes.</p>",
+    "mac": "<p>EFDD: the lines round a peak whose first singular vector has a MAC with the peak's above "
+           "this are the mode's bell. Higher keeps less of the bell; lower lets in the neighbours.</p>",
+    "new": "<p>Record again with fresh random forces and noise: the identified values scatter from record to "
+           "record, damping most.</p>",
+}
+SV_TIP = (
+    "<p>The singular values of the responses' cross-spectral matrix at each frequency line, largest "
+    "(s₁, bold) first. Near a mode the matrix is that mode's alone, so s₁ peaks at every mode and the "
+    "rest stay low (two close modes lift s₂ too). Dotted lines: the exact natural frequencies. The "
+    "shaded bells are each mode's lines for EFDD. Click near a peak to add or drop it.</p>")
+
+# Things to try: (name, what it sets, note)
+TRIALS = (
+    ("Long record, every mass", {},
+     "Random forces at every mass, two thousand periods of the slowest mode: every mode found. The lightly "
+     "damped ones' damping comes out within a few per cent; on the default chain, modes 3 and 4 are close "
+     "and heavily damped, their bells overlap and cut each other short, and mode 4's damping comes out low."),
+    ("Short record", {"cycles": 100},
+     "A hundred periods: few blocks to average, so the spectra are rough and the damping scatters. "
+     "Press New record a few times."),
+    ("Short blocks", {"block": 1 / 8},
+     "Blocks an eighth as long: smooth spectra but coarse lines, and the window's leakage widens every "
+     "peak: the damping comes out too high, the lightest damped mode's most."),
+    ("Forces at m3 only", {"input": 2},
+     "On the default chain m3 sits on a node of mode 2: nothing excites it, so it is missing from s₁."),
+    ("Coloured forces", {"corner": 1.5, "response": Response.DISPLACEMENT},
+     "Forces low-passed at 1.5× the first mode, measured as displacements: the higher modes are barely "
+     "driven and sink toward the noise, and the input's slope across their bells (OMA assumes it flat) "
+     "spoils their damping, or loses the mode."),
+    ("Noisy sensors", {"noise": 200.0},
+     "Noise at twice each channel's RMS fills the troughs between the peaks: the more damped modes' bells "
+     "drown in it, and their damping comes out far too low, or the mode is lost."),
+)
+
+NOTES_HTML = """
+<h3>Operational modal analysis</h3>
+<p>A modal test measures the force and the response, and their ratio, the FRF, is the structure's own. A bridge
+or a running machine can't be hammered: it is shaken by traffic, wind or its own working, forces nobody
+measures. <b>Operational modal analysis</b> (OMA, output-only) identifies the modes from the responses alone,
+assuming those forces are random and broadband (white), so the responses' spectra take their shape from the
+structure.</p>
+<p>With white forces of spectral density matrix S<sub>ff</sub>, the responses' cross-spectral matrix is</p>
+<p align="center">G<sub>yy</sub>(ω) = H(ω) S<sub>ff</sub> H(ω)<sup>H</sup>,</p>
+<p>and near a lightly damped mode r its term dominates: G<sub>yy</sub> ≈ d<sub>r</sub> φ<sub>r</sub>φ<sub>r</sub><sup>H</sup>,
+a matrix of rank one whose column space is the mode shape.</p>
+
+<h3>Frequency domain decomposition</h3>
+<p>FDD estimates G<sub>yy</sub> at each line by Welch's method (the responses cut into blocks, windowed,
+Fourier transformed, Y Y<sup>H</sup> averaged) and takes its singular value decomposition,
+G<sub>yy</sub> = U S U<sup>H</sup>. The first singular value s₁ peaks at every mode, and the first singular vector
+there is the mode's shape. Picking the peaks gives the frequencies, to the line. Two close modes show as
+s₁ and s₂ both peaking.</p>
+<p><b>Enhanced FDD</b> (EFDD) adds the damping. The lines round a peak whose first singular vector still has a
+high MAC with the peak's are that mode's single-degree-of-freedom spectrum, its <i>bell</i>. Transformed back
+to the time domain it is the mode's autocorrelation function, a decaying cosine: its zero crossings give the
+damped frequency, and the logarithmic decay of its extremes the damping, as from a free decay.</p>
+
+<h3>What OMA can't do</h3>
+<ul>
+<li>The force is unknown, so the shapes can't be <b>scaled</b>: no modal masses, no FRF. (A known mass added
+and the shift in frequency, or a measured force at one point, can scale them.)</li>
+<li>It assumes the forces are <b>white</b> over the band. A coloured input shapes the spectra, and a
+<b>harmonic</b> one (a machine running) makes a sharp peak that looks like a lightly damped mode.</li>
+<li>It needs <b>long records</b>: the input is random, and only many averages make the spectra smooth. The
+rule of thumb is a thousand to two thousand periods of the slowest mode.</li>
+<li>Damping is the hardest: the Hann window's leakage widens the peaks of a short block (too much damping),
+and a bell cut short by the MAC threshold rings on (too little).</li>
+</ul>
+"""
+
+
+def _plot(left: str, left_units: str | None, bottom: str, bottom_units: str | None) -> pg.PlotWidget:
+    p = pg.PlotWidget()
+    p.setMenuEnabled(False)
+    p.hideButtons()
+    p.showGrid(x=True, y=True, alpha=0.15)
+    p.setLabel("left", left, units=left_units)
+    p.setLabel("bottom", bottom, units=bottom_units)
+    return p
+
+
+def _form_row(form: QtWidgets.QFormLayout, text: str, box: QtWidgets.QWidget, tip: str) -> None:
+    box.setToolTip(tip)
+    label = QtWidgets.QLabel(text)
+    label.setToolTip(tip)
+    form.addRow(label, box)
+
+
+class OmaPage(QtWidgets.QWidget):
+    """Controls on the left, singular values and records in the centre, results and notes on the right."""
+
+    dof_requested = QtCore.Signal(int)  # the user changed N here; the main window owns the system
+    edit_parameters = QtCore.Signal()  # the user wants the Simulation page's parameter panel
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.system: ChainSystem | None = None
+        self.result: ModalResult | None = None
+        self.record: AmbientRecord | None = None
+        self.fdd: Fdd | None = None
+        self.modes: list[FddMode] = []
+        self.peaks: list[int] | None = None  # lines picked by hand; None: automatic
+        self.seed = 1  # the record's random forces and noise; New record moves it on
+        self.selected = 0  # the mode the EFDD tab shows
+        self._loading = False
+        self._dirty = False  # the record is stale (made again when the page shows)
+        self._remeasure = True  # the next recompute makes a new record (not just reprocesses)
+        self._recompute = QtCore.QTimer(self)
+        self._recompute.setSingleShot(True)
+        self._recompute.setInterval(RECOMPUTE_MS)
+        self._recompute.timeout.connect(self.recompute)
+
+        # --- left: the test, the acquisition, the processing
+        test = QtWidgets.QGroupBox("Test")
+        form = QtWidgets.QFormLayout(test)
+        self.dof = QtWidgets.QSpinBox()
+        self.dof.setRange(1, MAX_DOF)
+        self.dof.setToolTip("Same chain as the Simulation page; changing it here changes it there too.")
+        self.dof.valueChanged.connect(self.dof_requested)
+        form.addRow("Number of masses:", self.dof)
+        self.input = QtWidgets.QComboBox()
+        _form_row(form, "Ambient forces on:", self.input, TIPS["input"])
+        self.colour = QtWidgets.QComboBox()
+        for c in Colour:
+            self.colour.addItem(c.value, c)
+        self.corner = spin(0.01, 1e4, 5.0, 2, " Hz")
+        _form_row(form, "Their spectrum:", group(self.colour, "corner", self.corner), TIPS["colour"])
+        self.response = QtWidgets.QComboBox()
+        for r in (Response.ACCELERATION, Response.DISPLACEMENT):
+            self.response.addItem(r.value, r)
+        _form_row(form, "Sensors:", self.response, TIPS["response"])
+        link = QtWidgets.QLabel("Masses, springs and dampers are edited on the <a href='#sim'>Simulation page</a>.")
+        mute(link)
+        link.setWordWrap(True)
+        link.linkActivated.connect(lambda _: self.edit_parameters.emit())
+        form.addRow(link)
+
+        daq = QtWidgets.QGroupBox("Acquisition")
+        form = QtWidgets.QFormLayout(daq)
+        self.fs = spin(0.5, 10000.0, 20.0, 2, " Hz")
+        self.duration = spin(1.0, 1e6, 900.0, 0, " s")
+        self.noise = spin(0.0, 500.0, 2.0, 1, " %")
+        _form_row(form, "Sample rate fs:", self.fs, TIPS["fs"])
+        _form_row(form, "Record length:", self.duration, TIPS["duration"])
+        _form_row(form, "Sensor noise:", self.noise, TIPS["noise"])
+        self.new_record = QtWidgets.QPushButton("New record")
+        self.new_record.setToolTip(TIPS["new"])
+        form.addRow(self.new_record)
+        self.daq_info = QtWidgets.QLabel()
+        self.daq_info.setWordWrap(True)
+        mute(self.daq_info)
+        form.addRow(self.daq_info)
+
+        proc = QtWidgets.QGroupBox("Processing")
+        form = QtWidgets.QFormLayout(proc)
+        self.block = QtWidgets.QComboBox()
+        for b in BLOCKS:
+            self.block.addItem(str(b), b)
+        _form_row(form, "Block length:", self.block, TIPS["block"])
+        self.mac_min = spin(0.1, 0.999, MAC_MIN, 3, "")
+        _form_row(form, "EFDD bell MAC ≥", self.mac_min, TIPS["mac"])
+        self.auto_peaks = QtWidgets.QPushButton("Pick peaks automatically")
+        self.auto_peaks.setToolTip("<p>Forget the peaks clicked by hand and pick s₁'s most prominent "
+                                   "peaks again, at most one per mass.</p>")
+        form.addRow(self.auto_peaks)
+
+        trials = QtWidgets.QGroupBox("Things to try")
+        tv = QtWidgets.QVBoxLayout(trials)
+        self.trial = QtWidgets.QComboBox()
+        self.trial.addItems([name for name, _, _ in TRIALS])
+        self.trial.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.trial.setToolTip("<p>Settings that show one of OMA's strengths or pitfalls, set from the chain "
+                              "as it is now.</p>")
+        tv.addWidget(self.trial)
+        self.trial_note = QtWidgets.QLabel()
+        self.trial_note.setWordWrap(True)
+        mute(self.trial_note)
+        tv.addWidget(self.trial_note)
+
+        left = QtWidgets.QWidget()
+        lv = QtWidgets.QVBoxLayout(left)
+        for box in (test, daq, proc, trials):
+            lv.addWidget(box)
+        lv.addStretch(1)
+        left_scroll = ColumnScroll(left)
+
+        # --- centre: the singular values, the records
+        self.sv = _plot("Singular value", None, "Frequency", "Hz")
+        self.sv.setLogMode(x=False, y=True)
+        self.sv.setToolTip(SV_TIP)
+        self.sv.setMouseEnabled(x=False, y=False)
+        self.sv.scene().sigMouseClicked.connect(self._on_sv_click)
+        plot_height(self.sv, 220)
+        self.sv_legend = add_legend(self.sv.getPlotItem(), offset=(-10, 10))
+        self.readout = QtWidgets.QLabel()
+        self.readout.setWordWrap(True)
+        self.readout.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self.records = _plot("Response", None, "Time", "s")
+        self.records.setToolTip("<p>The start of the record: every mass's response to the ambient forces "
+                                "(no force is measured). It looks like noise; the modes are in its spectra.</p>")
+        self.records.setClipToView(True)
+        self.records.setDownsampling(auto=True, mode="peak")
+        plot_height(self.records, 120)
+        center = QtWidgets.QWidget()
+        cv = QtWidgets.QVBoxLayout(center)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.addWidget(self.sv, 3)
+        cv.addWidget(self.readout)
+        cv.addWidget(self.records, 1)
+
+        # --- right: the results, the chosen mode's EFDD, the notes
+        self.results = ResultsView()
+        self.mode_pick = QtWidgets.QComboBox()
+        self.mode_pick.setToolTip("<p>The identified mode whose EFDD fit is shown.</p>")
+        self.correlation = _plot("Autocorrelation", None, "Lag", "s")
+        self.correlation.setToolTip(
+            "<p>The chosen mode's bell transformed back to the time domain: its autocorrelation, a decaying "
+            "cosine, normalized to 1 at zero lag. The circled extremes give the decay (the dashed envelope "
+            "e<sup>−ζω<sub>n</sub>τ</sup>), the zero crossings the damped frequency.</p>")
+        plot_height(self.correlation, 180)
+        self.bell_plot = _plot("s₁", None, "Frequency", "Hz")
+        self.bell_plot.setLogMode(x=False, y=True)
+        self.bell_plot.setToolTip("<p>The chosen mode's bell: the lines round its peak whose first singular "
+                                  "vector looks like the peak's (MAC above the threshold).</p>")
+        plot_height(self.bell_plot, 140)
+        self.efdd_note = QtWidgets.QLabel()
+        self.efdd_note.setWordWrap(True)
+        self.efdd_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        efdd_tab = QtWidgets.QWidget()
+        ev = QtWidgets.QVBoxLayout(efdd_tab)
+        row = FlowLayout()
+        row.add(group("Mode:", self.mode_pick))
+        ev.addLayout(row)
+        ev.addWidget(self.bell_plot, 2)
+        ev.addWidget(self.correlation, 3)
+        ev.addWidget(self.efdd_note)
+        self.notes = QtWidgets.QTextBrowser()
+        self.notes.setHtml(NOTES_HTML)
+        self.tabs = QtWidgets.QTabWidget()
+        self.efdd_tab = efdd_tab
+        self.tabs.addTab(self.results, "Modal parameters")
+        self.tabs.addTab(efdd_tab, "EFDD")
+        self.tabs.addTab(self.notes, "Theory")
+
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        splitter.addWidget(left_scroll)
+        splitter.addWidget(center)
+        splitter.addWidget(self.tabs)
+        splitter.setSizes([330, 740, 630])
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(splitter)
+
+        # --- wiring
+        for box in (self.input, self.colour, self.response):
+            box.currentIndexChanged.connect(self._on_measure)
+        for box in (self.corner, self.fs, self.duration):
+            box.valueChanged.connect(self._on_measure)
+        self.noise.valueChanged.connect(self._on_process)
+        self.block.currentIndexChanged.connect(self._on_process)
+        self.mac_min.valueChanged.connect(self._on_process)
+        self.new_record.clicked.connect(self._on_new_record)
+        self.auto_peaks.clicked.connect(self._on_auto_peaks)
+        self.trial.currentIndexChanged.connect(lambda _: self.apply_trial())
+        self.mode_pick.currentIndexChanged.connect(self._on_mode_pick)
+
+    # ------------------------------------------------------------- inputs
+    def set_system(self, system: ChainSystem, result: ModalResult | None = None) -> None:
+        """New chain parameters: the settings follow its modes, and it's recorded again (now if shown)."""
+        n_changed = self.system is None or system.n != self.system.n
+        self.system = system
+        self.result = result or modal_analysis(system)
+        self._loading = True
+        self.dof.blockSignals(True)
+        self.dof.setValue(system.n)
+        self.dof.blockSignals(False)
+        if n_changed:
+            current = self.input.currentIndex()
+            self.input.clear()
+            self.input.addItem("Every mass")
+            self.input.addItems([f"m{i + 1}" for i in range(system.n)])
+            self.input.setCurrentIndex(current if 0 <= current <= system.n else 0)
+        self._loading = False
+        self.apply_trial()
+
+    def _suggested(self) -> tuple[float, float, int]:
+        """(fs, record length, block) for the chain's modes: fs clear of the top mode, a thousand periods
+        of the slowest, and lines fine enough to put several across its half-power width."""
+        modes = [m for m in self.result.modes if m.damped is not None and m.fn_hz > 0]
+        fs = suggested_fs(self.result)
+        if not modes:
+            return fs, 600.0, 2048
+        slow = min(modes, key=lambda m: m.fn_hz)
+        zeta = max(min(m.zeta_modal for m in modes if math.isfinite(m.zeta_modal)), 1e-3)
+        duration = min(CYCLES / slow.fn_hz, MAX_SAMPLES / fs / 2)
+        lines = fs / (0.5 * zeta * slow.fn_hz)  # samples per block for a line spacing of ζ f / 2
+        block = min((b for b in BLOCKS if b >= lines), default=BLOCKS[-1])
+        block = min(block, max(BLOCKS[0], 2 ** int(math.log2(duration * fs / 16))))
+        return fs, round(duration), block
+
+    def apply_trial(self) -> None:
+        """Set the settings the chosen trial asks for, from the chain as it is."""
+        if self.result is None:
+            return
+        name, changes, note = TRIALS[self.trial.currentIndex()]
+        fs, duration, block = self._suggested()
+        slow = min((m.fn_hz for m in self.result.modes if m.fn_hz > 0), default=1.0)
+        if "cycles" in changes:
+            duration = round(changes["cycles"] / slow)
+        if "block" in changes:
+            block = max(BLOCKS[0], int(block * changes["block"]))
+        self._loading = True
+        self.fs.setValue(fs)
+        self.duration.setValue(duration)
+        self.block.setCurrentIndex(BLOCKS.index(block) if block in BLOCKS else 0)
+        self.noise.setValue(changes.get("noise", 2.0))
+        n = self.system.n
+        self.input.setCurrentIndex(changes["input"] + 1 if "input" in changes and changes["input"] < n else 0)
+        self.colour.setCurrentIndex(1 if "corner" in changes else 0)
+        self.response.setCurrentIndex(
+            self.response.findData(changes.get("response", Response.ACCELERATION)))
+        self.corner.setValue(changes.get("corner", 1.5) * slow)
+        self.corner.setEnabled("corner" in changes)
+        self._loading = False
+        self.trial_note.setText(note)
+        self.peaks = None
+        self._schedule(measure=True)
+
+    def settings(self) -> AmbientSettings:
+        i = self.input.currentIndex()
+        return AmbientSettings(fs=self.fs.value(), duration=self.duration.value(),
+                               input_dof=None if i <= 0 else i - 1, colour=self.colour.currentData(),
+                               corner_hz=self.corner.value(), response=self.response.currentData(), seed=self.seed)
+
+    def _on_measure(self) -> None:
+        if not self._loading:
+            self.corner.setEnabled(self.colour.currentData() is Colour.LOW_PASS)
+            self.peaks = None
+            self._schedule(measure=True)
+
+    def _on_process(self) -> None:
+        if not self._loading:
+            self._schedule(measure=False)
+
+    def _on_new_record(self) -> None:
+        self.seed += 1
+        self._schedule(measure=True, now=True)
+
+    def _on_auto_peaks(self) -> None:
+        self.peaks = None
+        self._process()
+
+    def _schedule(self, measure: bool, now: bool = False) -> None:
+        self._remeasure |= measure
+        if not self.isVisible():
+            self._dirty = True
+            return
+        if now:
+            self.recompute()
+        else:
+            self._recompute.start()
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().showEvent(event)
+        if self._dirty:
+            self.recompute()
+
+    # ------------------------------------------------------------- computing
+    def recompute(self) -> None:
+        """Record again if asked for (or stale), then process; the plots and results follow."""
+        self._recompute.stop()
+        self._dirty = False
+        if self.system is None:
+            return
+        if self._remeasure or self.record is None:
+            try:
+                self.record = ambient_record(self.system, self.settings(), self.result)
+            except ValueError as e:
+                self.record = None
+                self.readout.setText(f"<b>{e}</b>.")
+                return
+            self._remeasure = False
+            self._draw_records()
+        self._process()
+
+    def _process(self) -> None:
+        if self.record is None:
+            return
+        y = self.record.measured(self.noise.value() / 100.0)
+        spectra = cross_spectra(y, self.record.settings.fs, self.block.currentData())
+        self.fdd = fdd(spectra)
+        band = self._band()
+        lines = pick_peaks(self.fdd, band, self.system.n) if self.peaks is None else self.peaks
+        self.modes = identify(self.fdd, lines, self.mac_min.value())
+        self._show_daq_info(spectra)
+        self._fill_mode_pick()
+        self._draw_sv()
+        self._show_results()
+        self._draw_efdd()
+
+    def _band(self) -> tuple[float, float]:
+        return 0.0, AA_CUTOFF * self.record.settings.fs / 2.0
+
+    def _on_sv_click(self, event) -> None:
+        if self.fdd is None:
+            return
+        vb = self.sv.getPlotItem().getViewBox()
+        if not vb.sceneBoundingRect().contains(event.scenePos()):
+            return
+        f = vb.mapSceneToView(event.scenePos()).x()
+        freqs = self.fdd.freqs
+        lines = [m.line for m in self.modes]
+        near = [line for line in lines if abs(freqs[line] - f) <= 0.02 * max(f, freqs[1])]
+        if near:
+            lines.remove(near[0])  # drop the peak clicked
+        else:
+            # the highest s₁ within a few lines of the click
+            k = int(np.argmin(np.abs(freqs - f)))
+            lo, hi = max(1, k - 3), min(freqs.size, k + 4)
+            lines.append(lo + int(np.argmax(self.fdd.s[lo:hi, 0])))
+        self.peaks = sorted(set(lines))
+        self._process()
+
+    def _on_mode_pick(self, index: int) -> None:
+        if index >= 0 and not self._loading:
+            self.selected = index
+            self._draw_efdd()
+            self._draw_sv()
+
+    # ------------------------------------------------------------- showing
+    def apply_theme(self) -> None:
+        if self.record is not None:
+            self._draw_records()
+        if self.fdd is not None:
+            self._draw_sv()
+            self._show_results()
+            self._draw_efdd()
+        self.results.mac.apply_theme()
+
+    def _show_daq_info(self, spectra) -> None:
+        s = self.record.settings
+        slow = min((m.fn_hz for m in self.result.modes if m.fn_hz > 0), default=math.nan)
+        self.daq_info.setText(
+            f"{s.samples:,} samples a channel; {s.duration * slow:,.0f} periods of mode 1. "
+            f"{spectra.blocks} blocks of {spectra.block} averaged (half overlapping), lines "
+            f"{spectra.resolution:.3g} Hz apart.")
+
+    def _fill_mode_pick(self) -> None:
+        self._loading = True
+        self.mode_pick.clear()
+        self.mode_pick.addItems([f"{k + 1}: peak at {m.peak_hz:.4g} Hz" for k, m in enumerate(self.modes)])
+        self.selected = min(self.selected, len(self.modes) - 1) if self.modes else 0
+        self.mode_pick.setCurrentIndex(self.selected if self.modes else -1)
+        self._loading = False
+
+    def _draw_records(self) -> None:
+        p = self.records
+        p.clear()
+        rec = self.record
+        y = rec.measured(self.noise.value() / 100.0)
+        k = min(y.shape[0], int(SHOWN_S * rec.settings.fs))
+        t = rec.t[:k]
+        for j in range(y.shape[1]):
+            p.plot(t, y[:k, j], pen=pg.mkPen(colors.mass[j % len(colors.mass)], width=1))
+        p.setLabel("left", rec.settings.response.value, units=rec.settings.response.unit)
+        p.setXRange(0.0, t[-1] if t.size else 1.0, padding=0)
+
+    def _draw_sv(self) -> None:
+        p = self.sv
+        p.clear()
+        self.sv_legend.clear()
+        d = self.fdd
+        f = d.freqs
+        lo, hi = self._band()
+        keep = (f > 0) & (f <= hi)
+        s = d.s[keep]
+        floor = max(s[:, 0].max() * 1e-8, 1e-300)
+        for i in range(d.s.shape[1] - 1, -1, -1):
+            first = i == 0
+            item = p.plot(f[keep], np.maximum(s[:, i], floor),
+                          pen=pg.mkPen(colors.strong if first else colors.grey, width=2 if first else 1))
+            if i < 2:
+                self.sv_legend.addItem(item, "s₁" if first else "s₂, s₃, …")
+        for k, m in enumerate(self.modes):
+            color = colors.mode[k % len(colors.mode)]
+            bell = m.bell & keep
+            c = pg.mkColor(color)
+            c.setAlpha(110 if k == self.selected else 60)
+            # filled down to the floor (in the view's log10 units: the plot is log in y)
+            p.plot(f[bell], np.maximum(d.s[bell, 0], floor), pen=None, fillLevel=math.log10(floor),
+                   brush=pg.mkBrush(c))
+            p.plot([f[m.line]], [d.s[m.line, 0]], pen=None, symbol="o", symbolSize=9,
+                   symbolPen=pg.mkPen(color, width=2), symbolBrush=pg.mkBrush(colors.background))
+        for md in self.result.modes:
+            if md.damped is not None and md.damped.fn_hz <= hi:
+                line = pg.InfiniteLine(md.damped.fn_hz, angle=90, label=str(md.index),
+                                       labelOpts={"position": 0.95, "color": colors.muted},
+                                       pen=pg.mkPen(colors.muted, width=1, style=QtCore.Qt.PenStyle.DotLine))
+                p.addItem(line)
+        p.setXRange(0.0, hi, padding=0)
+        p.setYRange(math.log10(floor), math.log10(s[:, 0].max() * 3.0), padding=0)
+
+    def _show_results(self) -> None:
+        f_top = self._band()[1]
+        rows = compare(self.modes, self.result, f_top)
+        macs = mac_matrix([m.identified for m in self.modes], self.result)
+        found = sum(1 for r in rows if r.mode is not None and r.identified is not None)
+        missed = [r.mode for r in rows if r.mode is not None and r.identified is None]
+        extra = sum(1 for r in rows if r.mode is None)
+        failed = sum(1 for m in self.modes if not math.isfinite(m.zeta))
+        notes = [f"FDD + EFDD: {found} mode{'s' if found != 1 else ''} found"]
+        if missed:
+            notes.append("missed: " + ", ".join(f"mode {m}" for m in missed))
+        if extra:
+            notes.append(f"{extra} peak{'s' if extra > 1 else ''} matching no mode")
+        if failed:
+            notes.append(f"{failed} bell{'s' if failed > 1 else ''} too narrow to fit a decay (the frequency is "
+                         f"the peak's line, ζ unknown)")
+        text = "; ".join(notes) + ". The shapes are unscaled: without the force, OMA can't find modal masses."
+        self.results.set_results(rows, macs, text)
+        exact = [m for m in self.result.modes if m.damped is not None]
+        self.results.mac.set_matrix(macs, [f"{m.peak_hz:.3g} Hz" for m in self.modes],
+                                    [str(m.index) for m in exact])
+        self.readout.setText(self._readout(rows))
+
+    def _readout(self, rows) -> str:
+        parts = []
+        for r in rows:
+            if r.mode is None or r.identified is None:
+                continue
+            fe = abs(r.exact) / (2 * math.pi)
+            ze = -r.exact.real / abs(r.exact)
+            ident = r.identified
+            parts.append(f"mode {r.mode} {ident.fn_hz:.4g} Hz ({100 * (ident.fn_hz / fe - 1):+.1f} %), "
+                         f"ζ {100 * ident.zeta:.2g} % (exact {100 * ze:.2g} %)")
+        return ("Found: " + "; ".join(parts) + ".") if parts else "No mode found."
+
+    def _draw_efdd(self) -> None:
+        c, b = self.correlation, self.bell_plot
+        c.clear()
+        b.clear()
+        if not self.modes:
+            self.efdd_note.setText("No peak picked.")
+            return
+        m = self.modes[self.selected]
+        color = colors.mode[self.selected % len(colors.mode)]
+        d = self.fdd
+        span = np.flatnonzero(m.bell)
+        lo, hi = max(1, span[0] - span.size), min(d.freqs.size - 1, span[-1] + span.size)
+        floor = max(d.s[lo:hi + 1, 0].max() * 1e-6, 1e-300)
+        b.plot(d.freqs[lo:hi + 1], np.maximum(d.s[lo:hi + 1, 0], floor), pen=pg.mkPen(colors.grey, width=1))
+        b.plot(d.freqs[m.bell], np.maximum(d.s[m.bell, 0], floor), pen=pg.mkPen(color, width=2))
+        show = m.lag <= (m.lag[m.extremes[-1]] * 1.3 if m.extremes.size else m.lag[-1] * 0.1)
+        c.plot(m.lag[show], m.correlation[show], pen=pg.mkPen(colors.strong, width=1.5))
+        c.addItem(pg.InfiniteLine(0.0, angle=0, pen=pg.mkPen(colors.faint, width=1)))
+        if m.extremes.size:
+            c.plot(m.lag[m.extremes], m.correlation[m.extremes], pen=None, symbol="o", symbolSize=7,
+                   symbolPen=pg.mkPen(color, width=1.5), symbolBrush=pg.mkBrush(colors.background))
+        if math.isfinite(m.zeta):
+            sigma = m.zeta * 2 * math.pi * m.fn_hz
+            t = m.lag[show]
+            env = np.exp(-sigma * t)
+            # through the extremes' fitted line, not from 1: the bell's edges shift it a little
+            a = float(np.exp(np.mean(np.log(np.abs(m.correlation[m.extremes])) + sigma * m.lag[m.extremes])))
+            pen = pg.mkPen(color, width=1, style=QtCore.Qt.PenStyle.DashLine)
+            c.plot(t, a * env, pen=pen)
+            c.plot(t, -a * env, pen=pen)
+            self.efdd_note.setText(
+                f"Bell of {int(m.bell.sum())} lines; {m.extremes.size} extremes and {m.crossings.size} zero "
+                f"crossings fitted: f<sub>n</sub> = {m.fn_hz:.4g} Hz, ζ = {100 * m.zeta:.3g} % (the peak's line: "
+                f"{m.peak_hz:.4g} Hz).")
+        else:
+            self.efdd_note.setText(f"Bell of {int(m.bell.sum())} lines: too few extremes to fit a decay. Lower the "
+                                   f"MAC threshold, or lengthen the blocks.")
+        c.setXRange(0.0, float(m.lag[show][-1]), padding=0)
