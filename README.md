@@ -954,8 +954,21 @@ elements. Its waves say which of the chain's modes to trust.
   mixed for a string or bar; N<sup>−2</sup> lumped and N<sup>−4</sup> consistent for a beam.
 - **Mode shape and frequencies**: the chosen mode, exact and on each mesh (the nodes and the
   elements' own interpolation between them), and a table of every mode's frequency and error.
+- **Waves** (centre, *Waves* tab): a pulse runs along the continuum and the mesh side by side,
+  travelling right or released at rest. The continuum's is exact: a string's or bar's two
+  d'Alembert waves carried along, scattered at the ends in closed form, or a beam's exact modes
+  summed. The mesh is stepped by its exact matrix exponential. On it the pulse sheds ripples
+  (behind it with lumped mass, ahead with consistent), since its short waves travel at the wrong
+  speed and none shorter than two elements travels at all. The pulse comes back from a fixed end
+  upside down and from a free end upright. A *dashpot* on the far end reflects
+  (1 − r)/(1 + r) of the wave, r its damping over the impedance Z (√(Tμ) or ρcA): matched (r = 1)
+  it absorbs the continuum's pulse, but not the mesh's short waves. A *step* in the string's mass or
+  the bar's section reflects (Z₁ − Z₂)/(Z₁ + Z₂) of a wave and passes 2Z₁/(Z₁ + Z₂). The mesh's
+  energy is shown as it goes.
 - **Presets**: a guitar string as beads, a steel bar held at one end, a steel ruler over a desk's
-  edge, a vibraphone bar (free–free), and a pinned beam whose modes lie on the mesh's curve.
+  edge, a vibraphone bar (free–free), and a pinned beam whose modes lie on the mesh's curve; and
+  four wave presets: a pulse on 40 beads, a matched end, a light string tied to a heavy one, and a
+  bending pulse on a beam.
 
 ![Continuous systems page, the Guitar string preset: on the dispersion plot the continuum's straight line ω = cκ (c = 106.8 m/s) and three 12-element meshes' curves bending away from it to the cut-off at κ = π/h = 58.2 rad/m, lumped low (topping out at 630 Hz where the continuum is at 989 Hz), consistent high (1090 Hz) and mixed close to the line, each mesh's modes dots on its curve; mode 6, four elements a wavelength, is marked: exact 494.4 Hz, lumped 445.2 Hz (−9.97 %), consistent 545.2 Hz (+10.3 %), mixed 487.6 Hz (−1.38 %). On the right its shape: each mesh's nodes are exactly on the sine](docs/images/continuum_string.png)
 
@@ -968,6 +981,13 @@ beaded string is slower for short waves, and carries none shorter than two beads
 A clamped steel ruler's third mode: eight elements are already within 0.06 % with consistent
 masses, which converge as N<sup>−4</sup>; lumped masses, leaving the slopes without inertia, only
 as N<sup>−2</sup>.
+
+![Continuous systems page, the Waves tab with a light string tied to a heavy one: a pulse launched rightward at 100 m/s has met the step halfway along (shaded), where the string is four times heavier. On the continuum (black) a third of it has come back upside down (−0.33) and two thirds have gone on (0.67) at half the speed, half as long; on the 100-element lumped mesh the transmitted pulse, five elements wide, reaches only 0.49 and trails ripples, and the reflected one lags the continuum's](docs/images/continuum_waves.png)
+
+Halfway along this string the mass per length is four times as much: twice the impedance and half the
+speed. A third of the pulse comes back upside down and two thirds go on, squeezed to half the length.
+On 100 elements the squeezed pulse is only five elements wide, and the mesh carries 0.49 of it where
+the string carries 0.67, shedding ripples behind.
 
 ## The math, briefly
 
@@ -1155,6 +1175,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
   its ends' frequency equation), meshes of N elements with lumped, consistent or mixed mass, their
   dispersion (in closed form, or a node's Bloch wave), each mode's error and its convergence with
   N, and the page's presets.
+- `core/continuum_waves.py`: a pulse on the continuum (a digital waveguide carrying d'Alembert's
+  waves, with the ends, a dashpot and a step scattering them in closed form, or a beam's exact
+  modes) and on the mesh (stepped by its exact matrix exponential), and the wave presets.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and

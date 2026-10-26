@@ -796,6 +796,20 @@ def continuum_beam():
     save(w, "continuum_beam")
 
 
+def continuum_waves():
+    w = window()
+    page = w.continuum_page
+    w.pages.setCurrentWidget(page)
+    page.preset.setCurrentText("Waves: a light string tied to a heavy one")
+    page._timer.stop()
+    page.running = False
+    page.step(120)  # half a crossing: the reflection and the transmitted pulse apart
+    settle()
+    print(page.wave_status.text())
+    print(page.wave_info.text())
+    save(w, "continuum_waves")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
@@ -803,7 +817,8 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          virtual_modal_test, modal_extraction, oma, oma_ssi, jeffcott_rotor, jeffcott_run_up,
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_newkirk, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked,
-         duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup, continuum_string, continuum_beam]
+         duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup, continuum_string, continuum_beam,
+         continuum_waves]
 
 
 def main(names: list[str]) -> None:
