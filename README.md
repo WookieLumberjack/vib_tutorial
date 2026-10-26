@@ -48,8 +48,8 @@ MacNeal), and **Virtual modal test** measures the FRF from simulated force and r
 as in a lab. The **Jeffcott rotor** page leaves the chain for a
 spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
 page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
-resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes
-(all below).
+resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes,
+and starts it with a motor (all below).
 
 ### Themes
 
@@ -857,16 +857,32 @@ the far shaft turns at z<sub>in</sub>/z<sub>out</sub> times the near one's speed
 - **Mode shapes**: each mode's swing referred to the motor's shaft and which link it twists, and
   the n² reflection checked: the train referred to one shaft (inertias and stiffnesses × s²) has
   the same frequencies, while making the gears rigid keeps the lower modes and loses the mesh's.
+- **The start-up** (centre, *Start-up* tab): a motor on the first disc runs the train up from rest
+  against a load on the last that rises as its speed squared. An induction motor follows its
+  speed–torque curve (Kloss's), with the line-frequency torque of switching it on direct on line;
+  a synchronous motor starts on its cage, its poles adding a torque at twice the slip frequency
+  that sweeps down from twice the line frequency through the modes below (drawn on the
+  interference diagram too), and its field pulls it into step. The plots show a link's torque and
+  the motor's speed as it plays, and each link's peak against what it carries running. Each step
+  is the exact FOH update with the motor's and the load's torques solved at its end by Newton.
 - **Presets**: a motor and fan on a coupling (two inertias, against the closed form), a geared
   compressor whose tooth-pass meets its mesh mode near the running speed, and a diesel generator
-  set's firing orders against its crankshaft and flexible coupling.
+  set's firing orders against its crankshaft and flexible coupling. The fan starts on an induction
+  motor and the compressor on a synchronous one.
 
-![Torsional vibration page, the Geared compressor preset: a 10 kg·m² motor drives a 4:1 speed-up gearbox and a compressor through two couplings. On the log-log interference diagram the modes at 38.9 and 83.1 Hz (the couplings) and 2688 Hz (the mesh) cross the orders; the tooth-pass (120× the motor's speed) meets the mesh mode at 1344 rpm, 9.8 % below the 1490 rpm running speed, inside the ±10 % band](docs/images/torsional_compressor.png)
+![Torsional vibration page, the Geared compressor preset: a 10 kg·m² motor drives a 4:1 speed-up gearbox and a compressor through two couplings. On the log-log interference diagram the modes at 38.9 and 83.1 Hz (the couplings) and 2688 Hz (the mesh) cross the orders; the tooth-pass (120× the motor's speed) meets the mesh mode at 1344 rpm, 9.8 % below the 1490 rpm running speed, inside the ±10 % band; the dashed red curve is the synchronous motor's start-up pulsation, at twice the slip frequency, falling through the two coupling modes](docs/images/torsional_compressor.png)
 
 The geared compressor's couplings make two modes, at 38.9 and 83.1 Hz, and the teeth a third, the
 two gears bouncing on the mesh at 2688 Hz. Made rigid, the n² reflection keeps the first two to
 within 0.1 % but loses that one, and it is the one the tooth-pass meets at 1344 rpm, inside the
 band round the 1490 rpm running speed.
+
+![Torsional vibration page, the Geared compressor's synchronous start-up: the low-speed coupling's torque against time rings as the motor's 2× slip pulsation passes mode 2 (83.1 Hz) at 254 rpm and mode 1 (38.9 Hz) at 916 rpm, peaking at 11.3 kN·m, 4.5× its running torque; below, the motor's speed runs up to 1500 rpm and the field pulls it into step](docs/images/torsional_startup.png)
+
+Started on a synchronous motor, the same compressor's poles pulse at 100 Hz at rest, falling as it
+runs up: they pass the 83.1 Hz mode at 254 rpm and the 38.9 Hz one at 916 rpm. The second rings the
+low-speed coupling up to 11.3 kN·m, 4.5× what it carries running, before the field pulls the motor
+into step at 1500 rpm.
 
 ## The math, briefly
 
@@ -1041,6 +1057,10 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/torsional.py`: torsional drive trains: discs, shafts and gear meshes (with transmission
   error), the modes and their twist, the train referred to one shaft and with rigid gears, the
   orders and torsional critical speeds, the steady forced response, and the page's presets.
+- `core/torsional_startup.py`: a motor starting the train: the induction motor's curve and
+  switch-on transient, the synchronous motor's 2× slip pulsation and field, a load rising as speed
+  squared, the exact FOH stepper with the two torques found by Newton each step, the steady running
+  torques, and the start-up presets.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and
