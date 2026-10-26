@@ -12,14 +12,18 @@ from vib_tutorial.core.random_vibration import G
 from vib_tutorial.core.shock import (
     CLASSICAL,
     Pulse,
+    Response,
+    Rule,
     Shape,
     bank,
+    chain_peaks,
     chain_response,
     classical,
     oscillator,
     record,
     sample_rate,
     srs,
+    target,
 )
 
 UNIFORM = ChainSystem.uniform(4)
@@ -124,6 +128,73 @@ def test_measured_records():
         record(Pulse(Shape.AT_A_MASS), 4000.0)
 
 
+def test_synthesis():
+    """Both kinds meet the target within 3 dB over the bank, at any scale; wavelets end at rest, damped sines don't;
+    the delays follow the seed."""
+    for shape in (Shape.SINES, Shape.WAVELETS):
+        for knee, seed in ((5.0, 1), (5.0, 2), (300.0, 1)):
+            pulse = Pulse(shape, 10.0, knee=knee, seed=seed)
+            rec, sp = _spectrum(pulse, 0.05)
+            goal = target(pulse, sp.f)
+            inside = np.isfinite(goal)
+            assert inside.sum() > 50 and not inside[0] and not inside[-1]
+            assert np.max(np.abs(20 * np.log10(sp.maximax[inside] / goal[inside]))) < 3.0
+            assert rec.synthesis.f.size == 28 and rec.synthesis.worst < 1.5
+            v = np.max(np.abs(rec.velocity()))
+            if shape is Shape.WAVELETS:
+                assert abs(rec.velocity_change) < 1e-6 * v
+                assert abs(rec.displacement()[-1]) < 1e-5 * np.max(np.abs(rec.displacement()))
+            else:
+                assert abs(rec.velocity_change) > 0.1 * v
+    one, two = (record(Pulse(Shape.WAVELETS, seed=s), 2000.0) for s in (1, 2))
+    assert not np.allclose(one.synthesis.delay, two.synthesis.delay)
+    # the record's length comes from the band, not the duration
+    assert record(Pulse(Shape.WAVELETS, duration=1.0), 2000.0).a.size == one.a.size
+
+
+def test_chain_peaks():
+    """The modes' terms add up to the exact response with proportional damping (accelerations and spring forces);
+    ABS bounds it; without proportional damping the sum is only near; a chain on a free end skips its rigid mode."""
+    r = modal_analysis(UNIFORM)
+    pulse = Pulse(Shape.HALF_SINE, 10.0, 0.1)
+    rec, _ = _spectrum(pulse, 0.05, r, UNIFORM)
+    cp = chain_peaks(UNIFORM, rec, r)
+    for response in Response:
+        exact = cp.exact[response]
+        for j in range(UNIFORM.n):
+            total = cp.contributions(response, j).sum(axis=0)
+            assert total == pytest.approx(exact[:, j], abs=1e-8 * np.abs(exact).max())
+        assert np.all(cp.estimate(response, Rule.ABS) >= cp.peak(response))
+        assert np.all(cp.estimate(response, Rule.SRSS) <= cp.estimate(response, Rule.NRL))
+        assert np.all(cp.estimate(response, Rule.NRL) <= cp.estimate(response, Rule.ABS))
+    assert cp.effective.sum() == pytest.approx(1.0)
+    # each mode's term peaks where the SRS says, at its own f and ζ
+    peaks = np.max(np.abs(cp.modal[Response.ACCELERATION]), axis=1)
+    assert peaks == pytest.approx(cp.spectrum[Response.ACCELERATION], rel=2e-3)
+
+    skew = ChainSystem(np.array([1.0, 2.0, 0.5]), np.array([400.0, 300.0, 200.0]), np.array([8.0, 0.0, 0.0]))
+    rs = modal_analysis(skew)
+    rec, _ = _spectrum(pulse, 0.05, rs, skew)
+    cp = chain_peaks(skew, rec, rs)
+    total = cp.contributions(Response.ACCELERATION, 2).sum(axis=0)
+    exact = cp.exact[Response.ACCELERATION][:, 2]
+    assert 1e-4 < np.max(np.abs(total - exact)) / np.max(np.abs(exact)) < 0.3
+
+    free = ChainSystem(np.array([1.0, 1.0]), np.array([0.0, 400.0]), np.array([0.0, 2.0]))
+    rf = modal_analysis(free)
+    rec, _ = _spectrum(pulse, 0.05, rf, free)
+    cp = chain_peaks(free, rec, rf)
+    assert cp.f.size == 1 and np.all(np.isfinite(cp.estimate(Response.SPRING, Rule.NRL)))
+
+
+def test_pseudo_velocity():
+    """The undamped pseudo-velocity tends to |Δv| at the left and to A / ω at the right."""
+    rec, sp = _spectrum(Pulse(Shape.HALF_SINE, 1.0, 0.1), 0.0)
+    pv = sp.pseudo_velocity
+    assert pv[0] == pytest.approx(rec.velocity_change, rel=2e-3)
+    assert pv[-1] == pytest.approx(G / (2 * math.pi * sp.f[-1]), rel=0.03)
+
+
 def test_the_trials_notes():
     from vib_tutorial.gui.shock import TRIALS, duration_for
 
@@ -168,3 +239,49 @@ def test_the_trials_notes():
     assert shift.maximax[0] / top / low == pytest.approx(10, rel=0.15)
     dv = abs(rec.velocity_change)
     assert shift.maximax[0] == pytest.approx(2 * math.pi * shift.f[0] * dv, rel=0.1)  # on the line
+
+    rec, sp, top = run("Modes combined")
+    cp = chain_peaks(UNIFORM, rec, r)
+    a = Response.ACCELERATION
+    exact = cp.peak(a)[3] / G
+    estimates = {rule: cp.estimate(a, rule)[3] / G for rule in Rule}
+    text = note["Modes combined"]
+    assert f"exactly {exact:.3g} g" in text
+    for rule, value in estimates.items():
+        quoted = f"{rule.value} (their sum) " if rule is Rule.ABS else f"{rule.value} "
+        assert quoted + f"{value:.3g} g, {100 * (value / exact - 1):+.0f} %".replace("-", "−") in text
+    when = cp.t[np.argmax(np.abs(cp.modal[a]), axis=1)]
+    assert when.max() < 0.3 and 0.3 == pytest.approx(1 / (3 * r.modes[0].fn_hz), rel=0.02)
+    assert "within the first 0.3 s, a third of mode 1's period" in text
+
+    rec, sp, top = run("Four-way paper")
+    assert rec.velocity_change == pytest.approx(2 * top * T / math.pi, rel=1e-4)
+    assert "6.24 m/s" in note["Four-way paper"]
+    assert sp.displacement[0] == pytest.approx(4.6, abs=0.05) and "4.6 m" in note["Four-way paper"]
+
+    from vib_tutorial.gui.shock import shape_spectra
+
+    same_peak, same_dv = shape_spectra(0.05, False), shape_spectra(0.05, True)
+    square = same_peak[Shape.SQUARE][2]
+    assert square[0] == pytest.approx(0.12, abs=0.005) and square.max() == pytest.approx(1.86, abs=0.005)
+    assert all(square[0] >= v[0] and square.max() >= v.max() for _, _, v in same_peak.values())
+    assert same_peak[Shape.TERMINAL_PEAK][2].max() == pytest.approx(1.19, abs=0.005)
+    lows = [v[0] for _, _, v in same_dv.values()]
+    assert max(lows) == pytest.approx(min(lows), rel=2e-3)
+    assert same_dv[Shape.INITIAL_PEAK][2].max() == pytest.approx(2.33, abs=0.005)
+    assert same_dv[Shape.SQUARE][2].max() == pytest.approx(1.18, abs=0.005)
+    assert max(same_dv.values(), key=lambda s: s[2][-1]) is same_dv[Shape.INITIAL_PEAK]
+    for text in ("0.12 ×", "1.86 ×", "1.19 ×", "2.33 ×", "1.18 ×"):
+        assert text in note["Pulse shapes compared"]
+
+    from vib_tutorial.gui.shock import knee_for
+
+    assert knee_for(r) == 5.0 and "5 Hz knee" in note["Damped sines to a spectrum"]
+    rec, sp, top = run("Damped sines to a spectrum")
+    assert rec.synthesis.f.size == 28 and "28 damped sines" in note["Damped sines to a spectrum"]
+    assert rec.velocity_change == pytest.approx(0.51, abs=0.005) and rec.displacement()[-1] == pytest.approx(6, abs=0.1)
+    assert top / G == pytest.approx(4.8, abs=0.05) and "only 4.8 g" in note["Damped sines to a spectrum"]
+    rec, sp, top = run("Wavelets to a spectrum")
+    assert rec.synthesis.f.size == 28 and abs(rec.displacement()[-1]) < 1e-6  # within a micrometre
+    assert np.max(np.abs(rec.displacement())) == pytest.approx(0.54, abs=0.005) and "0.54 m" in note[
+        "Wavelets to a spectrum"]

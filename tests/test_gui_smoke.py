@@ -3575,7 +3575,7 @@ def test_model_updating_page(app):
 def test_shock_page(app):
     """The shock spectrum page follows the chain, sets its pulse from it, records again only when the pulse changes,
     picks an oscillator from the spectrum, runs each trial, and follows the chain's size."""
-    from vib_tutorial.core.shock import Shape
+    from vib_tutorial.core.shock import Response, Shape
     from vib_tutorial.gui.main_window import MainWindow
     from vib_tutorial.gui.shock import TRIALS
 
@@ -3621,6 +3621,45 @@ def test_shock_page(app):
     rec = p.record
     p.again.click()
     assert p.seed == 2 and p.record is not rec
+
+    # the chain's peaks: worked out only when the tab shows, kept while only the output or response changes
+    p.trial.setCurrentText("Half-sine")
+    p.tabs.setCurrentWidget(p.osc_tab)
+    p.recompute()
+    assert p.chain is None and p.chain_tab in p._stale
+    p.tabs.setCurrentWidget(p.chain_tab)
+    cp = p.chain
+    assert cp is not None and p.chain_table.rowCount() == 4 and p.output.currentText() == "m4"
+    assert p.chain_table.item(3, 0).text() == "9.14" and "(+1 %)" in p.chain_table.item(3, 3).text()
+    assert len(p.peaks_legend.items) == 4 and len(p.history_legend.items) == 5
+    p.response.setCurrentIndex(p.response.findData(Response.SPRING))
+    assert p.chain is cp and p.output.currentText() == "k4" and p.chain_table.verticalHeaderItem(0).text() == "k1"
+    p.output.setCurrentIndex(0)
+    assert "k1 (N)" in p.history_plot.getPlotItem().getAxis("left").labelText
+    p.q.setValue(20.0)
+    p.recompute()
+    assert p.chain is cp  # the Q is the page's spectrum's; the chain takes each mode's own
+    p.tabs.setCurrentWidget(p.tri_tab)
+    assert "6.24 m/s" in p.tri_note.text()
+    p.tabs.setCurrentWidget(p.shapes_tab)
+    assert "Q = 20" in p.shapes_note.text() and len(p.compare_legend.items) == 6
+    p.same_dv.setChecked(True)
+    assert "the same Δv" in p.shapes_note.text()
+
+    # a synthesis: the knee instead of the duration, the target drawn, other delays
+    p.trial.setCurrentText("Wavelets to a spectrum")
+    p.recompute()
+    assert p.knee.isVisibleTo(p) and not p.duration.isVisibleTo(p) and p.peak_label.text() == "Plateau:"
+    assert p.again.text() == "New delays" and p.again.isEnabled() and not p.noise.isVisibleTo(p)
+    assert p.knee.value() == pytest.approx(5.0) and p.f_pick.value() == pytest.approx(5.0)
+    assert "28 wavelets" in p.readout.text() and "f / knee" in p.readout.text()
+    assert any("Target" in label.text for _, label in p.srs_legend.items)
+    rec = p.record
+    p.again.click()
+    assert p.record is not rec and not np.allclose(p.record.synthesis.delay, rec.synthesis.delay)
+    p.trial.setCurrentText("Modes combined")
+    p.recompute()
+    assert p.tabs.currentWidget() is p.chain_tab and p.chain is not None
 
     p.dof.setValue(6)
     app.processEvents()

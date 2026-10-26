@@ -681,6 +681,10 @@ modes are marked on the spectrum.
   trapezoid, square), and two measured records with noise and an offset if you like. One is the
   acceleration of a mass on the chain with its base given a half-sine, the shock a component mounted
   there sees. The other is a pyrotechnic-like transient, a burst of damped sines that ends at rest.
+  And two records synthesized to a target spectrum (a plateau above a knee, rising 6 dB an octave below
+  it, at Q = 10), the way a shaker test is set up: damped sines, which leave the table moving, or
+  Smallwood's wavelets, which start and end at rest. Their amplitudes are scaled round by round until
+  the spectrum meets the target.
 - **The spectrum**: the maximax, and on request the primary (while the pulse lasts) and residual (after
   it) spectra, and the positive and negative ones. Dashed lines mark its two asymptotes: the pulse's
   peak, which stiff oscillators follow, and 2π f Δv, the ringing of soft oscillators that take the pulse
@@ -688,12 +692,24 @@ modes are marked on the spectrum.
 - **The oscillator** (*Oscillator* tab): pick a frequency on the spectrum (drag the line, or click), and
   see that oscillator's acceleration against the pulse, its largest value marked, and its spring's
   stretch.
+- **The chain's peak** (*Chain* tab): each of the chain's modes is an oscillator at its own frequency
+  and damping, driven by its participation factor Γ times the base, so the SRS gives each mode's peak.
+  Those peaks are combined by ABS, SRSS and NRL and set against the chain's exact response, for each
+  mass's acceleration or each spring's force, with the picked output's history split mode by mode.
+- **Four-way paper** (*Tripartite* tab): the pseudo-velocity, with diagonal lines of constant
+  displacement and acceleration, and the pulse's Δv and peak acceleration dashed.
+- **Pulse shapes** (*Pulse shapes* tab): the six classical pulses' spectra side by side, at the same peak
+  or the same velocity change.
 - **Things to try**:
   - a half-sine, a square, a terminal-peak sawtooth and a haversine;
   - light damping (Q = 50: the spectrum hardly changes);
   - a component on the chain's last mass;
   - a pyrotechnic transient;
-  - the same transient with an accelerometer's zero shift.
+  - the same transient with an accelerometer's zero shift;
+  - the chain's modes combined;
+  - four-way paper;
+  - the pulse shapes compared;
+  - damped sines, then wavelets, synthesized to a spectrum.
 
 ![Shock spectrum page: a 10 g, 100 ms half-sine on the base. Its velocity rises to 6.24 m/s; the Q = 10 spectrum peaks at 16.5 g at 8.3 Hz (f T = 0.83), its primary part rising to it from the left and its residual part falling away to the right, between the dashed 2π f Δv line and the pulse's 10 g; the chain's modes are dotted at 1.1 to 6.0 Hz. The 8.3 Hz oscillator's acceleration peaks at 16.5 g near the end of the pulse, then rings at 11 to 13 g](docs/images/shock_spectrum.png)
 
@@ -701,6 +717,14 @@ A 10 g half-sine lasting 100 ms, 0.6 of the default chain's fastest period, puts
 rising side of the spectrum: a component tuned to mode 1 would see 4.1 g, one tuned to mode 4 15.7 g.
 The spectrum peaks at 1.65 × the pulse, for an oscillator whose period is a little longer than the
 pulse.
+
+![Shock spectrum page, Chain tab: the 10 g, 100 ms half-sine on the default chain. On m4 the exact peak is 9.14 g; from the SRS at each mode, ABS gives 11 g (+20 %), SRSS 6.62 g (−28 %) and NRL 9.27 g (+1 %). Below, m4's exact response and each mode's part of it, the dashes each part's peak from the SRS; every part peaks within the first 0.3 s](docs/images/shock_chain.png)
+
+The SRS gives each mode's peak but not when it comes. A shock sets every mode off at once, so their
+peaks come early and nearly together: the SRSS, which assumes they come at unrelated times, falls 28 %
+short at m4, while NRL lands within 1 %.
+
+![Shock spectrum page: 28 wavelets synthesized to a target of 10 g above a 5 Hz knee, rising 6 dB an octave below it. The Q = 10 spectrum stays within 1.9 dB of the target across the band, though the record itself peaks at only 5.19 g, and it ends at rest. On the Tripartite tab the target's rising slope is a constant pseudo-velocity and its plateau a constant acceleration](docs/images/shock_synthesis.png)
 
 ### Jeffcott rotor
 
@@ -1290,9 +1314,10 @@ $F_f$ times the distance slid, so the energy balance still closes.
   the test (the virtual modal test's or the exact modes with noise) at chosen sensors, the MAC and
   its pairs, frequency errors, the auto-MAC and COMAC; frequency sensitivities in closed form, and
   Gauss–Newton updating of masses, springs and dampers with regularization.
-- `core/shock.py`: shock response spectra: the classical pulses and measured records, the oscillators
-  stepped by the exact first-order-hold update (primary, residual, positive and negative peaks), and
-  the chain on a shaken base.
+- `core/shock.py`: shock response spectra: the classical pulses, measured records and syntheses to a
+  target (damped sines or wavelets), the oscillators stepped by the exact first-order-hold update
+  (primary, residual, positive and negative peaks), and the chain on a shaken base, its peaks from the
+  SRS mode by mode (ABS, SRSS, NRL) against the exact response.
 - `core/identification.py`: modal parameter extraction from a measured FRF column: peak
   picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
   modes (MAC).
