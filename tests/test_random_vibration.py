@@ -136,3 +136,59 @@ def test_suggested_record():
     assert samples == 16 * block
     with pytest.raises(ValueError):
         simulate(CHAIN, inp, 1e6)
+
+
+def test_rice_peak_distribution():
+    from vib_tutorial.core.random_vibration import peak_pdf
+
+    eta = np.linspace(-8, 8, 8001)
+    for alpha in (0.0, 0.3, 0.7, 0.99, 1.0):
+        assert np.trapezoid(peak_pdf(eta, alpha), eta) == pytest.approx(1.0, abs=1e-4)
+    assert peak_pdf(eta, 1.0) == pytest.approx(np.where(eta > 0, eta * np.exp(-eta**2 / 2), 0.0))  # Rayleigh
+    assert peak_pdf(eta, 0.0) == pytest.approx(np.exp(-eta**2 / 2) / math.sqrt(2 * math.pi))  # Gaussian
+
+
+def test_davenport_and_vanmarcke():
+    from vib_tutorial.core.random_vibration import davenport, vanmarcke
+
+    # Davenport's formula is the Poisson crossings' expected largest value, to its asymptotic accuracy
+    r = np.linspace(0, 12, 20001)
+    for cycles in (1e2, 1e4, 1e6):
+        poisson = np.trapezoid(1 - np.exp(-cycles * np.exp(-r**2 / 2)), r)
+        assert davenport(cycles) == pytest.approx(poisson, rel=0.03)
+        # clumped crossings (a narrow band) give a lower largest peak; a broad band, nearly Poisson's
+        assert vanmarcke(cycles, 0.1) < vanmarcke(cycles, 0.9) < poisson + 0.05
+    assert davenport(1e6) == pytest.approx(5.37, abs=0.01) and davenport(1.0) == 0.0
+
+
+@pytest.mark.parametrize(("inp", "out"), [(RandomInput(Input.BASE, 0.01, 0.0, 10.0), Output(Quantity.SPRING, 0)),
+                                          (RandomInput(Input.FORCE_ONE, 1.0, 0.0, 10.0, mass=3),
+                                           Output(Quantity.ACCELERATION, 3))])
+def test_the_records_statistics_match_rice(inp, out):
+    from vib_tutorial.core.random_vibration import (
+        LEVELS,
+        gaussian_exceedance,
+        peak_pdf,
+        record_statistics,
+        rice,
+        segment_maxima,
+    )
+
+    rec = simulate(CHAIN, inp, suggested_duration(inp, RESULT), seed=3, result=RESULT)
+    p = predict(CHAIN, inp, out, RESULT)
+    r = rice(p)
+    y = rec.output(out)
+    st = record_statistics(y, rec.fs)
+    scatter = rms_scatter(p, rec.duration)
+    assert st.sigma == pytest.approx(r.sigma, rel=4 * scatter)
+    assert st.skewness == pytest.approx(0.0, abs=0.05) and st.kurtosis == pytest.approx(3.0, abs=0.15)
+    for k, measured in zip(LEVELS, st.exceedance):
+        assert measured == pytest.approx(gaussian_exceedance(k), rel=0.35 if k == 3 else 0.1)
+    assert st.nu0 == pytest.approx(r.nu0, rel=0.04) and st.nu_peak == pytest.approx(r.nu_peak, rel=0.04)
+    h, edges = np.histogram(st.peaks * st.sigma / r.sigma, bins=32, range=(-4, 4), density=True)
+    centres = 0.5 * (edges[1:] + edges[:-1])
+    assert np.max(np.abs(h - peak_pdf(centres, r.alpha))) < 0.07
+    # the largest value in each 60 s: Vanmarcke within a few per cent, Davenport above it
+    largest = np.mean(segment_maxima(y, rec.fs, 60.0)) / r.sigma
+    assert r.clumped_peak_factor(60.0) == pytest.approx(largest, rel=0.04)
+    assert r.peak_factor(60.0) > r.clumped_peak_factor(60.0)

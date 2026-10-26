@@ -38,6 +38,28 @@ right when they are well apart). It misses what isn't resonant: a mass line unde
 (acceleration = force / mass far above the modes), modes outside the band, and the cross
 terms of close modes.
 
+Statistics
+----------
+A Gaussian response is described by its RMS σ and, for how often it does things, by its
+PSD's spectral moments m_k = ∫ f^k G df (m₀ = σ²). Rice's formulas give the rate at which it
+crosses zero upwards, ν₀ = √(m₂/m₀), and the rate of its peaks (maxima), ν_p = √(m₄/m₂); a
+level a is crossed upwards ν₀ e^{−a²/2σ²} times a second. Their ratio α = ν₀/ν_p is the
+irregularity factor: 1 for a narrow-band response (one peak per cycle, the peaks' heights
+Rayleigh distributed), towards 0 for a broad one (many small wiggles, the peaks' heights
+nearly Gaussian, many below zero). Rice's peak distribution covers everything between
+(`peak_pdf`). The largest peak in a time T is, on average (Davenport), σ times
+√(2 ln ν₀T) + 0.5772/√(2 ln ν₀T): about 3σ for a few hundred cycles, 4–5σ for a long
+service life, which is why "3σ" design is not a maximum. Davenport counts each upward
+crossing as independent; a narrow-band response's come in clumps, on the swells of its slowly
+varying envelope, so it overestimates the largest peak in a short time. Vanmarcke's
+correction (`vanmarcke`) counts the clumps instead, through the bandwidth δ = √(1 − m₁²/m₀m₂).
+
+The record's statistics count the same things (`record_statistics`): the fraction of the
+time beyond ±kσ, the crossings and the peaks, and its skewness and kurtosis (0 and 3 for a
+Gaussian). The record holds 2.5 samples per period of the band's top, enough to describe it
+(it has nothing above the band) but not to see its peaks, so it is interpolated eightfold
+first (a polyphase low-pass, which restores a band-limited signal between its samples).
+
 The time simulation
 -------------------
 The record's input is synthesized from its PSD (random phases and Gaussian amplitudes
@@ -408,3 +430,148 @@ def rms_scatter(prediction: Prediction, duration: float) -> float:
         return 0.0
     bandwidth = area * area / np.trapezoid(g * g, f)
     return 1.0 / (2.0 * math.sqrt(bandwidth * duration))
+
+
+
+# ------------------------------------------------------------- statistics
+UPSAMPLE = 8  # the record's samples interpolated this many times over before peaks and crossings are counted
+EULER = 0.5772156649015329
+LEVELS = (1.0, 2.0, 3.0)  # σ levels whose exceedances are compared
+
+
+@dataclass(frozen=True)
+class Rice:
+    """A Gaussian response's rates from its PSD's moments: RMS, upward zero crossings and peaks a second (Hz), and
+    Vanmarcke's bandwidth δ."""
+
+    sigma: float
+    nu0: float
+    nu_peak: float
+    delta: float = 1.0
+
+    @property
+    def alpha(self) -> float:
+        """The irregularity factor ν₀/ν_p: 1 narrow-band, towards 0 broad."""
+        return self.nu0 / self.nu_peak if self.nu_peak > 0 else 1.0
+
+    def crossings(self, level: float) -> float:
+        """Upward crossings of `level` a second."""
+        return self.nu0 * math.exp(-0.5 * (level / self.sigma)**2)
+
+    def peak_factor(self, duration: float) -> float:
+        """Davenport's expected largest peak over `duration`, over σ."""
+        return davenport(self.nu0 * duration)
+
+    def clumped_peak_factor(self, duration: float) -> float:
+        """Vanmarcke's expected largest peak over `duration`, over σ."""
+        return vanmarcke(self.nu0 * duration, self.delta)
+
+
+def spectral_moments(f: np.ndarray, psd: np.ndarray) -> tuple[float, float, float, float]:
+    """m₀, m₁, m₂, m₄ = ∫ f^k G df (f in Hz)."""
+    return tuple(float(np.trapezoid(f**k * psd, f)) for k in (0, 1, 2, 4))
+
+
+def rice(prediction: Prediction) -> Rice:
+    m0, m1, m2, m4 = spectral_moments(prediction.f, prediction.psd)
+    if m0 <= 0 or m2 <= 0:
+        return Rice(0.0, 0.0, 0.0)
+    return Rice(math.sqrt(m0), math.sqrt(m2 / m0), math.sqrt(m4 / m2),
+                math.sqrt(max(1.0 - m1 * m1 / (m0 * m2), 0.0)))
+
+
+def davenport(cycles: float) -> float:
+    """The expected largest of a Gaussian process's peaks over ν₀T zero crossings, over σ."""
+    if cycles <= 1.0:
+        return 0.0
+    r = math.sqrt(2.0 * math.log(cycles))
+    return r + EULER / r
+
+
+def vanmarcke(cycles: float, delta: float) -> float:
+    """The expected largest value over ν₀T zero crossings, over σ, the crossings clumped (Vanmarcke): the chance
+    of staying below r is (1 − e^{−r²/2}) exp(−ν₀T (1 − e^{−√(π/2) δ^1.2 r}) / (e^{r²/2} − 1)), integrated."""
+    if cycles <= 1.0:
+        return 0.0
+    r = np.linspace(1e-6, 12.0, 6001)
+    x = np.exp(-0.5 * r * r)
+    clumps = 1.0 - np.exp(-math.sqrt(0.5 * math.pi) * max(delta, 1e-6)**1.2 * r)
+    below = (1.0 - x) * np.exp(-cycles * clumps * x / (1.0 - x))
+    return float(np.trapezoid(1.0 - below, r))
+
+
+def gaussian_exceedance(k: float) -> float:
+    """The fraction of the time a Gaussian signal is beyond ±kσ."""
+    return math.erfc(k / math.sqrt(2.0))
+
+
+def peak_pdf(eta: np.ndarray, alpha: float) -> np.ndarray:
+    """Rice's distribution of a Gaussian process's peaks (maxima), η = height / σ: Rayleigh for α = 1, Gaussian as
+    α → 0."""
+    eta = np.asarray(eta, dtype=float)
+    alpha = min(max(alpha, 0.0), 1.0)
+    eps = math.sqrt(max(1.0 - alpha * alpha, 0.0))
+    rayleigh = alpha * eta * np.exp(-0.5 * eta * eta)
+    if eps < 1e-9:
+        return np.where(eta > 0, rayleigh, 0.0)
+    phi = 0.5 * (1.0 + _erf(alpha * eta / (eps * math.sqrt(2.0))))
+    return eps / math.sqrt(2.0 * math.pi) * np.exp(-0.5 * (eta / eps)**2) + rayleigh * phi
+
+
+def _erf(x: np.ndarray) -> np.ndarray:
+    import scipy.special
+
+    return scipy.special.erf(x)
+
+
+@dataclass(frozen=True)
+class RecordStatistics:
+    """What a record does, counted: its σ, skewness, kurtosis, the fraction of the time beyond ±kσ (LEVELS), upward
+    zero crossings and peaks a second, and the peaks' heights over σ."""
+
+    sigma: float
+    skewness: float
+    kurtosis: float
+    exceedance: tuple[float, ...]
+    nu0: float
+    nu_peak: float
+    peaks: np.ndarray
+
+    def crossings(self, y: np.ndarray, fs: float, level: float) -> float:
+        return _upcrossings(y - np.mean(y), level) * fs / y.size
+
+
+def _upcrossings(y: np.ndarray, level: float) -> int:
+    return int(np.count_nonzero((y[:-1] < level) & (y[1:] >= level)))
+
+
+def upsampled(y: np.ndarray) -> np.ndarray:
+    """The record interpolated UPSAMPLE times over (it has nothing above its Nyquist frequency)."""
+    import scipy.signal
+
+    return scipy.signal.resample_poly(y, UPSAMPLE, 1)
+
+
+def record_statistics(y: np.ndarray, fs: float) -> RecordStatistics:
+    fine = upsampled(y - np.mean(y))
+    duration = y.size / fs
+    sigma = float(np.std(fine))
+    z = fine / sigma if sigma > 0 else fine
+    skew = float(np.mean(z**3))
+    kurt = float(np.mean(z**4))
+    exceed = tuple(float(np.mean(np.abs(z) > k)) for k in LEVELS)
+    up = _upcrossings(fine, 0.0) / duration
+    mid = fine[1:-1]
+    maxima = (mid > fine[:-2]) & (mid >= fine[2:])
+    peaks = mid[maxima] / sigma if sigma > 0 else mid[maxima]
+    return RecordStatistics(sigma, skew, kurt, exceed, up, peaks.size / duration, peaks)
+
+
+def segment_maxima(y: np.ndarray, fs: float, duration: float) -> np.ndarray:
+    """The largest value in each whole stretch `duration` long, the record interpolated first."""
+    fine = upsampled(y - np.mean(y))
+    per = int(round(duration * fs * UPSAMPLE))
+    count = fine.size // per if per > 0 else 0
+    if count == 0:
+        return np.zeros(0)
+    return fine[:count * per].reshape(count, per).max(axis=1)

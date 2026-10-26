@@ -554,6 +554,12 @@ friction.
 - **The record**: the input synthesized to the PSD asked for, the chain stepped by the exact FOH
   update, sized from the narrowest peak (four Welch lines across its half-power width, sixteen blocks),
   with the block length and a new record at a click.
+- **Statistics** (*Statistics* tab): the record's values against the Gaussian (the fraction beyond
+  ±1, 2 and 3σ, skewness and kurtosis), and its peaks against Rice's distribution for the response's
+  irregularity α = ν₀/ν<sub>p</sub>. Rice's rates from the PSD's spectral moments, ν₀ = √(m₂/m₀) upward
+  zero crossings and ν<sub>p</sub> = √(m₄/m₂) peaks a second, sit beside the counts. Then the
+  expected largest peak over a stretch, Davenport's (independent crossings) and Vanmarcke's (crossings
+  clumped on a narrow band's envelope), against the record's stretches' largest values.
 - **Things to try**: a base shake, a force on the last mass, forces on every mass, the base spring's
   force, a short record, coarse lines (the peak comes out low but the RMS keeps its area), and a
   narrow band on mode 2.
@@ -563,6 +569,13 @@ friction.
 Shaken at 0.01 g²/Hz, 0.32 g RMS, the default chain's last mass sees 0.91 g RMS, 92 % of its mean
 square from mode 1 (Q = 29). Miles' equation, mode by mode, is 0.2 % off; the simulated record's RMS
 is within its ±2.6 % scatter.
+
+![Random vibration page, the Statistics tab for the base spring's force: the record's values follow the Gaussian (31.7 % beyond ±1σ, 32.2 % measured; kurtosis 2.91), its peaks Rice's distribution for α = 0.66; Rice's 1.14 upward zero crossings and 1.74 peaks a second against the record's 1.14 and 1.73; over 60 s Davenport expects a largest peak of 3.11σ and Vanmarcke 2.84σ, and the record's 43 stretches of 60 s average 2.79σ](docs/images/random_statistics.png)
+
+The force in the spring that carries the chain off the base crosses zero 1.14 times a second, as Rice
+says from its spectrum. Over a minute Davenport expects its largest peak at 3.11σ; but most of it is
+mode 1, a narrow band whose peaks come in clumps, and Vanmarcke's 2.84σ is closer to the record's
+2.79σ.
 
 ### Jeffcott rotor
 
