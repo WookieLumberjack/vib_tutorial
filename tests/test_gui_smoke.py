@@ -2678,7 +2678,7 @@ def test_frame_timers_keep_the_frame_rate(app, monkeypatch):
     frame's computing comes out of the wait, not on top of it (16 ms + its work held the rotor at 47 fps)."""
     import time
 
-    from vib_tutorial.gui import cms_time, duffing, rotor, torsional
+    from vib_tutorial.gui import cms_time, continuum, duffing, rotor, torsional
     from vib_tutorial.gui.main_window import MainWindow
 
     w = MainWindow()
@@ -2687,11 +2687,14 @@ def test_frame_timers_keep_the_frame_rate(app, monkeypatch):
     w.cms_page.tabs.setCurrentWidget(w.cms_page.time)
     app.processEvents()
     for p, frame_ms in ((w.cms_page.time, cms_time.FRAME_MS), (w.rotor_page, rotor.FRAME_MS),
-                        (w.duffing_page, duffing.FRAME_MS), (w.torsional_page, torsional.FRAME_MS)):
+                        (w.duffing_page, duffing.FRAME_MS), (w.torsional_page, torsional.FRAME_MS),
+                        (w.continuum_page, continuum.FRAME_MS)):
         w.pages.setCurrentWidget(w.cms_page if p is w.cms_page.time else p)
         app.processEvents()
         if p is w.torsional_page:
             p.start()  # it plays only once started
+        if p is w.continuum_page:
+            p.views.setCurrentWidget(p.waves_tab)  # it plays only on its Waves tab
         monkeypatch.setattr(p, "step", lambda *_, **__: time.sleep(0.008))
         p._frame()
         assert p._timer.isActive()
@@ -3259,5 +3262,58 @@ def test_continuum_page(app):
 
     w.set_theme("Dark")
     p.tabs.setCurrentWidget(p.table)
+    w.set_theme("Light")
+    w.close()
+
+
+def test_continuum_waves_tab(app):
+    """The Waves tab: a wave preset opens it and plays; the pulse runs, pauses and restarts; the dashpot and the
+    step reach the run; a beam turns them off; leaving the tab stops the frames."""
+    from vib_tutorial.core.continuum import Kind, Scheme
+    from vib_tutorial.core.continuum_waves import FRAMES_PER_TRANSIT
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.continuum_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    assert p.run is None  # not built until the tab shows
+    p.preset.setCurrentText("Waves: a pulse on 40 beads")
+    assert p.views.currentWidget() is p.waves_tab and p.run is not None and p._timer.isActive()
+    assert p.run.elements == 40 and p.run.waves.moving and p.play_button.text() == "Pause"
+    p._timer.stop()
+    p.step(FRAMES_PER_TRANSIT)
+    assert "t = 1.00 crossings (10 ms" in p.wave_status.text() and "keeps <b>100 %</b>" in p.wave_status.text()
+    assert p.mesh_nodes.getData()[0].size == 41
+    p.play_button.click()
+    assert not p.running and not p._timer.isActive() and p.play_button.text() == "Run"
+    p.restart_button.click()
+    assert p.run.t == 0.0 and not p._timer.isActive()
+
+    p.preset.setCurrentText("Waves: a matched end")
+    assert p.run.waves.dashpot == 1.0 and p.end_line.isVisible() and "reflects +0 of a wave" in p.wave_info.text()
+    p._timer.stop()
+    p.step(2 * FRAMES_PER_TRANSIT)
+    assert "keeps <b>17.3 %</b>" in p.wave_status.text()
+    p.wave_scheme.setCurrentText("Consistent")
+    assert p.run.waves.scheme is Scheme.CONSISTENT and p.run.t == 0.0 and p.preset.currentText() == "Waves: a matched end"
+    p.playback.setCurrentIndex(0)
+    assert p.run.playback == 0.25
+
+    p.preset.setCurrentText("Waves: a light string tied to a heavy one")
+    assert p.step_region.isVisible() and p.run.step_x == pytest.approx(0.5)
+    assert "reflects -0.333 and passes 0.667" in p.wave_info.text()
+    p.step_on.setChecked(False)
+    assert p.run.step_x is None and not p.step_region.isVisible() and not p.step_at.isEnabled()
+
+    p.kind.setCurrentText("Beam")
+    assert p.continuum.kind is Kind.BEAM and not p.moving.isEnabled() and not p.dashpot_on.isEnabled()
+    assert p.run.waves.dashpot is None and not p.run.moving
+
+    p.views.setCurrentWidget(p.errors_tab)
+    assert not p._timer.isActive()
+    p.views.setCurrentWidget(p.waves_tab)
+    w.set_theme("Dark")
     w.set_theme("Light")
     w.close()

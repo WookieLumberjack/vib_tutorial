@@ -1,11 +1,13 @@
 """Continuous systems page: a string, a bar or a beam against the meshes of masses and springs that approximate it.
 
-Left: the preset, the medium (its kind, size, material and ends) and the mesh (how many
-elements, which ways of sharing out the mass to show, the mode to look at). Centre, two
-tabs: the dispersion curves, the continuum's and each mesh's, with the modes on them; and
+Left: the preset, the medium (its kind, size, material and ends), the mesh (how many
+elements, which ways of sharing out the mass to show, the mode to look at) and the waves
+(the pulse, the mesh's mass, a dashpot on the far end, a step in the section). Centre,
+three tabs: the dispersion curves, the continuum's and each mesh's, with the modes on them;
 the frequency errors, against the mode number and, for the chosen mode, against the number
-of elements. Right: the chosen mode's shape, the frequencies in a table, and the notes. The
-page has its own model (core/continuum.py), not the chain.
+of elements; and a pulse running along the continuum and the mesh. Right: the chosen mode's
+shape, the frequencies in a table, and the notes. The page has its own model
+(core/continuum.py and core/continuum_waves.py), not the chain.
 """
 
 from __future__ import annotations
@@ -34,6 +36,16 @@ from ..core.continuum import (
     order,
     string_dispersion,
 )
+from ..core.continuum_waves import (
+    PLAYBACK,
+    WAVE_PRESETS,
+    WavePreset,
+    WaveRun,
+    Waves,
+    end_reflection,
+    step_coefficients,
+)
+from . import frame_stats, settle_plots
 from .axes import log_axes
 from .layouts import ColumnScroll, FlowLayout, group, plot_height
 from .panels import spin
@@ -41,6 +53,9 @@ from .style import colors
 from .theming import add_legend, mute
 
 CUSTOM = "Custom"
+ALL_PRESETS = (*PRESETS, *WAVE_PRESETS)
+FRAME_MS = 16
+NODES_DRAWN = 80  # the mesh's nodes are dotted up to this many elements
 KAPPA_POINTS = 241  # samples of each mesh's dispersion curve
 SHAPE_POINTS = 801
 PAST_CUTOFF = 1.25  # the dispersion plot runs this far past the mesh's cut-off, π/h
@@ -64,6 +79,19 @@ TIPS = {
     "schemes": "<p>How each element's mass is shared out. <b>Lumped</b>: half to each end node (a beam's "
                "slopes get none). <b>Consistent</b>: from the same shape functions as the stiffness: an "
                "upper bound on every frequency. <b>Mixed</b>: their average.</p>",
+    "pulse": "<p>The pulse: a raised cosine, its full width and its centre as fractions of the length. The fewer "
+             "elements across it, the more of it is short waves the mesh gets wrong.</p>",
+    "moving": "<p>Start the pulse travelling right (d'Alembert's right-going wave alone), or at rest, when it "
+              "splits into two halves going opposite ways. A beam's starts at rest.</p>",
+    "wave_scheme": "<p>How the mesh the pulse runs on shares out its mass.</p>",
+    "dashpot": "<p>Put a dashpot on the far end in place of the medium's own end, as a multiple of the "
+               "impedance Z = √(Tμ) (string) or ρcA (bar). At 1 it is matched: a wave runs into it and is "
+               "gone, as if the medium went on for ever. Reflected: (1 − r)/(1 + r) of the wave.</p>",
+    "step": "<p>A step in the medium at this point: past it the impedance is Z₂/Z₁ times as much (a string "
+            "that much heavier squared, so its waves go Z₁/Z₂ as fast; a bar of that much more section, at the "
+            "same speed). A wave reflects (Z₁ − Z₂)/(Z₁ + Z₂) of itself and passes 2Z₁/(Z₁ + Z₂). On the "
+            "mesh, at the nearest node.</p>",
+    "playback": "<p>How fast the pulse plays: at 1× it crosses the length in about four seconds.</p>",
     "mode": "<p>The flexible mode to look at (the rigid ones, at 0 Hz, are left out): its shape, where it sits on "
             "the dispersion curves, and how its error falls with the number of elements. Or click a mode on "
             "the error plot.</p>",
@@ -83,6 +111,10 @@ CONVERGENCE_TIP = (
     "<p>The chosen mode's error against the number of elements, both logarithmic: a straight line of slope "
     "−p is an error going as N<sup>−p</sup>. The dotted line marks the mesh shown. Points stop where the "
     "error reaches the eigensolver's round-off.</p>")
+WAVES_TIP = (
+    "<p>The pulse on the continuum (black) and on the mesh: its nodes, and the elements' own shape functions "
+    "between them. The continuum's is exact: d'Alembert's two waves, carried along and scattered at the ends "
+    "and the step in closed form (a string or bar), or the sum of its exact modes (a beam).</p>")
 SHAPE_TIP = (
     "<p>The chosen mode's shape: the exact one (black) and each mesh's, the nodes as dots and the elements' own "
     "shape functions between them (straight for a string or bar, cubic for a beam), largest +1.</p>")
@@ -134,6 +166,24 @@ halves the lumped error. With two unknowns a node the endless mesh has two waves
 and a second branch far above it in which the slopes swing against the deflections, which the continuum
 doesn't have. Lumped, the slopes carry no mass, and are condensed out exactly.</p>
 
+<h3>Waves and reflections</h3>
+<p>The <i>Waves</i> tab runs a pulse along the medium and the mesh side by side. On a string or bar the
+continuum's pulse keeps its shape, u = r(x − ct) + l(x + ct), and comes back from a fixed end upside down
+(the end must stay still, so the reflection cancels it there) and from a free end upright (doubling there).
+On the mesh the pulse is made of waves the mesh carries at their own speeds: lumped, its short waves go
+slow, and the pulse leaves ripples behind it; consistent, they go fast and the ripples lead. Nothing
+shorter than two elements travels at all. Few elements across the pulse and it falls apart.</p>
+<p>What a wave meets reflects some of it, by the impedance Z = √(Tμ) (string) or ρcA (bar), the force a
+wave needs per unit of velocity. A <b>dashpot</b> of c<sub>d</sub> at an end returns (Z − c<sub>d</sub>)/(Z +
+c<sub>d</sub>) of the wave: c<sub>d</sub> = Z is a <b>matched</b>, non-reflecting end, which absorbs the wave as
+an endless medium would carry it off. A <b>step</b> from Z₁ to Z₂ returns (Z₁ − Z₂)/(Z₁ + Z₂), upside down
+into something heavier, and passes 2Z₁/(Z₁ + Z₂). The energy is shared R² : T²Z₂/Z₁.</p>
+<p>The mesh's impedance is the continuum's only for long waves: a dashpot matched to the continuum
+reflects the mesh's short ones. That is why an absorbing boundary on a model is never quite silent, and
+why the mesh's high modes, the short waves, are the ones not to trust.</p>
+<p>A beam's bending waves are dispersive on the continuum too, ω = aκ²: a bump released on it spreads
+into ripples, the short ones running ahead at twice the speed of waves twice as long.</p>
+
 <h3>What to take away</h3>
 <p>A mesh is a low-pass filter on the continuum: the modes it gets right are those with many elements to a
 wavelength. Ten elements a wavelength (κh ≈ 0.63) keeps a string's lumped error under 2 %; the rule of thumb is
@@ -181,7 +231,7 @@ class ContinuumPage(QtWidgets.QWidget):
 
         # --- left: the preset, the medium, the mesh
         self.preset = QtWidgets.QComboBox()
-        self.preset.addItems([p.name for p in PRESETS] + [CUSTOM])
+        self.preset.addItems([p.name for p in ALL_PRESETS] + [CUSTOM])
         self.preset.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.preset_note = QtWidgets.QLabel()
         self.preset_note.setWordWrap(True)
@@ -249,12 +299,43 @@ class ContinuumPage(QtWidgets.QWidget):
         mute(self.mesh_info)
         sf.addRow(self.mesh_info)
 
+        waves = QtWidgets.QGroupBox("Waves")
+        wf = QtWidgets.QFormLayout(waves)
+        self.pulse_width = spin(1.0, 100.0, 12.5, 1, " %")
+        self.pulse_at = spin(0.0, 100.0, 25.0, 1, " %")
+        _form_row(wf, "Pulse:", group(self.pulse_width, "wide at", self.pulse_at), TIPS["pulse"])
+        self.moving = QtWidgets.QCheckBox("Travelling right")
+        self.moving.setChecked(True)
+        self.moving.setToolTip(TIPS["moving"])
+        wf.addRow(self.moving)
+        self.wave_scheme = QtWidgets.QComboBox()
+        self.wave_scheme.addItems([sc.value for sc in SCHEMES])
+        _form_row(wf, "Mesh's mass:", self.wave_scheme, TIPS["wave_scheme"])
+        self.dashpot_on = QtWidgets.QCheckBox("Dashpot on the far end")
+        self.dashpot_on.setToolTip(TIPS["dashpot"])
+        self.dashpot = spin(0.0, 100.0, 1.0, 2, " Z")
+        wf.addRow(group(self.dashpot_on, self.dashpot))
+        self.dashpot.setToolTip(TIPS["dashpot"])
+        self.step_on = QtWidgets.QCheckBox("Step at")
+        self.step_on.setToolTip(TIPS["step"])
+        self.step_at = spin(1.0, 99.0, 50.0, 1, " %")
+        self.step_ratio = spin(0.05, 20.0, 2.0, 2, "")
+        self.step_ratio.setPrefix("Z₂/Z₁ ")
+        for box in (self.step_at, self.step_ratio):
+            box.setToolTip(TIPS["step"])
+        wf.addRow(group(self.step_on, self.step_at, self.step_ratio))
+        self.wave_info = QtWidgets.QLabel()
+        self.wave_info.setWordWrap(True)
+        mute(self.wave_info)
+        wf.addRow(self.wave_info)
+
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
         lv.addWidget(self.preset)
         lv.addWidget(self.preset_note)
         lv.addWidget(medium)
         lv.addWidget(mesh)
+        lv.addWidget(waves)
         lv.addStretch(1)
         left_scroll = ColumnScroll(left)
 
@@ -294,6 +375,50 @@ class ContinuumPage(QtWidgets.QWidget):
         self.errors_tab = errors_tab
         self.views.addTab(dispersion_tab, "Dispersion")
         self.views.addTab(errors_tab, "Errors")
+
+        # the pulse on the continuum and on the mesh
+        self.waves_plot = _plot("Displacement", None, "Position x", "m")
+        self.waves_plot.setMouseEnabled(x=False, y=False)
+        self.waves_plot.setToolTip(WAVES_TIP)
+        plot_height(self.waves_plot, 240)
+        self.waves_legend = add_legend(self.waves_plot.getPlotItem(), offset=(-10, 10))
+        self.waves_zero = pg.InfiniteLine(0.0, angle=0)
+        self.waves_plot.addItem(self.waves_zero)
+        self.step_region = pg.LinearRegionItem(movable=False)
+        self.step_region.setZValue(-10)
+        self.waves_plot.addItem(self.step_region)
+        self.end_line = pg.InfiniteLine(0.0, angle=90, label="dashpot", labelOpts={"position": 0.9})
+        self.waves_plot.addItem(self.end_line)
+        self.exact_curve = self.waves_plot.plot([], [])
+        self.mesh_curve = self.waves_plot.plot([], [])
+        self.mesh_nodes = self.waves_plot.plot([], [], pen=None, symbol="o", symbolSize=6)
+        self.waves_legend.addItem(self.exact_curve, "Continuum")
+        self.waves_legend.addItem(self.mesh_curve, "Mesh")
+        self._style_waves()
+        self.play_button = QtWidgets.QPushButton("Pause")
+        self.play_button.setToolTip("<p>Pause or run the pulse.</p>")
+        self.restart_button = QtWidgets.QPushButton("Restart")
+        self.restart_button.setToolTip("<p>Start the pulse again from where it began.</p>")
+        self.playback = QtWidgets.QComboBox()
+        for x in PLAYBACK:
+            self.playback.addItem(f"{x:g}×", x)
+        self.playback.setCurrentIndex(PLAYBACK.index(1.0))
+        self.playback.setToolTip(TIPS["playback"])
+        self.wave_status = QtWidgets.QLabel()
+        self.wave_status.setWordWrap(True)
+        self.wave_status.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        waves_tab = QtWidgets.QWidget()
+        wv = QtWidgets.QVBoxLayout(waves_tab)
+        wv.addWidget(self.waves_plot, 1)
+        row = FlowLayout()
+        row.add(self.play_button, self.restart_button, group("Speed:", self.playback))
+        wv.addLayout(row)
+        wv.addWidget(self.wave_status)
+        self.waves_tab = waves_tab
+        self.views.addTab(waves_tab, "Waves")
+        self.run: WaveRun | None = None  # built when the Waves tab first shows after a change
+        self.running = True
+        self._reach = 1.0  # the plot's half height: the largest displacement seen yet
 
         # --- right: the mode's shape, the table, the notes
         self.shape = _plot("Deflection", None, "Position x", "m")
@@ -347,12 +472,27 @@ class ContinuumPage(QtWidgets.QWidget):
         for box in self.shown.values():
             box.toggled.connect(lambda _: self.redraw())
         self.mode.valueChanged.connect(self._on_mode)
+        for box in (self.pulse_width, self.pulse_at, self.dashpot, self.step_at, self.step_ratio):
+            box.valueChanged.connect(self._on_waves)
+        for box in (self.moving, self.dashpot_on, self.step_on):
+            box.toggled.connect(self._on_waves)
+        self.wave_scheme.currentIndexChanged.connect(self._on_waves)
+        self.play_button.clicked.connect(self._on_play)
+        self.restart_button.clicked.connect(self.restart)
+        self.playback.currentIndexChanged.connect(self._on_playback)
+        self.views.currentChanged.connect(self._on_view)
+
+        self._timer = QtCore.QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._frame)
+        self._clock = QtCore.QElapsedTimer()
 
         self.load_preset(PRESETS[0].name)
 
     # ------------------------------------------------------------- inputs
     def load_preset(self, name: str) -> None:
-        p = next(p for p in PRESETS if p.name == name)
+        """A preset's medium and mesh; a wave preset's pulse too, on the Waves tab, running."""
+        p = next(p for p in ALL_PRESETS if p.name == name)
         c = p.continuum
         self._loading = True
         self.preset.setCurrentText(name)
@@ -369,19 +509,23 @@ class ContinuumPage(QtWidgets.QWidget):
         self.left_end.setCurrentText(c.left.value)
         self.right_end.setCurrentText(c.right.value)
         self.elements.setValue(p.elements)
+        self._set_waves(p.waves if isinstance(p, WavePreset) else Waves(), c.kind)
         self._loading = False
         self.mode.blockSignals(True)
         self.mode.setValue(1)
         self.mode.blockSignals(False)
         self.set_continuum(c, p.elements)
+        if isinstance(p, WavePreset):
+            self.running = True
+            self.views.setCurrentWidget(self.waves_tab)
 
     def frame_context(self) -> str:
         """For the frame log (frame_stats): the preset showing."""
         return self.preset.currentText()
 
     def _on_preset(self, index: int) -> None:
-        if not self._loading and index < len(PRESETS):
-            self.load_preset(PRESETS[index].name)
+        if not self._loading and index < len(ALL_PRESETS):
+            self.load_preset(ALL_PRESETS[index].name)
 
     def _fill_ends(self, kind: Kind) -> None:
         for box in (self.left_end, self.right_end):
@@ -402,7 +546,11 @@ class ContinuumPage(QtWidgets.QWidget):
     def _on_kind(self, _index: int) -> None:
         if self._loading:
             return
-        self._fill_ends(Kind(self.kind.currentText()))
+        kind = Kind(self.kind.currentText())
+        self._fill_ends(kind)
+        self._loading = True
+        self._set_waves(self._waves(), kind)  # a beam's pulse starts at rest, on its own ends
+        self._loading = False
         self._on_edit()
 
     def _read(self) -> Continuum:
@@ -431,10 +579,13 @@ class ContinuumPage(QtWidgets.QWidget):
         self.mode.setRange(1, max(count, 1))
         self.mode.setEnabled(count > 0)
         self.mode.blockSignals(False)
-        self.shape.setLabel("left", "Displacement (along the bar)" if c.kind is Kind.BAR else "Deflection")
+        label = "Displacement (along the bar)" if c.kind is Kind.BAR else "Deflection"
+        self.shape.setLabel("left", label)
+        self.waves_plot.setLabel("left", label)
         self._show_info()
         self._fill_table()
         self.redraw()
+        self._new_run()
 
     def _shown(self) -> list[Scheme]:
         return [s for s in SCHEMES if self.shown[s].isChecked()]
@@ -502,8 +653,187 @@ class ContinuumPage(QtWidgets.QWidget):
         x = vb.mapSceneToView(event.scenePos()).x()
         self.mode.setValue(int(np.clip(round(x), 1, self.mode.maximum())))
 
+    # ------------------------------------------------------------- waves
+    def _set_waves(self, waves: Waves, kind: Kind) -> None:
+        """Fill the wave controls (signals held), a beam's without the dashpot, the step or a moving start."""
+        beam = kind is Kind.BEAM
+        boxes = (self.pulse_width, self.pulse_at, self.moving, self.wave_scheme, self.dashpot_on, self.dashpot,
+                 self.step_on, self.step_at, self.step_ratio)
+        for box in boxes:
+            box.blockSignals(True)
+        self.pulse_width.setValue(100 * waves.width)
+        self.pulse_at.setValue(100 * waves.at)
+        self.moving.setChecked(waves.moving and not beam)
+        self.wave_scheme.setCurrentText(waves.scheme.value)
+        self.dashpot_on.setChecked(waves.dashpot is not None and not beam)
+        if waves.dashpot is not None:
+            self.dashpot.setValue(waves.dashpot)
+        self.step_on.setChecked(waves.step_at is not None and not beam)
+        if waves.step_at is not None:
+            self.step_at.setValue(100 * waves.step_at)
+        self.step_ratio.setValue(waves.step_ratio)
+        for box in boxes:
+            box.blockSignals(False)
+        for box in (self.moving, self.dashpot_on, self.step_on):
+            box.setEnabled(not beam)
+        self._enable_waves()
+
+    def _enable_waves(self) -> None:
+        self.dashpot.setEnabled(self.dashpot_on.isChecked() and self.dashpot_on.isEnabled())
+        for box in (self.step_at, self.step_ratio):
+            box.setEnabled(self.step_on.isChecked() and self.step_on.isEnabled())
+
+    def _waves(self) -> Waves:
+        beam = Kind(self.kind.currentText()) is Kind.BEAM
+        return Waves(width=self.pulse_width.value() / 100, at=self.pulse_at.value() / 100,
+                     moving=self.moving.isChecked() and not beam, scheme=Scheme(self.wave_scheme.currentText()),
+                     dashpot=self.dashpot.value() if self.dashpot_on.isChecked() and not beam else None,
+                     step_at=self.step_at.value() / 100 if self.step_on.isChecked() and not beam else None,
+                     step_ratio=self.step_ratio.value())
+
+    def _on_waves(self, *_args) -> None:
+        if self._loading:
+            return
+        self._enable_waves()
+        self._new_run()
+
+    def _new_run(self) -> None:
+        """Start the pulse afresh: now if the Waves tab shows, else when it next does."""
+        self.run = None
+        self._show_wave_info()
+        if self.views.currentWidget() is self.waves_tab:
+            self.restart()
+
+    def restart(self) -> None:
+        self.run = WaveRun(self.continuum, self.elements.value(), self._waves(), float(self.playback.currentData()))
+        self._reach = 1.0
+        c = self.continuum
+        self.waves_plot.setXRange(0.0, c.length, padding=0.02)
+        self.waves_plot.setYRange(-1.15, 1.15, padding=0.0)
+        step = self.run.step_x
+        self.step_region.setVisible(step is not None)
+        if step is not None:
+            self.step_region.setRegion((step, c.length))
+        self.end_line.setVisible(self.run.waves.dashpot is not None)
+        self.end_line.setPos(c.length)
+        self._draw_waves()
+        self._update_play()
+        self._start_timer()
+
+    def _show_wave_info(self) -> None:
+        c, w = self.continuum, self._waves()
+        h = c.length / self.elements.value()
+        parts = [f"{w.width * c.length / h:.3g} elements across the pulse."]
+        if c.kind is not Kind.BEAM:
+            z = math.sqrt(c.rigidity * c.mass_per_length)
+            parts.append(f"Z = {z:.4g} N·s/m.")
+            if w.step_at is not None:
+                r, t = step_coefficients(w.step_ratio)
+                parts.append(f"The step reflects {r:+.3g} and passes {t:.3g} of a wave from the left "
+                             f"(energy {r * r:.3g} : {t * t * w.step_ratio:.3g}).")
+            if w.dashpot is not None:
+                parts.append(f"The dashpot ({w.dashpot:.3g} Z = {w.dashpot * z:.4g} N·s/m) reflects "
+                             f"{end_reflection(c.right, w.dashpot):+.3g} of a wave.")
+        self.wave_info.setText(" ".join(parts))
+
+    def _on_play(self) -> None:
+        self.running = not self.running
+        self._update_play()
+        if self.running:
+            self._start_timer()
+        else:
+            self._timer.stop()
+
+    def _update_play(self) -> None:
+        self.play_button.setText("Pause" if self.running else "Run")
+
+    def _on_playback(self, _index: int) -> None:
+        if self.run is not None:
+            self.run.set_playback(float(self.playback.currentData()))
+
+    def _on_view(self, _index: int) -> None:
+        if self.views.currentWidget() is self.waves_tab:
+            if self.run is None:
+                self.restart()
+            else:
+                self._start_timer()
+        else:
+            self._timer.stop()
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().showEvent(event)
+        self._start_timer()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().hideEvent(event)
+        self._timer.stop()
+
+    def _start_timer(self) -> None:
+        if (self.isVisible() and self.running and self.run is not None
+                and self.views.currentWidget() is self.waves_tab and not self._timer.isActive()):
+            self._clock.restart()
+            self._timer.start(FRAME_MS)
+
+    def _frame(self) -> None:
+        began = self._clock.elapsed()
+        with frame_stats.frame("Continuous systems", self._sim_t, FRAME_MS):
+            self.step()
+            settle_plots(self)
+        if self.isVisible() and self.running and self.views.currentWidget() is self.waves_tab:
+            # the next frame FRAME_MS after this one began, not after it ended
+            self._timer.start(max(1, FRAME_MS - (self._clock.elapsed() - began)))
+
+    def _sim_t(self) -> float | None:
+        return self.run.t if self.run is not None else None
+
+    def step(self, frames: int = 1) -> None:
+        """Run the pulse on by `frames` frames and redraw."""
+        if self.run is None:
+            self.restart()
+        self.run.advance(frames)
+        self._draw_waves()
+
+    def _draw_waves(self) -> None:
+        run = self.run
+        x, u = run.exact()
+        self.exact_curve.setData(x, u)
+        dense = np.linspace(0.0, self.continuum.length, SHAPE_POINTS)
+        shape = run.mesh_shape()
+        field = run.model.field(shape, dense)
+        self.mesh_curve.setData(dense, field)
+        nodes, w = run.mesh()
+        if self.elements.value() <= NODES_DRAWN:
+            self.mesh_nodes.setData(nodes, w)
+        else:
+            self.mesh_nodes.setData([], [])
+        reach = max(float(np.max(np.abs(u))), float(np.max(np.abs(field))))
+        if reach > self._reach:  # grow, never shrink, till the pulse starts again
+            self._reach = reach
+            self.waves_plot.setYRange(-1.15 * self._reach, 1.15 * self._reach, padding=0.0)
+        crossings = run.t / run.transit
+        self.wave_status.setText(
+            f"t = {crossings:.2f} crossings ({_fmt_time(run.t)}; one crossing {_fmt_time(run.transit)}). "
+            f"The mesh ({run.waves.scheme.value.lower()}) keeps <b>{100 * run.energy_left:.3g} %</b> of its "
+            "energy.")
+
+    def _style_waves(self) -> None:
+        self.waves_zero.setPen(pg.mkPen(colors.faint, width=1))
+        self.exact_curve.setPen(pg.mkPen(colors.strong, width=2))
+        mesh = colors.mode[0]
+        self.mesh_curve.setPen(pg.mkPen(mesh, width=1.5))
+        self.mesh_nodes.setSymbolBrush(mesh)
+        self.mesh_nodes.setSymbolPen(pg.mkPen(colors.background))
+        shade = pg.mkColor(colors.faint)
+        shade.setAlpha(70)
+        self.step_region.setBrush(pg.mkBrush(shade))
+        for line in self.step_region.lines:
+            line.setPen(pg.mkPen(colors.muted, width=1))
+        self.end_line.setPen(pg.mkPen(colors.force, width=3))
+        self.end_line.label.setColor(colors.force)
+
     # ------------------------------------------------------------- drawing
     def apply_theme(self) -> None:
+        self._style_waves()
         self.redraw()
 
     def redraw(self) -> None:
@@ -656,6 +986,10 @@ class ContinuumPage(QtWidgets.QWidget):
         self.shape_note.setText(
             f"Mode {n}, {per:.3g} elements a wavelength. The MAC of each mesh's nodes against the exact shape "
             "there (1: the same shape): " + ", ".join(notes) + "." if notes else f"Mode {n}: no mesh shown has it.")
+
+
+def _fmt_time(t: float) -> str:
+    return f"{t * 1e3:.3g} ms" if t < 1.0 else f"{t:.3g} s"
 
 
 def _cell(text: str) -> QtWidgets.QTableWidgetItem:
