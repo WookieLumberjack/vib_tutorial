@@ -3451,3 +3451,45 @@ def test_complex_modes_page(app):
     w.set_theme("Dark")
     w.set_theme("Light")
     w.close()
+
+
+def test_complex_modes_sweep_and_identification(app):
+    """The complex modes page's Sweep tab follows the chain's damper through its root locus, and its
+    Identification tab fits the FRF with real and complex modes; both work out only while they show."""
+    from vib_tutorial.core.complex_modes import Parameter
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.complex_page
+    w.pages.setCurrentWidget(p)
+    p.trial.setCurrentText("One damper, at the top")
+    app.processEvents()
+    assert p.sweep_result is None and p.ident_result is None  # not worked out while hidden
+    p.tabs.setCurrentWidget(p.sweep_tab)
+    app.processEvents()
+    sw = p.sweep_result
+    assert sw.parameter is Parameter.DAMPER and sw.element == 3 and p.sweep_element.currentText() == "c4"
+    assert "as c4 locks its joint" in p.sweep_note.text() and "c4 is 20 N·s/m" in p.sweep_note.text()
+    p.sweep_parameter.setCurrentIndex(p.sweep_parameter.findData(Parameter.SPRING))
+    assert p.sweep_result.parameter is Parameter.SPRING and p.sweep_element.currentText() == "k4"
+    assert "most complex" in p.sweep_note.text()
+
+    p.trial.setCurrentText("One damper, at the base")
+    app.processEvents()
+    assert p.sweep_result.parameter is Parameter.SPRING  # worked out again for the new chain, as it shows
+    p.tabs.setCurrentWidget(p.ident_tab)
+    app.processEvents()
+    assert p.ident_table.rowCount() == 4 and p.ident_table.item(2, 2).text() == "0.506"
+    assert "<b>29 %</b> (real modes)" in p.ident_note.text()
+    p.ident_noise.setValue(0.0)
+    assert "<b>0 %</b> (complex modes)" in p.ident_note.text()
+    p.ident_in.setCurrentIndex(3)
+    p.ident_out.setCurrentIndex(0)
+    assert p.ident_result.H.shape == (2000, 4)
+    p.make_proportional.click()
+    app.processEvents()
+    assert "<b>0 %</b> (real modes)" in p.ident_note.text()
+    w.set_theme("Dark")
+    w.set_theme("Light")
+    w.close()
