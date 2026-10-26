@@ -14,7 +14,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 
-from ..core.identification import Method, ModeMatch, Stabilization, Stability
+from ..core.identification import Method, ModeMatch, Stability, Stabilization
 from .panels import spin
 from .style import colors, text_on
 from .theming import add_legend
@@ -259,7 +259,9 @@ class MacPlot(pg.PlotWidget):
         self.cmap = pg.ColorMap([0.0, 1.0], [pg.mkColor(colors.background), pg.mkColor(colors.mac_high)])
         self.image.setLookupTable(self.cmap.getLookupTable(nPts=256))
 
-    def set_matrix(self, macs: np.ndarray, rows: list[str], cols: list[str]) -> None:
+    def set_matrix(self, macs: np.ndarray, rows: list[str], cols: list[str], text: np.ndarray | None = None,
+                   fmt: str = "{:.2f}") -> None:
+        """Colour by `macs` (0 to 1); label each cell with `text` (the MACs if None), formatted by `fmt`."""
         for t in self.labels:
             self.removeItem(t)
         self.labels = []
@@ -271,7 +273,8 @@ class MacPlot(pg.PlotWidget):
         for i in range(macs.shape[0]):
             for j in range(macs.shape[1]):
                 v = macs[i, j]
-                t = pg.TextItem(f"{v:.2f}", color=text_on(self.cmap.map(v, mode="qcolor").name()), anchor=(0.5, 0.5))
+                label = fmt.format(v if text is None else text[i, j])
+                t = pg.TextItem(label, color=text_on(self.cmap.map(v, mode="qcolor").name()), anchor=(0.5, 0.5))
                 t.setPos(j + 0.5, i + 0.5)
                 self.addItem(t)
                 self.labels.append(t)

@@ -49,7 +49,7 @@ as in a lab, **Operational modal analysis** finds the modes from the responses t
 ambient forces alone, **Random vibration** shakes it with a random force or base and
 predicts the response's spectrum and RMS, **Complex modes** shows when its damping makes the
 modes complex and what the usual approximation then misses, and **Model updating** correlates a
-model with errors in it against a modal test of the chain. The **Jeffcott rotor** page leaves the chain for a
+model with errors in it against a modal test of the chain, and updates it to find them. The **Jeffcott rotor** page leaves the chain for a
 spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
 page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
 resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes,
@@ -634,13 +634,24 @@ unknown; here they are set, so you can check what the correlation says against w
   - *Shapes*: a pair's two shapes.
   - *Auto-MAC*: the test's shapes against each other (spatial aliasing with too few sensors).
   - *COMAC*: the shapes' agreement at each sensor.
+- **Updating** (*Updating* tab): the springs, masses or dampers you tick are changed by Gauss–Newton steps
+  on their logarithms until the model's paired frequencies, and optionally its shapes and damping ratios,
+  match the test's. The tab follows each parameter, as a fraction of the structure's true value, step by
+  step, with the residual and J's singular values (a zero one is a combination of parameters that the data
+  can't settle). Regularization λ holds the model near where it started. *Apply to the model* takes the
+  result.
+- **Sensitivity** (*Sensitivity* tab): ∂ln f/∂ln p of every model mode to every parameter, in closed form. A
+  spring's is half its share of the mode's strain energy, and a mass's is minus half its share of the kinetic
+  energy.
 - **Things to try**:
   - a spring 30 % too stiff;
   - a mass 20 % too heavy;
   - every spring 10 % too soft (the frequencies move, the shapes don't);
   - dampers twice too strong;
   - only two sensors;
-  - no error at all, which leaves only the test's own scatter.
+  - no error at all, which leaves only the test's own scatter;
+  - four updates: the stiff spring found; masses and springs together (not unique); a strong
+    regularization (the error kept); the dampers.
 
 ![Model updating page: the model's k3 is 30 % too stiff, and the hammer test finds three of the four modes. The MAC matrix pairs T1–T3 with M1–M3 at 1.00, 1.00 and 0.93; the model's frequencies are 2.15, 4.09 and 0.31 % high; the Frequencies tab plots them against the test's, and their errors](docs/images/model_updating.png)
 
@@ -648,6 +659,14 @@ With the model's third spring 30 % too stiff, every frequency comes out high, mo
 least, since that spring hardly stretches in mode 3. The MACs stay at 0.99 and up: the shapes don't
 show the error, the pattern of frequency errors does. The third test mode's MAC of 0.93 is the test's own:
 without any error in the model it is 0.92.
+
+![Model updating page, the Updating tab: the springs updated against the hammer test's three frequencies and shapes. k3 falls from 1.30 of the structure's to 1.02 in a few steps while k1, k2 and k4 stay within 3.5 % of 1; the residual drops from 0.048 to 0.016 and stays there](docs/images/model_updating_springs.png)
+
+Updated against the hammer test's three frequencies and shapes, the springs find the error: k3 falls from
+1.30 to 1.02 of the structure's in a few steps. What remains, a few per cent on each spring, is the test's
+error passed into the model. Update the masses as well and the fit gets better while the answer gets worse:
+every factor comes out 2 to 4 % high, because a model that is uniformly stiffer and heavier has exactly the
+same modes.
 
 ### Jeffcott rotor
 
@@ -1235,7 +1254,8 @@ $F_f$ times the distance slid, so the energy balance still closes.
   complex modes.
 - `core/model_updating.py`: model updating and correlation: the model as the structure with errors,
   the test (the virtual modal test's or the exact modes with noise) at chosen sensors, the MAC and
-  its pairs, frequency errors, the auto-MAC and COMAC.
+  its pairs, frequency errors, the auto-MAC and COMAC; frequency sensitivities in closed form, and
+  Gauss–Newton updating of masses, springs and dampers with regularization.
 - `core/identification.py`: modal parameter extraction from a measured FRF column: peak
   picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
   modes (MAC).

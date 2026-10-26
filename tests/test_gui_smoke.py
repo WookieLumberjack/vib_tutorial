@@ -3499,7 +3499,7 @@ def test_model_updating_page(app):
     """The model updating page measures the Simulation page's chain, correlates its own model with errors in it,
     re-correlates without measuring again when the model or the sensors change, runs each trial, and follows the
     chain's size."""
-    from vib_tutorial.core.model_updating import Source
+    from vib_tutorial.core.model_updating import Kind, Source
     from vib_tutorial.gui.main_window import MainWindow
     from vib_tutorial.gui.model_updating import TRIALS
 
@@ -3541,6 +3541,23 @@ def test_model_updating_page(app):
     p.clear_errors.click()
     p.recompute()
     assert all(box.value() == 1.0 for row in p.error_rows for box in row[1:])
+
+    p.trial.setCurrentText("Update: find the stiff spring")
+    p.recompute()
+    assert p.update_result is None  # worked out only while its tab shows
+    p.tabs.setCurrentWidget(p.update_tab)
+    u = p.update_result
+    assert u is not None and "k3, 1.300 → <b>1.023</b>" in p.update_note.text()
+    p.apply_update.click()
+    assert p.error_rows[2][2].value() == pytest.approx(1.023, abs=0.001) and p.update_result is not u
+    assert max(abs(x.error) for x in p.corr.pairs) < 0.01
+    p.trial.setCurrentText("Update: masses too, not unique")
+    p.recompute()
+    assert p.update_kind[Kind.MASS].isChecked() and "1 of the 8 directions" in p.update_note.text()
+    p.regularization.setValue(1.0)
+    assert p.update_result.history  # worked out again for the new setting
+    p.tabs.setCurrentWidget(p.sens_tab)
+    assert len(p.sens_plot.labels) == 4 * 8
 
     p.dof.setValue(6)
     app.processEvents()
