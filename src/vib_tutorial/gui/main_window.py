@@ -53,6 +53,7 @@ LAZY_PAGES = (
     ("cms_page", "Substructuring (CMS)"),
     ("test_page", "Virtual modal test"),
     ("oma_page", "Operational modal analysis"),
+    ("random_page", "Random vibration"),
     ("rotor_page", "Jeffcott rotor"),
     ("duffing_page", "Duffing && Mathieu"),
     ("torsional_page", "Torsional vibration"),
@@ -92,6 +93,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "oma_page":
         from .oma import OmaPage
         return OmaPage
+    if name == "random_page":
+        from .random_vibration import RandomVibrationPage
+        return RandomVibrationPage
     from .modal_test import ModalTestPage
     return ModalTestPage
 MODE_ANIMATION_HZ = 0.5  # visual rate for the animated mode-shape plot
@@ -453,6 +457,7 @@ class MainWindow(QtWidgets.QMainWindow):
     duffing_page = property(lambda self: self._page("duffing_page"))
     torsional_page = property(lambda self: self._page("torsional_page"))
     continuum_page = property(lambda self: self._page("continuum_page"))
+    random_page = property(lambda self: self._page("random_page"))
 
     def _page(self, name: str) -> QtWidgets.QWidget:
         """The page `name` from LAZY_PAGES, built and put in its tab on first use."""

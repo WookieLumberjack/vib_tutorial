@@ -40,13 +40,14 @@ uv run pytest         # run the tests
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
-Five more pages work on the same chain, in order from analysis to simplification to test:
+Six more pages work on the same chain, in order from analysis to simplification to test:
 **FRF matrix** shows every term of the receptance matrix and how the modes build it up,
 **Modal coupling** joins two halves of the chain one mode each, to show when their modes split,
 **Substructuring (CMS)** reduces the chain by component mode synthesis (Craig–Bampton, Rubin or
 MacNeal), **Virtual modal test** measures the FRF from simulated force and response signals,
-as in a lab, and **Operational modal analysis** finds the modes from the responses to unmeasured
-ambient forces alone. The **Jeffcott rotor** page leaves the chain for a
+as in a lab, **Operational modal analysis** finds the modes from the responses to unmeasured
+ambient forces alone, and **Random vibration** shakes it with a random force or base and
+predicts the response's spectrum and RMS. The **Jeffcott rotor** page leaves the chain for a
 spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
 page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
 resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes,
@@ -533,6 +534,35 @@ finds.
 
 With a machine running just above mode 2, FDD's peak there is the sine's, and mode 2 is lost
 under it; SSI-cov fits mode 2 beside the sine, which the kurtosis test crosses out.
+
+### Random vibration
+
+The **Random vibration** page drives the chain with a stationary random input given by its power
+spectral density, flat over a band: a force on one mass or on every mass (N²/Hz), or the base's
+acceleration, as on a shaker table (g²/Hz). It follows the chain on the Simulation page, without its
+friction.
+
+- **The response's PSD**: exact, G<sub>y</sub> = H G<sub>u</sub> H<sup>H</sup>, for a mass's
+  displacement (relative to the base), its acceleration (absolute, in g) or a spring's force, with
+  the record's Welch estimate on top.
+- **The RMS**: the cumulative RMS √∫G df climbs a step at each mode, showing each one's share; its
+  end is the RMS, against the record's standard deviation and its expected scatter.
+- **Miles' equation**: each mode as a single oscillator under white input at its frequency, its RMS
+  √((π/2) f<sub>n</sub> Q G) through the mode shape, and the modes combined by SRSS, in a table beside
+  the exact RMS. It misses what isn't resonant, such as a forced mass's acceleration above the modes
+  (the mass line).
+- **The record**: the input synthesized to the PSD asked for, the chain stepped by the exact FOH
+  update, sized from the narrowest peak (four Welch lines across its half-power width, sixteen blocks),
+  with the block length and a new record at a click.
+- **Things to try**: a base shake, a force on the last mass, forces on every mass, the base spring's
+  force, a short record, coarse lines (the peak comes out low but the RMS keeps its area), and a
+  narrow band on mode 2.
+
+![Random vibration page: the default chain's base shaken flat at 0.01 g²/Hz to 10 Hz. The input's PSD from the record lies on the level; the last mass's acceleration PSD peaks at the four modes, the 2621 s record's Welch estimate following the exact H G Hᴴ; the cumulative RMS climbs mostly at mode 1 to 0.9109 g, the record's 0.9108 g and Miles' 0.9129 g beside it; the Miles table gives mode 1 92 % of the mean square](docs/images/random_vibration.png)
+
+Shaken at 0.01 g²/Hz, 0.32 g RMS, the default chain's last mass sees 0.91 g RMS, 92 % of its mean
+square from mode 1 (Q = 29). Miles' equation, mode by mode, is 0.2 % off; the simulated record's RMS
+is within its ±2.6 % scatter.
 
 ### Jeffcott rotor
 
@@ -1111,6 +1141,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
   domain decomposition and enhanced FDD's bell and autocorrelation fit, covariance-driven
   stochastic subspace identification, the harmonic test (filtered kurtosis), and a hammer test
   through the virtual modal test's chain for comparison.
+- `core/random_vibration.py`: random vibration: band-limited force or base-acceleration PSDs,
+  the response's PSD H G Hᴴ and cumulative RMS, Miles' equation mode by mode, a record synthesized
+  to the PSD and stepped by the exact FOH update, and Welch's estimate.
 - `core/identification.py`: modal parameter extraction from a measured FRF column: peak
   picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
   modes (MAC).

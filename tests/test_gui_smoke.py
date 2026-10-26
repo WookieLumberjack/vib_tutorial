@@ -3317,3 +3317,57 @@ def test_continuum_waves_tab(app):
     w.set_theme("Dark")
     w.set_theme("Light")
     w.close()
+
+
+def test_random_vibration_page(app):
+    """The random vibration page follows the chain, predicts the response's PSD and RMS and checks them against a
+    simulated record and Miles' equation, re-records only when the input changes, runs each trial, and survives a
+    theme switch."""
+    from vib_tutorial.core.random_vibration import Input, Quantity
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.random_vibration import TRIALS
+
+    w = MainWindow()
+    w.show()
+    p = w.random_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    p.recompute()
+    assert w.pages.tabText(w.pages.currentIndex()) == "Random vibration"
+    assert p.dof.value() == 4 and p.mass.count() == 4 and p.index.currentText() == "m4"
+    assert p.kind.currentData() is Input.BASE and p.level.suffix() == " g²/Hz" and not p.mass.isEnabled()
+    assert "exact 0.9109 g" in p.readout.text() and "Miles 0.9129 g (+0.22 %)" in p.readout.text()
+    assert "lines 0.0061 Hz apart" in p.record_info.text() and "0.3162 g" in p.input_info.text()
+    assert p.miles_table.rowCount() == 5 and p.miles_table.item(4, 4).text() == "SRSS 0.9129"
+
+    record = p.record
+    p.quantity.setCurrentIndex(p.quantity.findData(Quantity.SPRING))
+    p.recompute()
+    assert p.record is record and p.index.currentText() == "k4" and "N" in p.readout.text()
+    p.block.setCurrentIndex(0)
+    p.recompute()
+    assert p.record is record and "lines 0.0977 Hz apart" in p.record_info.text()
+    p.new_record.click()
+    assert p.record is not record and p.seed == 2
+
+    for i, (name, _, note) in enumerate(TRIALS):
+        p.trial.setCurrentIndex(i)
+        p.recompute()
+        assert p.trial_note.text() == note and p.prediction is not None and "RMS" in p.readout.text()
+    p.trial.setCurrentIndex(1)  # a force on the last mass: its own acceleration's mass line
+    p.recompute()
+    assert p.mass.isEnabled() and p.mass.currentText() == "m4" and p.level.suffix() == " N²/Hz"
+    assert "Miles 0.4163 g (-18 %)" in p.readout.text()
+
+    p.dof.setValue(3)  # the Simulation page's chain follows, and the page with it
+    app.processEvents()
+    p.recompute()
+    assert w.sim.system.n == 3 and p.mass.count() == 3 and p.record.x.shape[1] == 3
+    p.f_hi.setValue(0.0)  # an empty band
+    p.f_lo.setValue(1.0)
+    p.recompute()
+    assert "band" in p.readout.text()
+    w.set_theme("Dark")
+    p.tabs.setCurrentWidget(p.record_tab)
+    w.set_theme("Light")
+    w.close()
