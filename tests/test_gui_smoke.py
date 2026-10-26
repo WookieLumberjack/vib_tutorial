@@ -3371,3 +3371,29 @@ def test_random_vibration_page(app):
     p.tabs.setCurrentWidget(p.record_tab)
     w.set_theme("Light")
     w.close()
+
+
+def test_random_vibration_statistics(app):
+    """The random vibration page's Statistics tab: the record's crossings, peaks and exceedances beside Rice's and the
+    Gaussian's, and the largest peak over a stretch beside Davenport's and Vanmarcke's."""
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.random_page
+    w.pages.setCurrentWidget(p)
+    p.tabs.setCurrentWidget(p.stats_tab)
+    app.processEvents()
+    p.trial.setCurrentText("The base spring's force")
+    p.recompute()
+    table = p.stats_table.text()
+    assert "Upward zero crossings" in table and "31.7 %" in table and "Rice, α = 0.66" in [
+        p.peaks_legend.items[1][1].text]
+    assert "Davenport 3.11σ" in p.largest_note.text() and "Vanmarcke (δ = 0.25) 2.84σ" in p.largest_note.text()
+    assert "43 stretches of 60 s" in p.largest_note.text()
+    assert not p.cumulative.getAxis("left").autoSIPrefix
+    p.largest_over.setValue(1000.0)
+    assert "too short for four stretches" in p.largest_note.text()
+    w.set_theme("Dark")
+    w.set_theme("Light")
+    w.close()

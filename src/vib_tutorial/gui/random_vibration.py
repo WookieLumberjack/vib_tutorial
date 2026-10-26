@@ -4,7 +4,8 @@ Left: the input (a force on one mass or every mass, or the base's acceleration, 
 band), the response looked at (a mass's displacement or acceleration, or a spring's force),
 the time record (its length, Welch's block) and things to try. Centre: the input's PSD, the
 response's PSD (exact H G Hᴴ and the record's Welch estimate) and its cumulative RMS, with
-Miles' estimate. Right: Miles' equation mode by mode, the record itself, and the notes.
+Miles' estimate. Right: Miles' equation mode by mode, the record itself, its statistics against
+Rice's and the largest peak's (Davenport's, Vanmarcke's), and the notes.
 Follows the chain from the Simulation page (friction left out: all of this is linear).
 """
 
@@ -20,6 +21,7 @@ from ..core.modal import ModalResult, modal_analysis
 from ..core.model import ChainSystem
 from ..core.random_vibration import (
     BLOCKS,
+    LEVELS,
     Input,
     Output,
     Prediction,
@@ -27,10 +29,15 @@ from ..core.random_vibration import (
     RandomInput,
     RandomRecord,
     cumulative_rms,
+    gaussian_exceedance,
     linear,
+    peak_pdf,
     predict,
+    record_statistics,
+    rice,
     rms_scatter,
     sample_rate,
+    segment_maxima,
     simulate,
     suggested_block,
     suggested_duration,
@@ -69,6 +76,18 @@ CUMULATIVE_TIP = (
     "<p>The RMS so far, √∫<sub>0</sub><sup>f</sup> G df: each mode a step, its height its share. Dashed: the "
     "Miles estimate (the modes' together) and the record's standard deviation.</p>")
 RECORD_TIP = "<p>The start of the simulated response, with ±1σ and ±3σ of the exact RMS.</p>"
+AMPLITUDE_TIP = (
+    "<p>How the record's values are distributed, over σ (the exact RMS), against the Gaussian: a linear system's "
+    "response to a Gaussian input is Gaussian. Dashed: ±1, 2 and 3σ.</p>")
+PEAKS_TIP = (
+    "<p>The heights of the record's peaks (its local maxima), over σ, against Rice's distribution for the "
+    "response's irregularity α = ν₀/ν<sub>p</sub>: Rayleigh for a narrow band (α = 1: one peak a cycle, all "
+    "above zero), towards Gaussian for a broad one (many small wiggles, some below zero).</p>")
+LARGEST_TIP = (
+    "<p>How long a stretch to ask the largest peak of. The record is cut into stretches this long, and their "
+    "largest values averaged, to compare with Davenport's and Vanmarcke's expected largest peak.</p>")
+AMPLITUDE_BINS = 60
+PEAK_BINS = 40
 
 # Things to try: (name, what it sets, note)
 TRIALS = (
@@ -126,6 +145,24 @@ takes the mode shape's share of it, and the modes combine by the square root of 
 The <i>Miles</i> tab lists them. It is good where the response is resonant and the modes are well apart. It
 misses what isn't resonant: a forced mass's acceleration far above the modes is the force over the mass (the
 <b>mass line</b>), modes outside the band, and a band edge that cuts across a peak.</p>
+
+<h3>How often, how high</h3>
+<p>A linear system's response to a Gaussian input is Gaussian: 68.3 % of the time within ±1σ, 95.4 % within
+±2σ, 99.73 % within ±3σ, its skewness 0 and kurtosis 3. How often it does things comes from the PSD's
+<b>spectral moments</b> m<sub>k</sub> = ∫ f<sup>k</sup> G df. <b>Rice</b>: it crosses zero upwards
+ν₀ = √(m₂/m₀) times a second, a level a ν₀ e<sup>−a²/2σ²</sup> times, and has ν<sub>p</sub> = √(m₄/m₂) peaks a
+second. Their ratio, the <b>irregularity factor</b> α = ν₀/ν<sub>p</sub>, says how narrow its band is: at 1, one
+peak per cycle, their heights Rayleigh distributed; towards 0, many small peaks riding on the big swings, some
+below zero, their heights nearly Gaussian.</p>
+<p>The <b>largest peak</b> in a time T grows only slowly with T. Counting each upward crossing as independent,
+<b>Davenport</b> finds its expected value σ(√(2 ln ν₀T) + 0.577/√(2 ln ν₀T)): about 3σ over a hundred cycles, 4σ
+over three thousand, 5σ over 270,000. "3σ" is not a maximum: a long life sees more. A narrow-band response's
+crossings come in clumps, on the swells of its slowly varying envelope, so there are fewer independent chances
+than ν₀T, and Davenport overestimates the largest peak, most over short times. <b>Vanmarcke</b> counts the clumps,
+through the band's width δ = √(1 − m₁²/m₀m₂). The <i>Statistics</i> tab compares both with the record's own
+largest values, stretch by stretch.</p>
+<p>The record holds 2.5 samples per period of the band's top: enough to describe it, since it has nothing
+above the band, but not to see its peaks. It is interpolated eightfold before they are counted.</p>
 
 <h3>Estimating it from a record</h3>
 <p><b>Welch's method</b> cuts the record into blocks, windows each (Hann), Fourier transforms them and averages
@@ -278,6 +315,8 @@ class RandomVibrationPage(QtWidgets.QWidget):
         self.cumulative_legend = add_legend(self.cumulative.getPlotItem(), offset=(10, 10))
         for p in (self.psd_plot, self.cumulative):
             p.setXLink(self.input_plot)
+        for p in (self.input_plot, self.psd_plot, self.cumulative):  # setLogMode turned it back on where linear
+            p.getAxis("left").enableAutoSIPrefix(False)
         self.readout = QtWidgets.QLabel()
         self.readout.setWordWrap(True)
         self.readout.setTextFormat(QtCore.Qt.TextFormat.RichText)
@@ -317,6 +356,37 @@ class RandomVibrationPage(QtWidgets.QWidget):
         mute(self.record_note)
         rv.addWidget(self.record_note)
 
+        self.amplitude_plot = _plot("Probability density", None, "Value / σ", None, log=False)
+        self.amplitude_plot.setToolTip(AMPLITUDE_TIP)
+        plot_height(self.amplitude_plot, 130)
+        self.amplitude_legend = add_legend(self.amplitude_plot.getPlotItem(), offset=(-10, 10))
+        self.peaks_plot = _plot("Probability density", None, "Peak height / σ", None, log=False)
+        self.peaks_plot.setToolTip(PEAKS_TIP)
+        plot_height(self.peaks_plot, 130)
+        self.peaks_legend = add_legend(self.peaks_plot.getPlotItem(), offset=(-10, 10))
+        for p in (self.amplitude_plot, self.peaks_plot):
+            p.setMouseEnabled(x=False, y=False)
+        self.stats_table = QtWidgets.QLabel()
+        self.stats_table.setWordWrap(True)
+        self.stats_table.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self.largest_over = spin(0.1, 1e6, 60.0, 1, " s")
+        self.largest_over.setToolTip(LARGEST_TIP)
+        self.largest_note = QtWidgets.QLabel()
+        self.largest_note.setWordWrap(True)
+        self.largest_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        stats_tab = QtWidgets.QWidget()
+        sv = QtWidgets.QVBoxLayout(stats_tab)
+        sv.addWidget(self.amplitude_plot, 1)
+        sv.addWidget(self.peaks_plot, 1)
+        sv.addWidget(self.stats_table)
+        row = QtWidgets.QFormLayout()
+        label = QtWidgets.QLabel("Largest peak over:")
+        label.setToolTip(LARGEST_TIP)
+        row.addRow(label, self.largest_over)
+        sv.addLayout(row)
+        sv.addWidget(self.largest_note)
+        stats_scroll = ColumnScroll(stats_tab)
+
         self.notes = QtWidgets.QTextBrowser()
         self.notes.setHtml(NOTES_HTML)
         self.tabs = QtWidgets.QTabWidget()
@@ -324,6 +394,8 @@ class RandomVibrationPage(QtWidgets.QWidget):
         self.record_tab = record_tab
         self.tabs.addTab(miles_tab, "Miles")
         self.tabs.addTab(record_tab, "Record")
+        self.stats_tab = stats_scroll
+        self.tabs.addTab(stats_scroll, "Statistics")
         self.tabs.addTab(self.notes, "Notes")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -343,6 +415,7 @@ class RandomVibrationPage(QtWidgets.QWidget):
         self.quantity.currentIndexChanged.connect(self._on_output)
         self.index.currentIndexChanged.connect(self._on_output)
         self.block.currentIndexChanged.connect(lambda _: self._on_output())
+        self.largest_over.valueChanged.connect(lambda _: self._show_largest())
         self.new_record.clicked.connect(self._on_new_record)
         self.trial.currentIndexChanged.connect(lambda _: self.apply_trial())
 
@@ -560,6 +633,78 @@ class RandomVibrationPage(QtWidgets.QWidget):
             f"{rec.fs / block:.3g} Hz apart.")
         self._fill_miles(pred, unit)
         self._draw_record(y, rec.fs, pred.rms, unit)
+        self._draw_statistics(y, rec.fs, pred, unit)
+
+    def _draw_statistics(self, y: np.ndarray, fs: float, pred: Prediction, unit: str) -> None:
+        r = rice(pred)
+        self._rice = r
+        if r.sigma <= 0:
+            self.stats_table.setText("")
+            self.largest_note.setText("")
+            return
+        st = record_statistics(y, fs)
+        self._stats = st
+        dash = QtCore.Qt.PenStyle.DashLine
+
+        p = self.amplitude_plot
+        p.clear()
+        self.amplitude_legend.clear()
+        h, edges = np.histogram((y - np.mean(y)) / r.sigma, bins=AMPLITUDE_BINS, range=(-5.0, 5.0), density=True)
+        bars = p.plot(edges, h, stepMode="center", fillLevel=0, pen=pg.mkPen(colors.mass[0], width=1),
+                      brush=pg.mkBrush(_alpha(colors.mass[0], 90)))
+        eta = np.linspace(-5.0, 5.0, 401)
+        gauss = p.plot(eta, np.exp(-0.5 * eta * eta) / math.sqrt(2 * math.pi), pen=pg.mkPen(colors.strong, width=2))
+        self.amplitude_legend.addItem(bars, "The record")
+        self.amplitude_legend.addItem(gauss, "Gaussian")
+        for k in LEVELS:
+            for sign in (1, -1):
+                p.addItem(pg.InfiniteLine(sign * k, angle=90, pen=pg.mkPen(colors.faint, width=1, style=dash)))
+        p.setXRange(-5.0, 5.0, padding=0.0)
+
+        p = self.peaks_plot
+        p.clear()
+        self.peaks_legend.clear()
+        h, edges = np.histogram(st.peaks * st.sigma / r.sigma, bins=PEAK_BINS, range=(-3.0, 5.0), density=True)
+        bars = p.plot(edges, h, stepMode="center", fillLevel=0, pen=pg.mkPen(colors.mass[1], width=1),
+                      brush=pg.mkBrush(_alpha(colors.mass[1], 90)))
+        eta = np.linspace(-3.0, 5.0, 401)
+        theory = p.plot(eta, peak_pdf(eta, r.alpha), pen=pg.mkPen(colors.strong, width=2))
+        self.peaks_legend.addItem(bars, "The record's peaks")
+        self.peaks_legend.addItem(theory, f"Rice, α = {r.alpha:.2f}")
+        p.setXRange(-3.0, 5.0, padding=0.0)
+
+        def row(name: str, exact: str, record: str) -> str:
+            return f"<tr><td>{name}</td><td align='right'>{exact}</td><td align='right'>{record}</td></tr>"
+
+        rows = [row("σ", fmt(r.sigma, unit), fmt(st.sigma, unit)),
+                row("Upward zero crossings", f"{r.nu0:.4g} /s", f"{st.nu0:.4g} /s"),
+                row("Peaks", f"{r.nu_peak:.4g} /s", f"{st.nu_peak:.4g} /s"),
+                row("Irregularity α", f"{r.alpha:.3f}", f"{st.nu0 / st.nu_peak:.3f}" if st.nu_peak else "–")]
+        rows += [row(f"Beyond ±{k:g}σ", f"{100 * gaussian_exceedance(k):.3g} %", f"{100 * e:.3g} %")
+                 for k, e in zip(LEVELS, st.exceedance)]
+        rows += [row("Skewness", "0", f"{st.skewness:+.3f}"), row("Kurtosis", "3", f"{st.kurtosis:.3f}")]
+        self.stats_table.setText("<table cellspacing='6'><tr><th></th><th align='right'>Rice, Gaussian</th>"
+                                 "<th align='right'>The record</th></tr>" + "".join(rows) + "</table>")
+        self._show_largest()
+
+    def _show_largest(self) -> None:
+        r, rec = getattr(self, "_rice", None), self.record
+        if r is None or rec is None or r.sigma <= 0:
+            return
+        unit = self.output().unit()
+        t = self.largest_over.value()
+        dav, van = r.peak_factor(t), r.clumped_peak_factor(t)
+        y = rec.output(self.output())
+        maxima = segment_maxima(y, rec.fs, t)
+        text = (f"Over {t:g} s ({r.nu0 * t:.3g} cycles), the expected largest peak: Davenport {dav:.3g}σ = "
+                f"{fmt(dav * r.sigma, unit)}; Vanmarcke (δ = {r.delta:.2f}) {van:.3g}σ = {fmt(van * r.sigma, unit)}.")
+        if maxima.size >= 4:
+            mean = float(np.mean(maxima)) / r.sigma
+            text += (f" The record's {maxima.size} stretches of {t:g} s: their largest values average "
+                     f"<b>{mean:.3g}σ</b>.")
+        else:
+            text += f" (The record is too short for four stretches of {t:g} s to compare.)"
+        self.largest_note.setText(text)
 
     def _fill_miles(self, pred: Prediction, unit: str) -> None:
         t = self.miles_table
@@ -598,6 +743,12 @@ class RandomVibrationPage(QtWidgets.QWidget):
         p.setYRange(-4.0 * sigma, 4.0 * sigma, padding=0.02)
         self.record_note.setText(f"The first {n / fs:.3g} s ({SHOWN_PERIODS} periods of mode 1); dashed ±σ, "
                                  f"dotted ±3σ, σ the exact RMS.")
+
+
+def _alpha(color: str, alpha: int):
+    c = pg.mkColor(color)
+    c.setAlpha(alpha)
+    return c
 
 
 def _nice(x: float) -> float:
