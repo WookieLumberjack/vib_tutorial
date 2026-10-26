@@ -16,8 +16,21 @@ from PySide6 import QtCore, QtWidgets
 from ..core.complex_modes import complexity
 from ..core.modal import ModalResult, modal_analysis
 from ..core.model import ChainSystem
-from ..core.model_updating import Correlation, Errors, Source, Test, correlate, measure
-from .layouts import ColumnScroll, FlowLayout, plot_height
+from ..core.model_updating import (
+    Correlation,
+    Errors,
+    Kind,
+    Residuals,
+    Source,
+    Test,
+    Update,
+    correlate,
+    frequency_sensitivity,
+    measure,
+    parameters,
+    update,
+)
+from .layouts import ColumnScroll, FlowLayout, group, plot_height
 from .modal_extraction import MacPlot, colored
 from .panels import spin
 from .style import MAX_DOF, colors
@@ -50,6 +63,20 @@ COMAC_TIP = ("<p>COMAC per sensor: how well the paired shapes agree there, over 
              "(Σ|ψ<sub>i</sub>φ<sub>i</sub>|)²/(Σ|ψ<sub>i</sub>|² Σφ<sub>i</sub>²), each test shape scaled onto its "
              "model shape first. Low where the shapes disagree.</p>")
 
+UPDATE_TIP = (
+    "<p>Sensitivity-based updating: the chosen parameters are changed, by Gauss–Newton steps on their logarithms, "
+    "until the model's paired frequencies (and, if ticked, its shapes at the sensors and its damping ratios) "
+    "match the test's as closely as they can. Each step's slopes come from the model's sensitivities. "
+    "Regularization λ adds λ²‖ln p‖²: it keeps the model near where it started, and settles what the data "
+    "can't.</p>")
+FACTOR_TIP = ("<p>Each parameter's model value over the structure's, step by step: 1 is the truth, which only "
+              "this page can know. Springs solid, masses dashed, dampers dotted, in their mass's colour.</p>")
+SENSITIVITY_TIP = (
+    "<p>∂ln f<sub>r</sub>/∂ln p: how much each model mode's frequency changes for a change in each parameter. A "
+    "spring's is half its share of the mode's strain energy, a mass's minus half its share of the kinetic energy. "
+    "A parameter no mode is sensitive to can't be updated from frequencies.</p>")
+DEFAULT_UPDATE = {"kinds": (Kind.SPRING,), "shapes": True, "damping": False, "weight": 0.1, "reg": 0.0}
+
 # Errors to try: (name, {"k": {element: factor}, "m": ..., "c": ..., "all_k": factor, "sensors": [...],
 # "source": Source}, note). Elements count from 0; -1 is the last.
 TRIALS = (
@@ -75,6 +102,24 @@ TRIALS = (
      "The model is exactly the structure. Every difference left is the test's: its frequencies within "
      "0.3 %, and the highest mode it finds (mode 3) at a MAC of only 0.92, its curve fit's error. The model "
      "can't be correlated more finely than that."),
+    ("Update: find the stiff spring", {"k": {2: 1.3}, "source": Source.HAMMER},
+     "The springs updated against the hammer test's three frequencies and shapes (Updating tab): k3 comes down "
+     "from 1.30 to 1.02 in a few steps, and the other springs stay within 3.5 % of the truth. What is left is "
+     "the test's: its shapes' errors pull the springs a little. Apply it to the model and correlate again."),
+    ("Update: masses too, not unique", {"k": {2: 1.3}, "source": Source.EXACT,
+                                        "update": {"kinds": (Kind.SPRING, Kind.MASS)}},
+     "Springs and masses updated together against every mode: the fit is near perfect, but every factor comes "
+     "out 2 to 4 % high instead of k3 alone coming down. Scaling every mass and spring together changes no "
+     "frequency and no shape: one singular value is 0, and the data can't fix that direction. Pin it with a "
+     "known mass (untick masses) or regularization."),
+    ("Update: regularized", {"k": {2: 1.3}, "source": Source.HAMMER, "update": {"reg": 1.0}},
+     "The same springs, regularization λ = 1: the fit is held near where it started, and k3 only comes down to "
+     "1.29. Regularization trades the fit for the smallest change; it settles what the data can't, but here "
+     "it keeps the model's error. Lower it and watch k3 come down."),
+    ("Update: the dampers", {"all_c": 2.0, "source": Source.HAMMER,
+                            "update": {"kinds": (Kind.DAMPER,), "shapes": False, "damping": True}},
+     "The model's dampers are twice the structure's; the dampers updated against the measured damping ratios. "
+     "They come back to within 15 % of the truth: the hammer test's ζ are its least accurate numbers."),
 )
 
 NOTES_HTML = """
@@ -117,6 +162,31 @@ noise is spread over every sensor.</p>
 <p>The test is not exact either: its noise and its curve fit give each mode an error of its own, and weakly
 excited modes may be missed. The correlation can't be finer than that: with no error at all in the model, the
 MACs and frequency errors left are the test's.</p>
+
+<h3>Updating by sensitivities</h3>
+<p>Updating changes the model's parameters p (here its masses, springs or dampers) until it matches the test.
+The residual r is test minus model: each pair's frequency, relatively, and if asked its shape at the sensors
+and its damping ratio. How the model's frequencies move with each parameter is its <b>sensitivity</b>; with
+mass-normalized φ,</p>
+<p align="center">∂ω<sub>r</sub>²/∂p = φ<sub>r</sub><sup>T</sup>(∂K/∂p − ω<sub>r</sub>² ∂M/∂p)φ<sub>r</sub>,</p>
+<p>so a spring changes ln f<sub>r</sub> by half its share of the mode's strain energy, and a mass by minus half
+its share of the kinetic energy (the <i>Sensitivity</i> tab). A spring that hardly stretches in a mode can't be
+seen in that mode's frequency. Each <b>Gauss–Newton</b> step solves the linearized problem, the slopes J of the
+residual against ln p, by least squares,</p>
+<p align="center">min ‖r + JΔ‖² + λ²‖θ + Δ‖²,</p>
+<p>θ the change in ln p so far, and repeats until nothing moves. The <i>Updating</i> tab follows each parameter,
+as a fraction of the structure's true value, step by step.</p>
+
+<h3>What the data can't settle</h3>
+<p>With fewer independent residuals than parameters some combinations of them change nothing measured: J's
+singular values show them, near 0. Masses and springs together are the classic case: scaling every one by the
+same factor leaves every frequency and shape as it was, so a test of modes alone can't fix the model's
+overall mass. The least-squares step then takes the smallest change it can, and the answer fits the test but
+needn't be the structure. <b>Regularization</b> (λ) adds a penalty on the change: it settles those directions
+by keeping the model near where it started, at the price of the fit. Too much, and the model keeps its
+errors. A measured mass, or fewer parameters chosen with engineering judgment (the joints, not every
+element), are better than a large λ. And the test's own errors go into the model: the updated parameters are
+only as good as the modes they were fitted to.</p>
 """
 
 
@@ -307,6 +377,58 @@ class ModelUpdatingPage(QtWidgets.QWidget):
         ov.addWidget(self.comac_plot, 1)
         ov.addWidget(self.comac_note)
 
+        self.update_kind = {k: QtWidgets.QCheckBox(name) for k, name in
+                            ((Kind.SPRING, "springs"), (Kind.MASS, "masses"), (Kind.DAMPER, "dampers"))}
+        self.fit_shapes = QtWidgets.QCheckBox("shapes, weight")
+        self.shape_weight = spin(0.0, 10.0, 0.1, 2)
+        self.fit_damping = QtWidgets.QCheckBox("damping ratios")
+        self.regularization = spin(0.0, 100.0, 0.0, 3)
+        for w in (*self.update_kind.values(), self.fit_shapes, self.shape_weight, self.fit_damping,
+                  self.regularization):
+            w.setToolTip(UPDATE_TIP)
+        self.apply_update = QtWidgets.QPushButton("Apply to the model")
+        self.apply_update.setToolTip("<p>Set the model's errors to the updated ones, and correlate again.</p>")
+        self.factor_plot = _plot("Model / structure", "Iteration")
+        self.factor_plot.setToolTip(FACTOR_TIP)
+        self.factor_legend = add_legend(self.factor_plot.getPlotItem(), offset=(-10, 10), colCount=2)
+        self.cost_plot = _plot("‖residual‖", "Iteration")
+        self.cost_plot.setLogMode(x=False, y=True)
+        self.cost_plot.setToolTip(UPDATE_TIP)
+        plot_height(self.factor_plot, 170)
+        plot_height(self.cost_plot, 90)
+        self.update_note = QtWidgets.QLabel()
+        self.update_note.setWordWrap(True)
+        self.update_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        update_tab = QtWidgets.QWidget()
+        uv = QtWidgets.QVBoxLayout(update_tab)
+        row = FlowLayout()
+        row.addWidget(group("Update:", *self.update_kind.values()))
+        row.addWidget(group("Fit frequencies,", self.fit_shapes, self.shape_weight, self.fit_damping))
+        row.addWidget(group("Regularization λ:", self.regularization))
+        row.addWidget(self.apply_update)
+        uv.addLayout(row)
+        uv.addWidget(self.factor_plot, 3)
+        uv.addWidget(self.cost_plot, 2)
+        uv.addWidget(self.update_note)
+        update_scroll = ColumnScroll(update_tab)
+
+        self.sens_plot = MacPlot()
+        self.sens_plot.setLabel("bottom", "Parameter")
+        self.sens_plot.setLabel("left", "Model mode")
+        self.sens_plot.setTitle("∂ln f / ∂ln p", size="9pt")
+        self.sens_plot.setToolTip(SENSITIVITY_TIP)
+        plot_height(self.sens_plot, 200)
+        self.sens_note = QtWidgets.QLabel(
+            "Colour: the size; the number: the value. A spring stiffens every mode it stretches in; a mass slows "
+            "every mode it moves in.")
+        self.sens_note.setWordWrap(True)
+        mute(self.sens_note)
+        sens_tab = QtWidgets.QWidget()
+        nv = QtWidgets.QVBoxLayout(sens_tab)
+        nv.addWidget(self.sens_plot, 1)
+        nv.addWidget(self.sens_note)
+        self.update_result: Update | None = None
+
         self.notes = QtWidgets.QTextBrowser()
         self.notes.setHtml(NOTES_HTML)
         self.tabs = QtWidgets.QTabWidget()
@@ -315,6 +437,9 @@ class ModelUpdatingPage(QtWidgets.QWidget):
         self.tabs.addTab(shape_tab, "Shapes")
         self.tabs.addTab(auto_tab, "Auto-MAC")
         self.tabs.addTab(comac_tab, "COMAC")
+        self.update_tab, self.sens_tab = update_scroll, sens_tab
+        self.tabs.addTab(update_scroll, "Updating")
+        self.tabs.addTab(sens_tab, "Sensitivity")
         self.tabs.addTab(self.notes, "Notes")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -332,6 +457,13 @@ class ModelUpdatingPage(QtWidgets.QWidget):
         self.clear_errors.clicked.connect(self._on_clear)
         self.trial.currentIndexChanged.connect(lambda _: self.apply_trial())
         self.table.itemSelectionChanged.connect(self._draw_shapes)
+        for w in (*self.update_kind.values(), self.fit_shapes, self.fit_damping):
+            w.toggled.connect(lambda _: self._on_update_settings())
+        for w in (self.shape_weight, self.regularization):
+            w.valueChanged.connect(lambda _: self._on_update_settings())
+        self.apply_update.clicked.connect(self._on_apply_update)
+        self.tabs.currentChanged.connect(lambda _: self._draw_update())
+        self._set_update_settings(DEFAULT_UPDATE)
 
     # ------------------------------------------------------------- inputs
     def set_system(self, system: ChainSystem, result: ModalResult | None = None) -> None:
@@ -396,7 +528,8 @@ class ModelUpdatingPage(QtWidgets.QWidget):
         self.errors = errors
 
     def apply_trial(self) -> None:
-        """Set the errors (and the test) the chosen trial asks for, on the chain as it is."""
+        """Set the errors (and the test) the chosen trial asks for, on the chain as it is, measured with the first
+        seed: the notes quote that measurement."""
         if self.system is None:
             return
         _, changes, note = TRIALS[self.trial.currentIndex()]
@@ -414,9 +547,33 @@ class ModelUpdatingPage(QtWidgets.QWidget):
             box.setChecked(i in want)
         if "source" in changes:
             self.source.setCurrentIndex(self.source.findData(changes["source"]))
+        self._set_update_settings({**DEFAULT_UPDATE, **changes.get("update", {})})
         self._loading = False
         self.trial_note.setText(note)
-        self._schedule(measure=self.test is None or self.test.source is not self.source.currentData())
+        again = self.test is None or self.test.source is not self.source.currentData() or self.seed != 1
+        self.seed = 1  # the notes' numbers are this measurement's
+        self._schedule(measure=again)
+
+    def _set_update_settings(self, settings: dict) -> None:
+        loading, self._loading = self._loading, True
+        for k, box in self.update_kind.items():
+            box.setChecked(k in settings["kinds"])
+        self.fit_shapes.setChecked(settings["shapes"])
+        self.fit_damping.setChecked(settings["damping"])
+        self.shape_weight.setValue(settings["weight"])
+        self.regularization.setValue(settings["reg"])
+        self._loading = loading
+
+    def _on_update_settings(self) -> None:
+        self.shape_weight.setEnabled(self.fit_shapes.isChecked())
+        if not self._loading:
+            self.update_result = None
+            self._draw_update()
+
+    def _on_apply_update(self) -> None:
+        if self.update_result is not None:
+            self._set_errors(self.update_result.errors)
+            self._schedule(measure=False, now=True)
 
     def _on_errors(self, *_args) -> None:
         if not self._loading:
@@ -468,6 +625,7 @@ class ModelUpdatingPage(QtWidgets.QWidget):
             self.test = measure(self.system, self.source.currentData(), mask, self.seed, self.result)
             self._remeasure = False
         self.corr = correlate(self.system, self.errors, self.test.with_sensors(mask))
+        self.update_result = None
         self.redraw()
 
     # ------------------------------------------------------------- drawing
@@ -502,6 +660,7 @@ class ModelUpdatingPage(QtWidgets.QWidget):
         self._draw_shapes()
         self._draw_auto()
         self._draw_comac()
+        self._draw_update()
         if c.pairs:
             worst = max(c.pairs, key=lambda p: abs(p.error))
             low = min(c.pairs, key=lambda p: p.mac)
@@ -632,3 +791,63 @@ class ModelUpdatingPage(QtWidgets.QWidget):
                                     "pairs. A weak locator: a stiffness error changes every shape a little.")
         else:
             self.comac_note.setText("")
+
+    def _draw_update(self) -> None:
+        """The Updating and Sensitivity tabs, when they show (updated once per correlation and setting)."""
+        c = self.corr
+        tab = self.tabs.currentWidget()
+        if c is None or tab not in (self.update_tab, self.sens_tab):
+            return
+        kinds = [k for k, box in self.update_kind.items() if box.isChecked()]
+        params = parameters(self.system.n, kinds)
+        if tab is self.sens_tab:
+            sens = frequency_sensitivity(c.model, c.result, params)
+            top = float(np.max(np.abs(sens))) if sens.size else 1.0
+            self.sens_plot.set_matrix(np.abs(sens) / (top or 1.0), [f"M{r + 1}" for r in range(sens.shape[0])],
+                                      [p.name for p in params], text=sens, fmt="{:+.2f}")
+            return
+        if self.update_result is None:
+            what = Residuals(self.fit_shapes.isChecked(), self.fit_damping.isChecked(), self.shape_weight.value())
+            self.update_result = update(self.system, self.errors, c.test, params, what, self.regularization.value())
+        u = self.update_result
+        p, q = self.factor_plot, self.cost_plot
+        p.clear()
+        q.clear()
+        self.factor_legend.clear()
+        steps = np.arange(len(u.history))
+        styles = {Kind.SPRING: QtCore.Qt.PenStyle.SolidLine, Kind.MASS: QtCore.Qt.PenStyle.DashLine,
+                  Kind.DAMPER: QtCore.Qt.PenStyle.DotLine}
+        factors = np.array([u.factors(it.errors) for it in u.history]).reshape(len(u.history), len(u.params))
+        for j, prm in enumerate(u.params):
+            curve = p.plot(steps, factors[:, j], pen=pg.mkPen(colors.mass[prm.element], width=2,
+                                                              style=styles[prm.kind]))
+            self.factor_legend.addItem(curve, prm.name)
+        p.addItem(pg.InfiniteLine(1.0, angle=0, pen=pg.mkPen(colors.faint, width=1)))
+        if factors.size:
+            lo, hi = min(float(factors.min()), 1.0), max(float(factors.max()), 1.0)
+            pad = 0.08 * (hi - lo) + 0.02
+            p.setRange(xRange=(0, max(1, len(u.history) - 1)), yRange=(lo - pad, hi + pad), padding=0)
+        costs = np.maximum([it.cost for it in u.history], 1e-12)
+        q.plot(steps, costs, pen=pg.mkPen(colors.strong, width=2), symbol="o", symbolSize=5,
+               symbolBrush=pg.mkBrush(colors.strong), symbolPen=None)
+        q.setXRange(0, max(1, len(u.history) - 1), padding=0)
+        self.apply_update.setEnabled(len(u.history) > 1)
+        if not u.params or not u.pairs:
+            self.update_note.setText("Nothing to update: tick a kind of parameter, and pair some modes.")
+            return
+        final = factors[-1]
+        worst = int(np.argmax(np.abs(np.log(final))))
+        start = factors[0]
+        moved = int(np.argmax(np.abs(np.log(final / start))))
+        sv = u.history[1].singular if len(u.history) > 1 else np.zeros(0)
+        text = (f"{len(u.history) - 1} steps; ‖residual‖ {u.history[0].cost:.3g} → <b>{u.history[-1].cost:.3g}</b>. "
+                f"Largest change: {u.params[moved].name}, {start[moved]:.3f} → <b>{final[moved]:.3f}</b> of the "
+                f"structure's. Furthest from the truth now: {u.params[worst].name} at {final[worst]:.3f}.")
+        if sv.size:
+            unseen = int(np.sum(sv < 1e-3 * sv[0]))
+            rank_note = (f" {unseen} of the {len(u.params)} directions in the parameters "
+                         f"{'changes' if unseen == 1 else 'change'} nothing the test measures (a singular value of "
+                         f"0): the data can't settle {'it' if unseen == 1 else 'them'}." if unseen else "")
+            text += f" Singular values {sv.max():.3g} to {sv.min():.2g}.{rank_note}"
+        self.update_note.setText(text)
+

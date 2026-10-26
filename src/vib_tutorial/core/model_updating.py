@@ -211,3 +211,157 @@ def correlate(structure: ChainSystem, errors: Errors, test: Test, min_mac: float
     f_model = [m.damped.fn_hz if m.damped is not None else m.fn_hz for m in result.modes]
     pairs = pair(macs, [m.fn_hz for m in test.modes], f_model, min_mac)
     return Correlation(model, result, test, macs, pairs, mac(shapes, shapes), comac(shapes, model_shapes, pairs))
+
+
+# ------------------------------------------------------------------ updating
+class Kind(enum.Enum):
+    MASS = "m"
+    SPRING = "k"
+    DAMPER = "c"
+
+
+@dataclass(frozen=True)
+class Parameter:
+    kind: Kind
+    element: int  # 0-based
+
+    @property
+    def name(self) -> str:
+        return f"{self.kind.value}{self.element + 1}"
+
+
+def parameters(n: int, kinds: list[Kind]) -> list[Parameter]:
+    """Every element of each kind, kind by kind."""
+    return [Parameter(k, i) for k in kinds for i in range(n)]
+
+
+def updated_errors(errors: Errors, params: list[Parameter], theta: np.ndarray) -> Errors:
+    """The model's errors with each parameter multiplied by e^θ (θ = 0: the model as it is)."""
+    m, k, c = errors.mass.copy(), errors.stiffness.copy(), errors.damping.copy()
+    arrays = {Kind.MASS: m, Kind.SPRING: k, Kind.DAMPER: c}
+    for p, t in zip(params, theta):
+        arrays[p.kind][p.element] *= math.exp(t)
+    return Errors(m, k, c)
+
+
+def frequency_sensitivity(model: ChainSystem, result: ModalResult, params: list[Parameter]) -> np.ndarray:
+    """∂ln f_r/∂ln p for each undamped mode r and parameter p: (modes, params), in closed form.
+
+    With φ mass-normalized, ω_r² = φᵀKφ, and dω_r²/dp = φᵀ(∂K/∂p − ω_r² ∂M/∂p)φ. A spring k_j stretched by
+    Δ_j = φ_j − φ_{j−1} gives ∂ln f/∂ln k_j = k_j Δ_j² / 2ω²: its share of the mode's strain energy, halved.
+    A mass gives −m_j φ_j² / 2: its share of the kinetic energy, halved. A damper doesn't move the undamped
+    frequencies.
+    """
+    out = np.zeros((len(result.modes), len(params)))
+    for r, mode in enumerate(result.modes):
+        phi, w2 = mode.shape_mass_normalized, mode.omega_n**2
+        stretch = np.diff(phi, prepend=0.0)
+        for j, p in enumerate(params):
+            if p.kind is Kind.SPRING and w2 > 0:
+                out[r, j] = model.stiffness[p.element] * stretch[p.element] ** 2 / (2 * w2)
+            elif p.kind is Kind.MASS:
+                out[r, j] = -model.masses[p.element] * phi[p.element] ** 2 / 2
+    return out
+
+
+SHAPE_WEIGHT = 1.0  # a shape residual (an entry of the shape, peak 1) against a relative frequency one
+STEP_LIMIT = 0.5  # at most this much change in ln p per iteration
+FD_STEP = 1e-6
+RCOND = 1e-3  # singular values under this times the largest count as zero: directions the data can't see
+
+
+@dataclass(frozen=True)
+class Residuals:
+    """What the updating fits: the paired frequencies always, the shapes and damping ratios if asked."""
+
+    shapes: bool = True
+    damping: bool = False
+    shape_weight: float = SHAPE_WEIGHT
+
+
+def _realized(psi: np.ndarray, phi: np.ndarray) -> np.ndarray:
+    """A complex test shape turned onto its best-fit line and scaled onto a real model shape."""
+    from .complex_modes import complexity
+
+    real = (psi * np.exp(-1j * complexity(psi).angle)).real
+    den = float(real @ real)
+    return real * float(real @ phi) / den if den > 0 else real
+
+
+def residual(structure: ChainSystem, errors: Errors, test: Test, pairs: list[tuple[int, int]],
+             what: Residuals) -> np.ndarray:
+    """Test minus model, for the given (test, model) pairs: frequencies relative, then shapes, then ζ relative."""
+    result = modal_analysis(errors.model(structure))
+    sensors = test.sensors
+    f, s, z = [], [], []
+    for t, m in pairs:
+        mode = result.modes[m]
+        f_model = mode.damped.fn_hz if mode.damped is not None else mode.fn_hz
+        f.append(1.0 - f_model / test.modes[t].fn_hz)
+        if what.shapes:
+            phi = mode.shape[sensors]
+            s.append(what.shape_weight * (_realized(test.modes[t].shape[sensors], phi) - phi))
+        if what.damping:
+            z_model = mode.damped.zeta if mode.damped is not None else 1.0
+            z.append(1.0 - z_model / test.modes[t].zeta)
+    return np.concatenate([np.array(f), *s, np.array(z)])
+
+
+@dataclass(frozen=True)
+class Iteration:
+    theta: np.ndarray  # ln of each parameter's change so far
+    errors: Errors  # the model's errors then
+    cost: float  # ‖residual‖
+    singular: np.ndarray  # the Jacobian's singular values at the start of the step
+
+
+@dataclass(frozen=True)
+class Update:
+    params: list[Parameter]
+    pairs: list[tuple[int, int]]
+    history: list[Iteration]  # the first is the model as it was
+
+    @property
+    def errors(self) -> Errors:
+        return self.history[-1].errors
+
+    def factors(self, errors: Errors | None = None) -> np.ndarray:
+        """Each parameter's model value over the structure's: 1 where the updating found the truth."""
+        e = errors or self.errors
+        arrays = {Kind.MASS: e.mass, Kind.SPRING: e.stiffness, Kind.DAMPER: e.damping}
+        return np.array([arrays[p.kind][p.element] for p in self.params])
+
+
+def update(structure: ChainSystem, errors: Errors, test: Test, params: list[Parameter],
+           what: Residuals = Residuals(), regularization: float = 0.0, iterations: int = 10) -> Update:
+    """Gauss–Newton on ln p: each step minimizes ‖r + JΔ‖² + λ²‖θ + Δ‖², λ the regularization.
+
+    The pairs are the correlation's at the start, kept fixed. J comes by finite differences. With λ = 0 and
+    fewer independent residuals than parameters, the least-norm step is taken (numpy's lstsq).
+    """
+    pairs = [(p.test, p.model) for p in correlate(structure, errors, test).pairs]
+    theta = np.zeros(len(params))
+
+    def r_at(th: np.ndarray) -> np.ndarray:
+        return residual(structure, updated_errors(errors, params, th), test, pairs, what)
+
+    r = r_at(theta)
+    history = [Iteration(theta.copy(), errors, float(np.linalg.norm(r)), np.zeros(0))]
+    if not pairs or not params:
+        return Update(params, pairs, history)
+    for _ in range(iterations):
+        J = np.column_stack([(r_at(theta + FD_STEP * e) - r) / FD_STEP for e in np.eye(len(params))])
+        singular = np.linalg.svd(J, compute_uv=False)
+        A = np.vstack([J, regularization * np.eye(len(params))])
+        b = -np.concatenate([r, regularization * theta])
+        step = np.linalg.lstsq(A, b, rcond=RCOND)[0]
+        biggest = float(np.max(np.abs(step)))
+        if biggest > STEP_LIMIT:
+            step *= STEP_LIMIT / biggest
+        theta = theta + step
+        r = r_at(theta)
+        history.append(Iteration(theta.copy(), updated_errors(errors, params, theta), float(np.linalg.norm(r)),
+                                 singular))
+        if biggest < 1e-8:
+            break
+    return Update(params, pairs, history)
