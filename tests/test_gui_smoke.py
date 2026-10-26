@@ -3198,3 +3198,66 @@ def test_oma_page(app):
     w.set_theme("Dark")
     w.set_theme("Light")
     w.close()
+
+
+def test_continuum_page(app):
+    """The continuous systems page loads each preset, picks a mode (spin box, table, a click on the error plot),
+    switches the kind (the ends refill), meshes it finer and coarser, hides a scheme, and survives a theme switch."""
+    from PySide6.QtCore import QPointF
+
+    from vib_tutorial.core.continuum import PRESETS, End, Kind, Scheme
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.continuum_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    assert w.pages.tabText(w.pages.currentIndex()) == "Continuous systems"
+    assert p.preset.currentText() == "Guitar string (low E)" and p.frame_context() == p.preset.currentText()
+    assert "wave speed c = 106.8 m/s" in p.medium_info.text()
+    p.mode.setValue(6)
+    assert "<b>Mode 6</b>" in p.readout.text() and "4 elements</b>" in p.readout.text()
+    assert "lumped 445.2 Hz (-9.97 %)" in p.readout.text()
+    assert "lumped 1.000000" in p.shape_note.text()  # the nodes are the exact shape's, only f is off
+    assert p.table.currentRow() == 5 and p.table.item(5, 3).text() == "-9.97 %"
+    p.views.setCurrentWidget(p.errors_tab)
+    app.processEvents()
+    assert "lumped N<sup>−2</sup>" in p.convergence_note.text() and "mixed N<sup>−4</sup>" in p.convergence_note.text()
+
+    vb = p.errors.getPlotItem().getViewBox()
+
+    class Click:
+        def __init__(self, x, y):
+            self.at = vb.mapViewToScene(QPointF(x, y))
+
+        def scenePos(self):  # noqa: N802 (Qt's name)
+            return self.at
+
+    p._on_errors_click(Click(3.2, 0.0))
+    assert p.mode.value() == 3
+    p.table.selectRow(8)
+    assert p.mode.value() == 9
+
+    for preset in (*PRESETS[1:], PRESETS[0]):
+        p.preset.setCurrentText(preset.name)
+        assert p.continuum == preset.continuum and p.elements.value() == preset.elements
+        assert p.preset_note.text() == preset.note and p.mode.value() == 1
+
+    p.kind.setCurrentText("Bar")
+    assert p.preset.currentText() == "Custom" and p.continuum.kind is Kind.BAR
+    assert [p.left_end.itemText(i) for i in range(p.left_end.count())] == ["Fixed", "Free"]
+    assert p.continuum.left is End.FIXED and p.material.currentIndex() == 1
+    p.kind.setCurrentText("String")
+    assert p.material.currentIndex() == 0 and p.continuum.kind is Kind.STRING
+    p.elements.setValue(1)  # fixed–fixed, one element: nothing free
+    assert not p.mode.isEnabled() and "No flexible mode" in p.readout.text()
+    p.elements.setValue(40)
+    assert p.mode.isEnabled() and p.mode.maximum() == 39
+    p.shown[Scheme.LUMPED].setChecked(False)
+    assert "lumped" not in p.readout.text() and "consistent" in p.readout.text()
+
+    w.set_theme("Dark")
+    p.tabs.setCurrentWidget(p.table)
+    w.set_theme("Light")
+    w.close()

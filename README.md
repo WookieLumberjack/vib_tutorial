@@ -50,7 +50,8 @@ ambient forces alone. The **Jeffcott rotor** page leaves the chain for a
 spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
 page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
 resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes,
-and starts it with a motor (all below).
+and starts it with a motor, and the **Continuous systems** page refines the chain into a string, a
+bar or a beam to show which of its modes to trust (all below).
 
 ### Themes
 
@@ -930,6 +931,44 @@ runs up: they pass the 83.1 Hz mode at 254 rpm and the 38.9 Hz one at 916 rpm. T
 low-speed coupling up to 11.3 kN·m, 4.5× what it carries running, before the field pulls the motor
 into step at 1500 rpm.
 
+### Continuous systems
+
+The **Continuous systems** page goes the other way from the chain: a string, a bar or a beam is a
+continuum with infinitely many modes, and the chain is what you get by cutting it into N equal
+elements. Its waves say which of the chain's modes to trust.
+
+- **The medium**: a string (tension, mass per length), a bar (axial waves) or an Euler–Bernoulli
+  beam (bending), its length, material and section, and each end fixed or free (a beam's clamped,
+  pinned or free). The exact modes come in closed form, a beam's from its ends' frequency equation.
+- **The mesh**: 1 to 200 elements, linear for the string and bar and Hermite cubics for the beam,
+  with three ways to share out the mass, shown together: *lumped* (half to each node: beads on a
+  string, or the first page's chain), *consistent* (from the stiffness's own shape functions, an
+  upper bound on every frequency) and *mixed* (their average).
+- **Dispersion**: frequency against wavenumber, the continuum's (ω = cκ, or aκ² for a beam) with each
+  mesh's, which bends away and stops at κ = π/h, two elements a wavelength. The mesh's modes are dots
+  on it: a string's or bar's lie exactly on the mesh's curve, since its modes are the endless mesh's
+  waves sampled at the nodes. A beam's consistent mass adds a second branch, the slopes against the
+  deflections, drawn past π/h, where its extra modes land.
+- **Errors**: each mode's frequency error against its number, and the chosen mode's against the
+  number of elements on log scales, with the slope: N<sup>−2</sup> lumped or consistent, N<sup>−4</sup>
+  mixed for a string or bar; N<sup>−2</sup> lumped and N<sup>−4</sup> consistent for a beam.
+- **Mode shape and frequencies**: the chosen mode, exact and on each mesh (the nodes and the
+  elements' own interpolation between them), and a table of every mode's frequency and error.
+- **Presets**: a guitar string as beads, a steel bar held at one end, a steel ruler over a desk's
+  edge, a vibraphone bar (free–free), and a pinned beam whose modes lie on the mesh's curve.
+
+![Continuous systems page, the Guitar string preset: on the dispersion plot the continuum's straight line ω = cκ (c = 106.8 m/s) and three 12-element meshes' curves bending away from it to the cut-off at κ = π/h = 58.2 rad/m, lumped low (topping out at 630 Hz where the continuum is at 989 Hz), consistent high (1090 Hz) and mixed close to the line, each mesh's modes dots on its curve; mode 6, four elements a wavelength, is marked: exact 494.4 Hz, lumped 445.2 Hz (−9.97 %), consistent 545.2 Hz (+10.3 %), mixed 487.6 Hz (−1.38 %). On the right its shape: each mesh's nodes are exactly on the sine](docs/images/continuum_string.png)
+
+A low E string as 12 beads: the 6th harmonic, four beads a wavelength, is 10 % flat, though its
+shape at the beads is the sine's exactly (MAC 1). The frequency error is all in the dispersion: the
+beaded string is slower for short waves, and carries none shorter than two beads.
+
+![Continuous systems page, the Steel ruler preset's Errors tab: the frequency error of each of 8 Hermite elements' modes against the mode number, lumped falling to −24 %, consistent within 1.2 % for the first six, mixed between them, and above mode 8 the consistent and mixed meshes' slope modes far off; below, mode 3's error against the number of elements on log scales, falling as N⁻² lumped and mixed and N⁻⁴ consistent; on the right mode 3's shape, the meshes' nodes on the exact one (MAC 0.992 lumped, 1.000 consistent)](docs/images/continuum_beam.png)
+
+A clamped steel ruler's third mode: eight elements are already within 0.06 % with consistent
+masses, which converge as N<sup>−4</sup>; lumped masses, leaving the slopes without inertia, only
+as N<sup>−2</sup>.
+
 ## The math, briefly
 
 The *Background* tab in the app explains this in more depth; this is the outline.
@@ -1112,6 +1151,10 @@ $F_f$ times the distance slid, so the energy balance still closes.
   switch-on transient, the synchronous motor's 2× slip pulsation and field, a load rising as speed
   squared, the exact FOH stepper with the two torques found by Newton each step, the steady running
   torques, and the start-up presets.
+- `core/continuum.py`: a string, a bar or an Euler–Bernoulli beam: the exact modes (the beam's from
+  its ends' frequency equation), meshes of N elements with lumped, consistent or mixed mass, their
+  dispersion (in closed form, or a node's Bloch wave), each mode's error and its convergence with
+  N, and the page's presets.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and

@@ -771,6 +771,31 @@ def torsional_startup():
     save(w, "torsional_startup")
 
 
+def continuum_string():
+    w = window()
+    page = w.continuum_page
+    w.pages.setCurrentWidget(page)
+    page.load_preset("Guitar string (low E)")
+    page.mode.setValue(6)
+    settle()
+    print(page.readout.text())
+    print(page.mesh_info.text())
+    save(w, "continuum_string")
+
+
+def continuum_beam():
+    w = window()
+    page = w.continuum_page
+    w.pages.setCurrentWidget(page)
+    page.load_preset("Steel ruler, clamped–free")
+    page.views.setCurrentWidget(page.errors_tab)
+    page.mode.setValue(3)
+    settle()
+    print(page.convergence_note.text())
+    print(page.shape_note.text())
+    save(w, "continuum_beam")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
@@ -778,7 +803,7 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          virtual_modal_test, modal_extraction, oma, oma_ssi, jeffcott_rotor, jeffcott_run_up,
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_newkirk, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked,
-         duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup]
+         duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup, continuum_string, continuum_beam]
 
 
 def main(names: list[str]) -> None:

@@ -56,12 +56,13 @@ LAZY_PAGES = (
     ("rotor_page", "Jeffcott rotor"),
     ("duffing_page", "Duffing && Mathieu"),
     ("torsional_page", "Torsional vibration"),
+    ("continuum_page", "Continuous systems"),
 )
 
 
 def _follows_chain(page: QtWidgets.QWidget) -> bool:
-    """Whether a page shows the chain (and is given it); the rotor, Duffing & Mathieu and torsional pages have models
-    of their own."""
+    """Whether a page shows the chain (and is given it); the rotor, Duffing & Mathieu, torsional and continuous
+    systems pages have models of their own."""
     return getattr(page, "follows_chain", True)
 
 
@@ -82,6 +83,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "torsional_page":
         from .torsional import TorsionalPage
         return TorsionalPage
+    if name == "continuum_page":
+        from .continuum import ContinuumPage
+        return ContinuumPage
     if name == "rotor_page":
         from .rotor import RotorPage
         return RotorPage
@@ -448,6 +452,7 @@ class MainWindow(QtWidgets.QMainWindow):
     rotor_page = property(lambda self: self._page("rotor_page"))
     duffing_page = property(lambda self: self._page("duffing_page"))
     torsional_page = property(lambda self: self._page("torsional_page"))
+    continuum_page = property(lambda self: self._page("continuum_page"))
 
     def _page(self, name: str) -> QtWidgets.QWidget:
         """The page `name` from LAZY_PAGES, built and put in its tab on first use."""
