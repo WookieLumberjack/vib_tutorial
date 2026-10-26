@@ -3397,3 +3397,57 @@ def test_random_vibration_statistics(app):
     w.set_theme("Dark")
     w.set_theme("Light")
     w.close()
+
+
+def test_complex_modes_page(app):
+    """The complex modes page follows the chain, loads its trial chains into the Simulation page, makes the damping
+    proportional, and draws every tab for every mode, an overdamped one included, through a theme switch."""
+    from vib_tutorial.gui.complex_modes import TRIALS
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.complex_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    assert w.pages.tabText(w.pages.currentIndex()) == "Complex modes"
+    assert "proportional" in p.coupling.text() and not p.make_proportional.isEnabled()
+    assert p.table.rowCount() == 4 and "Every mode is real" in p.readout.text()
+    assert "stays there" in p.decay_note.text() and "the same" in p.frf_note.text()
+
+    names = [name for name, _, _ in TRIALS]
+    p.trial.setCurrentIndex(1 + names.index("One damper, at the base"))
+    app.processEvents()
+    assert p.trial.currentIndex() == 0 and p.trial_note.isVisible()
+    assert list(w.sim.system.damping) == [20.0, 0, 0, 0]
+    assert "not proportional" in p.coupling.text() and "mode 3, MPC 0.20" in p.readout.text()
+    p.mode.setCurrentIndex(1)
+    assert p.table.selectedItems()[0].row() == 1 and "45 %</b> of it reaches mode 1" in p.decay_note.text()
+    p.table.selectRow(2)
+    assert p.mode.currentIndex() == 2 and "MPC 0.200" in p.argand.getPlotItem().titleLabel.text
+    for tab in (p.frf_tab, p.decay_tab, p.scatter_tab):
+        p.tabs.setCurrentWidget(tab)
+        app.processEvents()
+    p.frf_in.setCurrentIndex(0)
+    assert "%</b> of the exact FRF's peak" in p.frf_note.text()
+
+    p.make_proportional.click()
+    app.processEvents()
+    assert w.sim.system.damping == pytest.approx(w.sim.system.damping[0] / 400.0 * w.sim.system.stiffness)
+    assert "proportional" in p.coupling.text() and not p.make_proportional.isEnabled()
+
+    p.trial.setCurrentIndex(1 + names.index("A strong damper locks a joint"))
+    app.processEvents()
+    assert "Overdamped (no oscillating pole): mode 4." in p.readout.text()
+    assert p.table.item(3, 1).text() == "overdamped"
+    p.mode.setCurrentIndex(3)
+    assert "real roots" in p.mode_info.text()
+    p.trial.setCurrentIndex(1 + names.index("Tuned mass damper"))
+    app.processEvents()
+    assert p.dof.value() == 5 and p.mode.count() == 5 and p.table.rowCount() == 5
+    p.dof.setValue(2)
+    app.processEvents()
+    assert w.sim.system.n == 2 and p.table.rowCount() == 2 and p.frf_in.count() == 2
+    w.set_theme("Dark")
+    w.set_theme("Light")
+    w.close()

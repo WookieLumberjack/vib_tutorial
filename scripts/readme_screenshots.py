@@ -834,11 +834,24 @@ def random_statistics():
     save(w, "random_statistics")
 
 
+def complex_modes():
+    w = window()
+    page = w.complex_page
+    w.pages.setCurrentWidget(page)
+    page.trial.setCurrentText("One damper, at the base")
+    page.mode.setCurrentIndex(2)
+    page.tabs.setCurrentWidget(page.decay_tab)
+    settle()
+    print(page.readout.text())
+    print(page.decay_note.text())
+    save(w, "complex_modes")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
-         virtual_modal_test, modal_extraction, oma, oma_ssi, random_vibration, random_statistics, jeffcott_rotor, jeffcott_run_up,
+         virtual_modal_test, modal_extraction, oma, oma_ssi, random_vibration, random_statistics, complex_modes, jeffcott_rotor, jeffcott_run_up,
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_newkirk, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked,
          duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup, continuum_string, continuum_beam,
