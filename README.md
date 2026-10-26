@@ -505,16 +505,33 @@ from those responses.
 - **Enhanced FDD**: the lines round each peak whose singular vector still matches make the mode's
   bell, and its inverse transform, the mode's autocorrelation, gives the damped frequency from
   its zero crossings and the damping from its decay (*EFDD* tab).
+- **Stochastic subspace identification (SSI-cov)**: a state-space model fitted to the responses'
+  correlations at every model order, the stable poles picked automatically from a stabilization
+  diagram (or by clicking). It fits every mode at once, so close, heavily damped modes come out
+  far better than from EFDD's bells.
+- **A machine running**: an optional sine force on m1, a sharp peak with almost no damping that
+  looks like a lightly damped mode. Peaks whose response, projected on their shape and filtered
+  round them, has a kurtosis near a sine's 1.5 (a mode's is 3) and no damping are crossed out as
+  harmonics.
 - **Against the exact modes**: f<sub>n</sub>, ζ and MAC, as on the virtual modal test, with the
-  shapes unscaled (no force, no modal mass).
+  shapes unscaled (no force, no modal mass). The *Methods* tab sets FDD + EFDD, SSI-cov and a
+  hammer test (the virtual modal test's way, on m1) side by side.
 - **Things to try**: a short record, short blocks (leakage: too much damping), forces at a node
-  of a mode (it is missed), coloured forces, noisy sensors.
+  of a mode (it is missed), coloured forces, noisy sensors, SSI on the close damped modes, and a
+  machine running between two modes or right by one.
 
 ![Operational modal analysis of the default chain: the first singular value of the responses' cross-spectral matrix peaks at all four modes, each with its shaded EFDD bell; mode 1 found at 1.106 Hz and 1.9 % damping against the exact 1.105 Hz and 1.7 %](docs/images/oma.png)
 
 The default chain's two lower modes come out within a fraction of a per cent in frequency and a
 tenth in damping. Modes 3 and 4 are close and heavily damped (7.7 and 9.4 %):
-their bells overlap and cut each other short, and EFDD's damping for them is poor.
+their bells overlap and cut each other short, and EFDD's damping for them is poor. SSI-cov
+gets them within about 15 %; the hammer test, knowing the force, does better on the modes it
+finds.
+
+![Operational modal analysis with a machine running 2 % above mode 2: its sine is a sharp peak, crossed out as a harmonic by its kurtosis of 1.5; SSI-cov's stabilization diagram has mode 2's column beside the sine's, and finds all four modes](docs/images/oma_ssi.png)
+
+With a machine running just above mode 2, FDD's peak there is the sine's, and mode 2 is lost
+under it; SSI-cov fits mode 2 beside the sine, which the kurtosis test crosses out.
 
 ### Jeffcott rotor
 
@@ -1032,7 +1049,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
   filtering and sampling, noise, windows, and the H1/H2 and coherence estimates.
 - `core/oma.py`: operational modal analysis: the ambient record (random forces at every mass,
   the exact response, anti-alias filter and sensor noise), the cross-spectral matrix, frequency
-  domain decomposition and enhanced FDD's bell and autocorrelation fit.
+  domain decomposition and enhanced FDD's bell and autocorrelation fit, covariance-driven
+  stochastic subspace identification, the harmonic test (filtered kurtosis), and a hammer test
+  through the virtual modal test's chain for comparison.
 - `core/identification.py`: modal parameter extraction from a measured FRF column: peak
   picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
   modes (MAC).

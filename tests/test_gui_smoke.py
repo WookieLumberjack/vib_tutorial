@@ -3114,8 +3114,8 @@ def test_torsional_start_up(app):
 
 def test_oma_page(app):
     """The operational modal analysis page follows the chain, finds its modes from the ambient record, picks
-    and drops peaks by clicking, reprocesses without recording again, runs each trial, and survives a theme
-    switch."""
+    and drops peaks (and SSI's poles) by clicking, reprocesses without recording again, runs each trial, crosses
+    out a machine's harmonic, compares the methods with a hammer test, and survives a theme switch."""
     from PySide6.QtCore import QPointF
 
     from vib_tutorial.gui.main_window import MainWindow
@@ -3127,7 +3127,7 @@ def test_oma_page(app):
     app.processEvents()
     assert w.pages.tabText(w.pages.currentIndex()) == "Operational modal analysis"
     assert p.record is not None and p.dof.value() == 4 and p.input.count() == 5
-    assert p.readout.text().startswith("Found: mode 1 ") and "mode 4" in p.readout.text()
+    assert p.readout.text().startswith("FDD + EFDD found: mode 1 ") and "mode 4" in p.readout.text()
     assert "2,000 periods of mode 1" in p.daq_info.text() and p.block.currentData() == 2048
     assert p.results.table.rowCount() == 4 and p.mode_pick.count() == 4
 
@@ -3168,6 +3168,28 @@ def test_oma_page(app):
     p.tabs.setCurrentWidget(p.efdd_tab)
     p.mode_pick.setCurrentIndex(1)
     assert p.selected == 1 and "Bell of" in p.efdd_note.text()
+
+    # SSI, its stabilization diagram (click a pole to drop it, again to take it back), the machine
+    p.trial.setCurrentText("SSI on close, damped modes")
+    p.recompute()
+    assert p.method.currentText() == "SSI-cov" and p.rows.isVisible() and not p.mac_min.isVisible()
+    assert p.readout.text().startswith("SSI-cov found: mode 1") and "mode 4" in p.readout.text()
+    order, i = p.ssi_poles[0]
+    p._on_pole_clicked(order, i)
+    assert len(p.ssi) == 3 and p.ssi_picked is not None
+    p._on_pole_clicked(order, i)
+    assert len(p.ssi) == 4
+    p.auto_peaks.click()
+    assert p.ssi_picked is None
+    p.tabs.setCurrentWidget(p.methods_tab)
+    assert p.methods.rowCount() == 4 and p._hammer is not None
+    assert p.methods.item(0, 4).text().startswith("1.1")  # the hammer test's mode 1
+    p.trial.setCurrentText("A machine near a mode")
+    p.recompute()
+    assert p.machine_hz.value() > 0 and p.method.currentText() == "FDD + EFDD"
+    assert "<b>Harmonic</b> at" in p.readout.text() and "mode 2" not in p.readout.text()
+    p.method.setCurrentText("SSI-cov")
+    assert "mode 2" in p.readout.text()  # SSI fits mode 2 beside the sine
 
     w.params.dof.setValue(3)  # the chain changes: the page follows
     app.processEvents()

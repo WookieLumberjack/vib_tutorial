@@ -6,6 +6,7 @@ import math
 import numpy as np
 import pytest
 
+from vib_tutorial.core.identification import auto_select, match_modes
 from vib_tutorial.core.measurement import AA_CUTOFF, Response
 from vib_tutorial.core.modal import TWO_PI, frf, modal_analysis
 from vib_tutorial.core.model import ChainSystem
@@ -16,10 +17,17 @@ from vib_tutorial.core.oma import (
     compare,
     cross_spectra,
     efdd,
+    correlations,
     fdd,
+    hammer_modes,
+    harmonic_flags,
+    harmonics,
     identify,
+    kurtosis,
     oversampling,
     pick_peaks,
+    ssi_cov,
+    ssi_modes,
 )
 
 CHAIN = ChainSystem.uniform(4)
@@ -126,3 +134,65 @@ def test_records_repeat_with_their_seed_and_refuse_too_long():
     assert math.isclose(np.std(a.measured(0.5) - a.y) / np.std(a.y), 0.5, rel_tol=0.1)
     with pytest.raises(ValueError):
         ambient_record(CHAIN, AmbientSettings(fs=1000.0, duration=1e5))
+
+
+def test_ssi_finds_the_close_damped_modes_efdd_cannot():
+    """Modes 3 and 4 (7.7 and 9.4 %) overlap: EFDD's bells cut each other short; SSI fits them together."""
+    s = AmbientSettings(fs=19.0, duration=1809.0, seed=2)
+    y = ambient_record(CHAIN, s, RESULT).measured(0.02)
+    band = (0.0, AA_CUTOFF * s.fs / 2)
+    stab = ssi_cov(y, s.fs, 34, 60, band)
+    rows = match_modes(ssi_modes(stab, auto_select(stab)), RESULT, band[1])
+    assert [r.mode for r in rows] == [1, 2, 3, 4]
+    for r in rows:
+        assert abs(r.identified.fn_hz / (abs(r.exact) / TWO_PI) - 1) < 0.01 and r.mac > 0.99
+        assert r.identified.zeta == pytest.approx(-r.exact.real / abs(r.exact), rel=0.15)
+    # the stable column of mode 1 runs up through the orders
+    assert len(stab.orders) == 30 and max(max(run, default=0) for run in stab.runs) >= 20
+
+
+def test_correlations_are_the_lagged_products():
+    rng = np.random.default_rng(0)
+    y = rng.standard_normal((500, 2))
+    R = correlations(y, 3)
+    z = y - y.mean(axis=0)
+    assert R[2] == pytest.approx(z[2:].T @ z[:-2] / 498)
+    assert R[0] == pytest.approx(R[0].T)
+
+
+def test_a_machine_is_a_harmonic_by_its_kurtosis():
+    """A sine's filtered response has a kurtosis of 1.5, a mode's random one 3."""
+    f1, f2 = RESULT.modes[0].fn_hz, RESULT.modes[1].fn_hz
+    s = AmbientSettings(fs=FS, duration=2000.0, seed=4, harmonic_hz=0.5 * (f1 + f2), harmonic_force=1.0)
+    y = ambient_record(CHAIN, s, RESULT).measured(0.02)
+    result = fdd(cross_spectra(y, s.fs, 4096))
+    modes = identify(result, pick_peaks(result, (0.0, AA_CUTOFF * s.fs / 2), CHAIN.n + 1))
+    kurt = harmonic_flags(y, s.fs, result, modes)
+    flags = harmonics([m.zeta for m in modes], kurt)
+    (sine,) = [m for m, h in zip(modes, flags) if h]
+    assert sine.peak_hz == pytest.approx(s.harmonic_hz, abs=2 * result.freqs[1])
+    assert sine.zeta < 0.005  # almost no damping: what makes it look like a mode
+    assert kurt[modes.index(sine)] == pytest.approx(1.5, abs=0.1)
+    assert all(k == pytest.approx(3.0, abs=0.3) for k, h in zip(kurt, flags) if not h)
+    # a mode with the sine in its band reads low too, but keeps its damping
+    assert harmonics([0.05, 0.001, 0.003], [1.5, 1.5, 3.0]) == [False, True, False]
+
+
+def test_kurtosis_of_a_sine_and_of_noise():
+    rng = np.random.default_rng(1)
+    t = np.arange(200_000) / 50.0
+    shape = np.array([1.0, 0.5])
+    sine = np.outer(np.sin(TWO_PI * 3.0 * t), shape)
+    noise = rng.standard_normal((t.size, 2))
+    assert kurtosis(sine, 50.0, shape, 3.0, 0.1) == pytest.approx(1.5, abs=0.02)
+    assert kurtosis(noise, 50.0, shape, 3.0, 0.3) == pytest.approx(3.0, abs=0.1)
+
+
+def test_the_hammer_test_for_comparison():
+    modes, tau = hammer_modes(CHAIN, RESULT, 19.0, seed=1)
+    rows = {r.mode: r for r in match_modes(modes, RESULT, AA_CUTOFF * 19.0 / 2) if r.mode}
+    for k in (1, 2):
+        r = rows[k]
+        assert r.identified.fn_hz == pytest.approx(abs(r.exact) / TWO_PI, rel=0.005)
+        assert r.identified.zeta == pytest.approx(-r.exact.real / abs(r.exact), rel=0.05)
+    assert tau > 0
