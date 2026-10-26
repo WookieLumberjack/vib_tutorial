@@ -589,11 +589,18 @@ complex: each mass peaks at its own time, and the nodes move. It follows the cha
   half a cycle: one shape, scaled, for a real mode; changing shape, the nodes wandering, for a complex one.
 - **How complex**: every mode's MPC (modal phase collinearity: 1 real, 0 spread evenly), MPD (mean
   phase deviation from the best-fit line) and MAC with the undamped shape, and the phases' scatter
-  (*Phase scatter* tab).
+  (*Phases* tab).
 - **The proportional approximation** (ζ = φ<sup>T</sup>Cφ/2ω, the off-diagonal terms dropped): its poles
   against the exact ones in the table, its FRF against the exact one (*FRF*), and a *Free decay* from an
   undamped mode's shape: exactly that mode with proportional damping, otherwise the damping hands some
   of the motion to the others.
+- **Sweep**: one damper (or spring) swept over four decades, the rest of the chain as it is: each mode's
+  exact pole (the root locus), its damping ratio exact and approximated, and its MPD. A damper's modes damp
+  more as it grows, peak, and fall again as it locks its joint and the modes become the locked chain's,
+  one pair leaving as overdamped roots; the approximation's ζ grows for ever.
+- **Identification**: an FRF column with a little noise fitted by LSFD on the exact poles, with complex
+  modes and with real (normal) modes: their shapes' MAC with the exact ψ and the undamped φ, the
+  complex fit's MPC, and how far each fit's FRF misses.
 - **Chains to try** (loaded into the Simulation page): proportional dampers, one damper at the base, one
   at the top, a strong damper that locks a joint (a mode overdamped), and a tuned mass damper's two close
   modes. *Make it proportional* sets c<sub>i</sub> = βk<sub>i</sub>, keeping mode 1's ζ.
@@ -603,6 +610,13 @@ complex: each mass peaks at its own time, and the nodes move. It follows the cha
 With one damper at the base, mode 3 is the most complex: its masses' phases spread up to 54° from the
 best-fit line. The approximation puts mode 4's damping at twice the exact value, and a release in
 mode 3's undamped shape passes half of it to mode 2.
+
+![Complex modes page, the Sweep tab for that damper: the root locus as c1 goes from 0.2 to 2000 N·s/m, mode 2's pair leaving for the real axis and the others turning back towards the locked chain's 1.42, 3.97 and 5.74 Hz; each mode's ζ peaks (mode 1 0.147 at 59.7 N·s/m) while the approximation's grows for ever; the MPD peaks near 20–30 N·s/m](docs/images/complex_sweep.png)
+
+Swept, the same damper gives mode 1 at most ζ = 0.147, at 60 N·s/m; stiffer, it locks m1 to the base and
+the modes become those of the three masses above it. Fitted with real modes, this chain's FRF misses by
+29 %, and mode 3's shape has a MAC of 0.51 with the exact one; with complex modes it misses by 0.28 %,
+the noise's share.
 
 ### Jeffcott rotor
 
@@ -1185,8 +1199,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
   the response's PSD H G Hᴴ and cumulative RMS, Miles' equation mode by mode, a record synthesized
   to the PSD and stepped by the exact FOH update, and Welch's estimate.
 - `core/complex_modes.py`: non-proportional damping: the complex modes' MPC and MPD, the
-  proportional approximation's damping, poles and FRF against the exact ones, and the free decay
-  from an undamped mode's shape.
+  proportional approximation's damping, poles and FRF against the exact ones, the free decay
+  from an undamped mode's shape, a damper's or spring's root locus, and LSFD with real and with
+  complex modes.
 - `core/identification.py`: modal parameter extraction from a measured FRF column: peak
   picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
   modes (MAC).

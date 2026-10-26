@@ -17,19 +17,26 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 
 from ..core.complex_modes import (
+    IdentificationResult,
     ModeComparison,
+    Parameter,
+    Sweep,
     compare,
+    complexity,
     free_decay,
     frf_grid,
     frf_pair,
+    identify,
     made_proportional,
     strobe,
+    sweep,
 )
-from ..core.modal import ModalResult, modal_analysis
+from ..core.modal import TWO_PI, ModalResult, modal_analysis
 from ..core.model import ChainSystem
 from ..core.presets import tuned_mass_damper
 from .axes import log_axes
-from .layouts import ColumnScroll, group, plot_height
+from .layouts import ColumnScroll, FlowLayout, group, plot_height
+from .panels import spin
 from .style import MAX_DOF, colors
 from .theming import add_legend, mute
 
@@ -62,6 +69,17 @@ DECAY_TIP = (
     "<p>The chain released at rest in an undamped mode's shape, its modal coordinates q<sub>s</sub> = "
     "φ<sub>s</sub><sup>T</sup>Mx over time, exact. The approximation keeps the released mode alone, decaying at "
     "its ζ. With proportional damping the others stay at 0; otherwise the damping passes motion to them.</p>")
+SWEEP_TIP = (
+    "<p>One damper (or spring) swept over a wide range, the rest of the chain as it is: each mode's exact pole "
+    "(the root locus), its damping ratio, exact and approximated, and its MPD. The dotted line and the dots: the "
+    "chain's own value.</p>")
+LOCUS_TIP = (
+    "<p>The root locus: each mode's exact pole λ as the element changes, Re λ across (the decay rate), "
+    "Im λ/2π up (the damped frequency). Grey crosses: real roots, where a mode is overdamped.</p>")
+IDENT_TIP = (
+    "<p>The FRF column for a force on one mass, with a little noise, fitted by LSFD on the exact poles two ways: "
+    "with complex modes (any complex residues) and with real modes (A<sub>r</sub>/(ω<sub>r</sub>² − ω² + "
+    "2iζ<sub>r</sub>ω<sub>r</sub>ω), A<sub>r</sub> real), the model of a proportionally damped structure.</p>")
 SCATTER_TIP = (
     "<p>Each mode's entries' angles from its best-fit line (one dot per mass, mass colours), and their mean, "
     "weighted by size (the MPD, a bar). All on 0 for real modes.</p>")
@@ -137,6 +155,28 @@ together) is counted as if it did, and the approximation's ζ can be ten times t
 go overdamped, or a damper lock a joint. The <i>FRF</i> tab compares the receptances; the <i>Free decay</i> tab
 releases the chain in an undamped mode's shape: exactly that mode, if the damping is proportional; otherwise
 the damping hands some of the motion to the other modes, close ones most.</p>
+
+<h3>Sweeping a damper</h3>
+<p>The <i>Sweep</i> tab follows each mode's exact pole as one damper goes from almost nothing to very stiff,
+the rest of the chain as it is: the <b>root locus</b>. With a light damper every mode's damping grows in
+proportion to it, as the approximation says. But a damper only works while its ends move apart: as it
+stiffens it holds them together, and the chain's modes turn into those of the chain with that joint rigid,
+whose frequencies are different and whose damping falls back towards zero. So each mode's damping rises
+to a peak and falls again, and on the way one pair (the motion across the damper) leaves as two real,
+overdamped roots. There is a best damper for each mode, and it is not the stiffest. A damper at the base of
+the default chain gives mode 1 at most ζ = 0.15, at about 60 N·s/m; the approximation's ζ keeps growing for
+ever. The modes are most complex near those peaks, where the damper both works hard and changes the shapes.
+Sweeping a spring instead moves the modes, and how complex they get depends on how close they come.</p>
+
+<h3>Identification</h3>
+<p>A modal test fits a model to measured FRFs. The <i>Identification</i> tab fits one column (a force on one
+mass, every response, with a little noise) on the exact poles two ways, by least squares (LSFD): with
+<b>complex modes</b>, residues of any phase, which fit any viscous damping; and with <b>real modes</b>,
+A<sub>r</sub>/(ω<sub>r</sub>² − ω² + 2iζ<sub>r</sub>ω<sub>r</sub>ω) with A<sub>r</sub> real, the model of a
+proportionally damped structure. With proportional damping the two agree. Otherwise the real-mode fit can't
+take the modes' phases: it fits the FRF worse and gets the shapes wrong, and its shapes are not the undamped
+ones either. Noise makes even real modes come out a little complex from the complex-mode fit, which is why
+a small MPD in a measurement says little.</p>
 """
 
 
@@ -322,13 +362,86 @@ class ComplexModesPage(QtWidgets.QWidget):
         pv.addWidget(self.scatter_plot, 1)
         pv.addWidget(self.scatter_note)
 
+        self.sweep_parameter = QtWidgets.QComboBox()
+        for prm in Parameter:
+            self.sweep_parameter.addItem(prm.value, prm)
+        self.sweep_element = QtWidgets.QComboBox()
+        for b in (self.sweep_parameter, self.sweep_element):
+            b.setToolTip(SWEEP_TIP)
+        self.locus = _plot("Im λ / 2π (Hz)", None, "Re λ (1/s)", None)
+        self.locus.setToolTip(LOCUS_TIP)
+        self.sweep_zeta = _plot("ζ", None, "", None, log=True)
+        self.sweep_zeta.setLogMode(x=True, y=False)
+        self.sweep_zeta.setToolTip(SWEEP_TIP)
+        self.sweep_zeta_legend = add_legend(self.sweep_zeta.getPlotItem(), offset=(10, 10))
+        self.sweep_mpd = _plot("MPD (°)", None, "", None, log=True)
+        self.sweep_mpd.setLogMode(x=True, y=False)
+        self.sweep_mpd.setXLink(self.sweep_zeta)
+        self.sweep_mpd.setToolTip(SWEEP_TIP)
+        for p in (self.sweep_zeta, self.sweep_mpd):
+            p.getAxis("left").enableAutoSIPrefix(False)
+        plot_height(self.locus, 150)
+        plot_height(self.sweep_zeta, 120)
+        plot_height(self.sweep_mpd, 100)
+        self.sweep_note = QtWidgets.QLabel()
+        self.sweep_note.setWordWrap(True)
+        self.sweep_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        sweep_tab = QtWidgets.QWidget()
+        wv = QtWidgets.QVBoxLayout(sweep_tab)
+        row = FlowLayout()
+        row.addWidget(group("Sweep:", self.sweep_parameter, self.sweep_element))
+        wv.addLayout(row)
+        wv.addWidget(self.locus, 4)
+        wv.addWidget(self.sweep_zeta, 3)
+        wv.addWidget(self.sweep_mpd, 2)
+        wv.addWidget(self.sweep_note)
+        sweep_scroll = ColumnScroll(sweep_tab)
+
+        self.ident_in = QtWidgets.QComboBox()
+        self.ident_out = QtWidgets.QComboBox()
+        self.ident_noise = spin(0.0, 20.0, 1.0, 1, " %")
+        for b in (self.ident_in, self.ident_out, self.ident_noise):
+            b.setToolTip(IDENT_TIP)
+        self.ident_noise.setToolTip("<p>Noise on each response, its RMS this share of the response's peak.</p>")
+        self.ident_plot = _plot("|x/F| (m/N)", None, "Frequency", "Hz", log=True)
+        self.ident_plot.setLogMode(x=False, y=True)
+        self.ident_plot.getAxis("left").enableAutoSIPrefix(False)
+        self.ident_plot.setToolTip(IDENT_TIP)
+        self.ident_legend = add_legend(self.ident_plot.getPlotItem(), offset=(-10, 10))
+        plot_height(self.ident_plot, 170)
+        self.ident_table = QtWidgets.QTableWidget()
+        self.ident_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.ident_table.verticalHeader().setVisible(False)
+        self.ident_table.setToolTip(
+            "<p>Each mode's identified shape: its MAC with the exact complex shape ψ for both fits, the real "
+            "fit's MAC with the undamped shape φ, and the complex fit's MPC against the exact one.</p>")
+        self.ident_note = QtWidgets.QLabel()
+        self.ident_note.setWordWrap(True)
+        self.ident_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        ident_tab = QtWidgets.QWidget()
+        iv = QtWidgets.QVBoxLayout(ident_tab)
+        row = FlowLayout()
+        row.addWidget(group("Force on:", self.ident_in))
+        row.addWidget(group("plot:", self.ident_out))
+        row.addWidget(group("Noise:", self.ident_noise))
+        iv.addLayout(row)
+        iv.addWidget(self.ident_plot, 3)
+        iv.addWidget(self.ident_table, 2)
+        iv.addWidget(self.ident_note)
+        self.sweep_result: Sweep | None = None
+        self.ident_result: IdentificationResult | None = None
+        self._stale: set[QtWidgets.QWidget] = set()
+
         self.notes = QtWidgets.QTextBrowser()
         self.notes.setHtml(NOTES_HTML)
         self.tabs = QtWidgets.QTabWidget()
         self.frf_tab, self.decay_tab, self.scatter_tab = frf_tab, decay_tab, scatter_tab
+        self.sweep_tab, self.ident_tab = sweep_scroll, ident_tab
         self.tabs.addTab(frf_tab, "FRF")
         self.tabs.addTab(decay_tab, "Free decay")
-        self.tabs.addTab(scatter_tab, "Phase scatter")
+        self.tabs.addTab(scatter_tab, "Phases")
+        self.tabs.addTab(sweep_scroll, "Sweep")
+        self.tabs.addTab(ident_tab, "Identification")
         self.tabs.addTab(self.notes, "Notes")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -347,6 +460,12 @@ class ComplexModesPage(QtWidgets.QWidget):
         self.table.itemSelectionChanged.connect(self._on_table_selection)
         self.frf_in.currentIndexChanged.connect(lambda _: self._draw_frf())
         self.frf_out.currentIndexChanged.connect(lambda _: self._draw_frf())
+        self.sweep_parameter.currentIndexChanged.connect(self._on_sweep_parameter)
+        self.sweep_element.currentIndexChanged.connect(lambda _: self._refresh(self.sweep_tab))
+        self.ident_in.currentIndexChanged.connect(lambda _: self._refresh(self.ident_tab))
+        self.ident_noise.valueChanged.connect(lambda _: self._refresh(self.ident_tab))
+        self.ident_out.currentIndexChanged.connect(lambda _: self._draw_identification())
+        self.tabs.currentChanged.connect(lambda _: self._catch_up())
 
     # ------------------------------------------------------------- inputs
     def set_system(self, system: ChainSystem, result: ModalResult | None = None) -> None:
@@ -358,7 +477,8 @@ class ComplexModesPage(QtWidgets.QWidget):
         self.dof.setValue(system.n)
         self.dof.blockSignals(False)
         if n_changed:
-            for box, default in ((self.frf_in, system.n - 1), (self.frf_out, 0)):
+            for box, default in ((self.frf_in, system.n - 1), (self.frf_out, 0), (self.ident_in, 0),
+                                 (self.ident_out, system.n - 1)):
                 box.blockSignals(True)
                 box.clear()
                 box.addItems([f"m{i + 1}" for i in range(system.n)])
@@ -370,6 +490,12 @@ class ComplexModesPage(QtWidgets.QWidget):
             self.mode.addItems([f"Mode {i + 1}" for i in range(system.n)])
             self.mode.setCurrentIndex(current if 0 <= current < system.n else 0)
             self.mode.blockSignals(False)
+            self._fill_elements()
+        if self.sweep_parameter.currentData() is Parameter.DAMPER and system.damping.any() and not (
+                system.damping[self.sweep_element.currentIndex()]):
+            self.sweep_element.blockSignals(True)  # sweep a damper the chain has
+            self.sweep_element.setCurrentIndex(int(np.argmax(system.damping)))
+            self.sweep_element.blockSignals(False)
         if self.isVisible():
             self.recompute()
         else:
@@ -409,6 +535,39 @@ class ComplexModesPage(QtWidgets.QWidget):
         if rows and rows[0].row() != self.mode.currentIndex():
             self.mode.setCurrentIndex(rows[0].row())
 
+    def _fill_elements(self) -> None:
+        n = self.system.n
+        letter = "c" if self.sweep_parameter.currentData() is Parameter.DAMPER else "k"
+        current = self.sweep_element.currentIndex()
+        self.sweep_element.blockSignals(True)
+        self.sweep_element.clear()
+        self.sweep_element.addItems([f"{letter}{i + 1}" for i in range(n)])
+        self.sweep_element.setCurrentIndex(current if 0 <= current < n else 0)
+        self.sweep_element.blockSignals(False)
+
+    def _on_sweep_parameter(self, _index: int) -> None:
+        self._fill_elements()
+        self._refresh(self.sweep_tab)
+
+    def _refresh(self, tab: QtWidgets.QWidget) -> None:
+        """Work out the sweep or the identification again, now if its tab shows, else when it does."""
+        self._stale.add(tab)
+        self._catch_up()
+
+    def _catch_up(self) -> None:
+        tab = self.tabs.currentWidget()
+        if tab not in self._stale or self.system is None:
+            return
+        self._stale.discard(tab)
+        if tab is self.sweep_tab:
+            self.sweep_result = sweep(self.system, self.sweep_parameter.currentData(),
+                                      max(self.sweep_element.currentIndex(), 0))
+            self._draw_sweep()
+        elif tab is self.ident_tab:
+            self.ident_result = identify(self.system, self.result, max(self.ident_in.currentIndex(), 0),
+                                         self.ident_noise.value() / 100.0)
+            self._draw_identification()
+
     def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().showEvent(event)
         if self._dirty:
@@ -420,6 +579,7 @@ class ComplexModesPage(QtWidgets.QWidget):
         if self.system is None:
             return
         self.rows = compare(self.system, self.result)
+        self._stale |= {self.sweep_tab, self.ident_tab}
         self.redraw()
 
     def selected(self) -> int:
@@ -443,6 +603,11 @@ class ComplexModesPage(QtWidgets.QWidget):
         self._draw_frf()
         self._draw_decay()
         self._draw_scatter()
+        if self.sweep_result is not None:
+            self._draw_sweep()
+        if self.ident_result is not None:
+            self._draw_identification()
+        self._catch_up()
         worst = max((c for c in self.rows if c.measures is not None), key=lambda c: c.measures.mpd, default=None)
         over = [c.index for c in self.rows if c.exact is None and c.fn_hz > 0]
         text = ""
@@ -602,6 +767,123 @@ class ComplexModesPage(QtWidgets.QWidget):
         p.setXRange(0.5, n + 0.5, padding=0)
         p.setYRange(-92, 92, padding=0)
         p.getAxis("bottom").setTicks([[(i + 1, str(i + 1)) for i in range(n)]])
+
+    def _draw_sweep(self) -> None:
+        sw = self.sweep_result
+        if sw is None:
+            return
+        n = sw.fn.shape[1]
+        own = (self.system.damping if sw.parameter is Parameter.DAMPER else self.system.stiffness)[sw.element]
+        at = int(np.argmin(np.abs(sw.values - own)))
+        unit = "N·s/m" if sw.parameter is Parameter.DAMPER else "N/m"
+        name = f"{'c' if sw.parameter is Parameter.DAMPER else 'k'}{sw.element + 1}"
+        dot = QtCore.Qt.PenStyle.DotLine
+        p = self.locus
+        p.clear()
+        for k in range(n):
+            colour = colors.mode[k % len(colors.mode)]
+            lam = sw.poles[:, k]
+            p.plot(lam.real, lam.imag / TWO_PI, pen=pg.mkPen(colour, width=2), connect="finite")
+            if np.isfinite(lam[at]):
+                p.addItem(pg.ScatterPlotItem([lam[at].real], [lam[at].imag / TWO_PI], size=9, pen=None,
+                                             brush=pg.mkBrush(colour)))
+        real = np.concatenate(sw.roots) if sw.roots else np.zeros(0)
+        if real.size:
+            p.addItem(pg.ScatterPlotItem(real, np.zeros(real.size), size=4, symbol="x", pen=None,
+                                         brush=pg.mkBrush(colors.grey)))
+        p.addItem(pg.InfiniteLine(0.0, angle=90, pen=pg.mkPen(colors.faint, width=1)))
+        finite = sw.poles[np.isfinite(sw.poles)]
+        if finite.size:
+            left = min(float(finite.real.min()), 0.0)
+            p.setXRange(max(left, -8 * float(finite.imag.max())), 0.0, padding=0.03)
+            p.setYRange(0.0, 1.05 * float(finite.imag.max()) / TWO_PI, padding=0)
+        p.setTitle(f"Root locus as {name} goes from {sw.values[0]:.3g} to {sw.values[-1]:.3g} {unit}", size="9pt")
+
+        z, m = self.sweep_zeta, self.sweep_mpd
+        z.clear()
+        m.clear()
+        self.sweep_zeta_legend.clear()
+        for k in range(n):
+            colour = colors.mode[k % len(colors.mode)]
+            curve = z.plot(sw.values, sw.zeta_exact[:, k], pen=pg.mkPen(colour, width=2), connect="finite")
+            z.plot(sw.values, np.minimum(sw.zeta_approx[:, k], 2.0),
+                   pen=pg.mkPen(colour, width=1, style=QtCore.Qt.PenStyle.DashLine), connect="finite")
+            self.sweep_zeta_legend.addItem(curve, f"Mode {k + 1}")
+            m.plot(sw.values, sw.mpd[:, k], pen=pg.mkPen(colour, width=2), connect="finite")
+        self.sweep_zeta_legend.addItem(pg.PlotDataItem(pen=pg.mkPen(colors.grey, width=1,
+                                                                   style=QtCore.Qt.PenStyle.DashLine)), "Approx.")
+        for p in (z, m):
+            if own > 0:
+                p.addItem(pg.InfiniteLine(math.log10(own), angle=90, pen=pg.mkPen(colors.muted, width=1, style=dot)))
+            p.setXRange(math.log10(sw.values[0]), math.log10(sw.values[-1]), padding=0)
+        z.setYRange(0.0, 1.05, padding=0)
+        m.setYRange(0.0, max(5.0, 1.1 * float(np.nanmax(sw.mpd, initial=0.0))), padding=0)
+        m.setLabel("bottom", f"{name} ({unit})")
+        lines = []
+        if sw.parameter is Parameter.DAMPER:
+            for k in range(n):
+                value, zeta = sw.peak(k)
+                if np.isfinite(zeta):
+                    lines.append(f"mode {k + 1} ζ = {zeta:.3g} at {value:.3g}")
+            self.sweep_note.setText(
+                f"Each mode's damping peaks, then falls as {name} locks its joint: " + "; ".join(lines)
+                + f" N·s/m. The chain's {name} is {own:.3g} N·s/m. The approximation (dashed) rises for ever.")
+        else:
+            mpd = np.where(np.isfinite(sw.mpd), sw.mpd, -1.0)
+            v, worst = np.unravel_index(int(np.argmax(mpd)), mpd.shape)
+            self.sweep_note.setText(
+                f"Mode {worst + 1} is most complex (MPD {mpd[v, worst]:.3g}°) at {name} = {sw.values[v]:.3g} N/m; "
+                f"the chain's {name} is {own:.3g} N/m. The springs move the modes; the dampers decide how much "
+                "they couple them.")
+
+    def _draw_identification(self) -> None:
+        res = self.ident_result
+        if res is None:
+            return
+        out = min(max(self.ident_out.currentIndex(), 0), res.H.shape[1] - 1)
+        p = self.ident_plot
+        p.clear()
+        self.ident_legend.clear()
+        meas = p.plot(res.freqs, np.maximum(np.abs(res.H[:, out]), 1e-300), pen=pg.mkPen(colors.grey, width=1))
+        cf = p.plot(res.freqs, np.maximum(np.abs(res.complex_fit.H[:, out]), 1e-300), pen=pg.mkPen(colors.fit, width=2))
+        rf = p.plot(res.freqs, np.maximum(np.abs(res.real_fit.H[:, out]), 1e-300),
+                    pen=pg.mkPen(colors.force, width=2, style=QtCore.Qt.PenStyle.DashLine))
+        self.ident_legend.addItem(meas, "Measured")
+        self.ident_legend.addItem(cf, "Complex modes")
+        self.ident_legend.addItem(rf, "Real modes")
+        p.setLabel("left", f"|x{out + 1}/F{max(self.ident_in.currentIndex(), 0) + 1}| (m/N)")
+        peak = float(np.max(np.abs(res.exact[:, out])))
+        p.setYRange(math.log10(peak) - 3.5, math.log10(peak) + 0.4, padding=0)
+        p.setXRange(0.0, res.freqs[-1], padding=0)
+
+        t = self.ident_table
+        t.clear()
+        heads = ["Mode", "MAC(ψ) complex", "MAC(ψ) real", "MAC(φ) real", "MPC complex", "MPC exact"]
+        t.setColumnCount(len(heads))
+        t.setHorizontalHeaderLabels(heads)
+        t.setRowCount(len(res.modes))
+        for i, k in enumerate(res.modes):
+            exact_mpc = self.rows[k].measures.mpc if self.rows[k].measures is not None else float("nan")
+            cells = [f"{k + 1}", f"{res.complex_fit.mac[i]:.3f}", f"{res.real_fit.mac[i]:.3f}",
+                     f"{res.real_fit.mac_undamped[i]:.3f}",
+                     f"{complexity(res.complex_fit.modes[i].shape).mpc:.3f}", f"{exact_mpc:.3f}"]
+            for j, text in enumerate(cells):
+                item = _cell(text)
+                if j == 0:
+                    item.setForeground(pg.mkColor(colors.mode[k % len(colors.mode)]))
+                t.setItem(i, j, item)
+        t.resizeColumnsToContents()
+        worst = int(np.argmin(res.real_fit.mac)) if res.modes else 0
+        self.ident_note.setText(
+            f"The fits' FRFs miss the exact one by <b>{_share(res.complex_fit.error)} %</b> (complex modes) and "
+            f"<b>{_share(res.real_fit.error)} %</b> (real modes). "
+            + (f"The real modes' worst shape: mode {res.modes[worst] + 1}, MAC {res.real_fit.mac[worst]:.3f} with ψ."
+               if res.modes else ""))
+
+
+def _share(x: float) -> str:
+    """A fraction as a percentage, round-off shown as 0."""
+    return f"{100 * x:.2g}" if x > 1e-8 else "0"
 
 
 def _alpha(color: str, alpha: int):

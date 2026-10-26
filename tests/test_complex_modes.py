@@ -147,3 +147,53 @@ def test_the_trials_notes():
     r = rows(name)
     assert [round(c.measures.mpd) for c in r[:2]] == [10, 17]
     assert max(c.measures.mpd for c in r[2:]) < 2.5
+
+
+def test_a_dampers_root_locus():
+    """Sweeping the base damper: from the undamped modes to those of the chain with m1 held (the damper locked),
+    one pair going overdamped on the way; each mode's damping peaks between, while the approximation's grows as c."""
+    from vib_tutorial.core.complex_modes import Parameter, sweep, sweep_values
+
+    values = sweep_values(BASE, Parameter.DAMPER, 0)
+    assert 20.0 in values and values[0] == pytest.approx(0.2) and values[-1] == pytest.approx(2000.0)
+    sw = sweep(BASE, Parameter.DAMPER, 0)
+    undamped = [m.fn_hz for m in modal_analysis(ChainSystem(BASE.masses, BASE.stiffness, np.zeros(4))).modes]
+    assert np.abs(sw.poles[0]) / (2 * np.pi) == pytest.approx(undamped, rel=1e-3)
+    held = ChainSystem(np.ones(3), np.full(3, 400.0), np.zeros(3))  # m1 fixed: m2–m4 on k2
+    locked = sorted(m.fn_hz for m in modal_analysis(held).modes)
+    end = np.abs(sw.poles[-1]) / (2 * np.pi)
+    assert np.isnan(end[1]) and sorted(end[[0, 2, 3]]) == pytest.approx(locked, rel=1e-3)
+    assert sw.roots[-1].size == 2  # mode 2's pair, overdamped
+    # followed by continuity: no jumps between neighbouring values (but near critical damping, where a pair
+    # meets on the real axis, its poles move as the square root of the distance)
+    step = np.abs(np.diff(sw.poles, axis=0)) / np.abs(sw.poles[1:])
+    assert np.nanmax(np.where(sw.zeta_exact[1:] < 0.7, step, np.nan)) < 0.1
+    for k in range(4):
+        value, zeta = sw.peak(k)
+        assert sw.values[0] < value < sw.values[-1]
+        assert k == 1 or zeta > 2 * sw.zeta_exact[-1, k]
+    assert sw.peak(0) == pytest.approx((59.7, 0.147), abs=0.05)  # the notes' and the README's
+    assert sw.zeta_approx[:, 0] / sw.values == pytest.approx(np.full(values.size, sw.zeta_approx[0, 0] / values[0]))
+    # nearly real at both ends: barely damped, then a chain with no damping left in it
+    assert np.nanmax(sw.mpd[0]) < 1.0 and np.nanmax(sw.mpd[-1]) < 1.0 and np.nanmax(sw.mpd) > 30
+    assert sweep(BASE, Parameter.SPRING, 2).values[0] == pytest.approx(20.0)
+
+
+def test_identification_real_and_complex_modes():
+    """LSFD on the exact poles: complex modes fit any damping; real modes only proportional damping."""
+    from vib_tutorial.core.complex_modes import identify, real_mode_lsfd
+
+    res = identify(UNIFORM, modal_analysis(UNIFORM))
+    assert res.complex_fit.error < 1e-8 and res.real_fit.error < 1e-8
+    assert res.real_fit.mac == pytest.approx(np.ones(4)) and res.real_fit.mac_undamped == pytest.approx(np.ones(4))
+    r = modal_analysis(BASE)
+    res = identify(BASE, r)
+    assert res.complex_fit.error < 1e-8 and res.complex_fit.mac == pytest.approx(np.ones(4))
+    assert res.real_fit.error == pytest.approx(0.29, abs=0.005)
+    assert res.real_fit.mac == pytest.approx([0.997, 0.773, 0.506, 0.886], abs=0.001)
+    modes, _ = real_mode_lsfd(res.freqs, res.H, [m.damped.eigenvalue for m in r.modes])
+    assert all(np.abs(m.plus.real).max() == 0.0 for m in modes)  # A/(λ − λ*): purely imaginary
+    # noise: the complex fit's shapes come out a little complex even where the modes are real
+    noisy = identify(UNIFORM, modal_analysis(UNIFORM), noise=0.01, seed=0)
+    mpc = [complexity(m.shape).mpc for m in noisy.complex_fit.modes]
+    assert min(mpc) < 0.995 and noisy.real_fit.error < 0.01
