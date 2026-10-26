@@ -736,6 +736,18 @@ def torsional_compressor():
     save(w, "torsional_compressor")
 
 
+def torsional_startup():
+    w = window()
+    page = w.torsional_page
+    w.pages.setCurrentWidget(page)
+    page.preset.setCurrentText("Geared compressor")
+    page.start()
+    page.step(page.startup.duration)
+    settle()
+    print(page.startup_note.text())
+    save(w, "torsional_startup")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
@@ -743,7 +755,7 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          virtual_modal_test, modal_extraction, jeffcott_rotor, jeffcott_run_up,
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_newkirk, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked,
-         duffing_jump, mathieu_sweep, torsional_compressor]
+         duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup]
 
 
 def main(names: list[str]) -> None:

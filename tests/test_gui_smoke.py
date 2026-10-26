@@ -2678,7 +2678,7 @@ def test_frame_timers_keep_the_frame_rate(app, monkeypatch):
     frame's computing comes out of the wait, not on top of it (16 ms + its work held the rotor at 47 fps)."""
     import time
 
-    from vib_tutorial.gui import cms_time, duffing, rotor
+    from vib_tutorial.gui import cms_time, duffing, rotor, torsional
     from vib_tutorial.gui.main_window import MainWindow
 
     w = MainWindow()
@@ -2687,9 +2687,11 @@ def test_frame_timers_keep_the_frame_rate(app, monkeypatch):
     w.cms_page.tabs.setCurrentWidget(w.cms_page.time)
     app.processEvents()
     for p, frame_ms in ((w.cms_page.time, cms_time.FRAME_MS), (w.rotor_page, rotor.FRAME_MS),
-                        (w.duffing_page, duffing.FRAME_MS)):
+                        (w.duffing_page, duffing.FRAME_MS), (w.torsional_page, torsional.FRAME_MS)):
         w.pages.setCurrentWidget(w.cms_page if p is w.cms_page.time else p)
         app.processEvents()
+        if p is w.torsional_page:
+            p.start()  # it plays only once started
         monkeypatch.setattr(p, "step", lambda *_, **__: time.sleep(0.008))
         p._frame()
         assert p._timer.isActive()
@@ -3045,5 +3047,66 @@ def test_torsional_page(app):
 
     w.set_theme("Dark")
     p.tabs.setCurrentWidget(p.shapes_tab)
+    w.set_theme("Light")
+    w.close()
+
+
+def test_torsional_start_up(app):
+    """The torsional page's start-ups: the fan's induction motor and the compressor's synchronous one run to the
+    end with their peaks read out, pause and resume, the diesel set has no motor until one is picked, and
+    editing the train or the motor starts afresh."""
+    from vib_tutorial.core.torsional_startup import MotorKind
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.torsional_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    assert p.sim is not None and not p.running and p.views.currentWidget() is p.criticals_tab
+    assert "At rest" in p.startup_status.text() and "mode 1 (52.3 Hz) is 5 % from it" in p.startup_info.text()
+    p.start_button.click()
+    assert p.running and p.views.currentWidget() is p.startup_tab and p.pause_button.text() == "Pause"
+    p.step(0.5)
+    assert p.sim.t == pytest.approx(0.5) and p._k == round(0.5 / p.sim.h)
+    p.pause_button.click()
+    assert not p.running and p.pause_button.text() == "Run"
+    p.step(10.0)  # a test steps it whether it plays or not: to the end, and no further
+    assert p.sim.done and not p.pause_button.isEnabled()
+    assert "Done." in p.startup_status.text()
+    assert "<b>Coupling: 6 kN·m at 0.068 s (38 rpm), 10.3× its running 580 N·m</b>" in p.startup_note.text()
+    assert p.link_curve.xData.size == p._k  # (getData is what shows, decimated)
+
+    p.preset.setCurrentText("Geared compressor")
+    assert p.motor_kind.currentText() == "Synchronous" and p._k == 0 and not p.running
+    assert "meets mode 2 (83.1 Hz) at 254 rpm, mode 1 (38.9 Hz) at 916 rpm" in p.startup_info.text()
+    assert len(p._marks) == 2  # the two crossings' speeds
+    p.start()
+    p.step(3.0)
+    assert len(p._marks) == 4 and p.sim.field_on  # and when the run passed them
+    assert "in step, the field on. Done." in p.startup_status.text()
+    assert "<b>Low-speed coupling: 11.3 kN·m" in p.startup_note.text()
+    p.startup_link.setCurrentText("High-speed coupling")
+    assert np.abs(p.link_curve.yData).max() == pytest.approx(p.sim.peaks[2])
+
+    p.start()
+    p.step(0.2)
+    p.select(3)  # the mesh: a stiffer one starts the run again from rest, still playing
+    p.mesh_stiffness.setValue(3000.0)
+    assert p.preset.currentText() == "Custom" and p.running and p.sim.t == 0.0 and p._k == 0
+    p.breakdown.setValue(7000.0)
+    assert p.startup.motor.breakdown == 7000.0 and p.sim.t == 0.0
+
+    p.preset.setCurrentText("Diesel generator set")
+    assert p.sim is None and not p.start_button.isEnabled() and "engine drives this train" in p.startup_info.text()
+    p.start()
+    assert not p.running
+    p.motor_kind.setCurrentIndex(1)  # the last motor's numbers, made an induction motor
+    assert p.startup.motor.kind is MotorKind.INDUCTION and p.sim is not None and p.start_button.isEnabled()
+    assert p.preset.currentText() == "Custom"
+    p.start()
+    p.step(0.1)
+    assert p._k > 0
+    w.set_theme("Dark")
     w.set_theme("Light")
     w.close()
