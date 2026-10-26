@@ -40,14 +40,15 @@ uv run pytest         # run the tests
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
-Six more pages work on the same chain, in order from analysis to simplification to test:
+Seven more pages work on the same chain, in order from analysis to simplification to test:
 **FRF matrix** shows every term of the receptance matrix and how the modes build it up,
 **Modal coupling** joins two halves of the chain one mode each, to show when their modes split,
 **Substructuring (CMS)** reduces the chain by component mode synthesis (Craig–Bampton, Rubin or
 MacNeal), **Virtual modal test** measures the FRF from simulated force and response signals,
 as in a lab, **Operational modal analysis** finds the modes from the responses to unmeasured
-ambient forces alone, and **Random vibration** shakes it with a random force or base and
-predicts the response's spectrum and RMS. The **Jeffcott rotor** page leaves the chain for a
+ambient forces alone, **Random vibration** shakes it with a random force or base and
+predicts the response's spectrum and RMS, and **Complex modes** shows when its damping makes the
+modes complex and what the usual approximation then misses. The **Jeffcott rotor** page leaves the chain for a
 spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
 page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
 resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes,
@@ -576,6 +577,32 @@ The force in the spring that carries the chain off the base crosses zero 1.14 ti
 says from its spectrum. Over a minute Davenport expects its largest peak at 3.11σ; but most of it is
 mode 1, a narrow band whose peaks come in clumps, and Vanmarcke's 2.84σ is closer to the record's
 2.79σ.
+
+### Complex modes
+
+The **Complex modes** page looks at what the damping does to the chain's modes. With proportional
+damping (Φ<sup>T</sup>CΦ diagonal: here, a damper per spring in proportion to it) every mode keeps its
+real, undamped shape; a damper on its own couples the modes, and the exact (state-space) shapes become
+complex: each mass peaks at its own time, and the nodes move. It follows the chain on the Simulation page.
+
+- **The mode in the complex plane**: one arrow per mass, with the best-fit line, and its snapshots over
+  half a cycle: one shape, scaled, for a real mode; changing shape, the nodes wandering, for a complex one.
+- **How complex**: every mode's MPC (modal phase collinearity: 1 real, 0 spread evenly), MPD (mean
+  phase deviation from the best-fit line) and MAC with the undamped shape, and the phases' scatter
+  (*Phase scatter* tab).
+- **The proportional approximation** (ζ = φ<sup>T</sup>Cφ/2ω, the off-diagonal terms dropped): its poles
+  against the exact ones in the table, its FRF against the exact one (*FRF*), and a *Free decay* from an
+  undamped mode's shape: exactly that mode with proportional damping, otherwise the damping hands some
+  of the motion to the others.
+- **Chains to try** (loaded into the Simulation page): proportional dampers, one damper at the base, one
+  at the top, a strong damper that locks a joint (a mode overdamped), and a tuned mass damper's two close
+  modes. *Make it proportional* sets c<sub>i</sub> = βk<sub>i</sub>, keeping mode 1's ζ.
+
+![Complex modes page, the default chain with a single 20 N·s/m damper on spring 1: mode 3's arrows spread from their best-fit line (MPC 0.200, MPD 28.87°) and its eight snapshots change shape; the table gives mode 4's ζ as 0.0225 exact against the approximation's 0.0489 (+117 %); released in mode 3's undamped shape, 50.3 % of it reaches mode 2](docs/images/complex_modes.png)
+
+With one damper at the base, mode 3 is the most complex: its masses' phases spread up to 54° from the
+best-fit line. The approximation puts mode 4's damping at twice the exact value, and a release in
+mode 3's undamped shape passes half of it to mode 2.
 
 ### Jeffcott rotor
 
@@ -1157,6 +1184,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/random_vibration.py`: random vibration: band-limited force or base-acceleration PSDs,
   the response's PSD H G Hᴴ and cumulative RMS, Miles' equation mode by mode, a record synthesized
   to the PSD and stepped by the exact FOH update, and Welch's estimate.
+- `core/complex_modes.py`: non-proportional damping: the complex modes' MPC and MPD, the
+  proportional approximation's damping, poles and FRF against the exact ones, and the free decay
+  from an undamped mode's shape.
 - `core/identification.py`: modal parameter extraction from a measured FRF column: peak
   picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
   modes (MAC).

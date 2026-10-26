@@ -54,6 +54,7 @@ LAZY_PAGES = (
     ("test_page", "Virtual modal test"),
     ("oma_page", "Operational modal analysis"),
     ("random_page", "Random vibration"),
+    ("complex_page", "Complex modes"),
     ("rotor_page", "Jeffcott rotor"),
     ("duffing_page", "Duffing && Mathieu"),
     ("torsional_page", "Torsional vibration"),
@@ -72,6 +73,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "frf_page":
         from .frf_matrix import FrfMatrixPage
         return FrfMatrixPage
+    if name == "complex_page":
+        from .complex_modes import ComplexModesPage
+        return ComplexModesPage
     if name == "coupling_page":
         from .modal_coupling import ModalCouplingPage
         return ModalCouplingPage
@@ -458,6 +462,7 @@ class MainWindow(QtWidgets.QMainWindow):
     torsional_page = property(lambda self: self._page("torsional_page"))
     continuum_page = property(lambda self: self._page("continuum_page"))
     random_page = property(lambda self: self._page("random_page"))
+    complex_page = property(lambda self: self._page("complex_page"))
 
     def _page(self, name: str) -> QtWidgets.QWidget:
         """The page `name` from LAZY_PAGES, built and put in its tab on first use."""
@@ -468,6 +473,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if _follows_chain(page):
             page.dof_requested.connect(self.params.dof.setValue)
             page.edit_parameters.connect(lambda: self.pages.setCurrentWidget(self.sim_page))
+            if hasattr(page, "system_requested"):
+                page.system_requested.connect(self.params.set_system)
             page.set_system(self.sim.system, self.modal)
         # Insert the page before its placeholder, switch to it if the placeholder was
         # showing, then drop the placeholder: only the real page is ever shown.
