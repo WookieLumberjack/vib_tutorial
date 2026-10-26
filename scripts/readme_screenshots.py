@@ -863,11 +863,23 @@ def complex_sweep():
     save(w, "complex_sweep")
 
 
+def model_updating():
+    w = window()
+    page = w.updating_page
+    w.pages.setCurrentWidget(page)
+    page.trial.setCurrentText("One spring 30 % too stiff")
+    page.recompute()
+    settle()
+    print(page.readout.text())
+    print([(p.test + 1, p.model + 1, round(p.mac, 3), f"{100 * p.error:+.2f}") for p in page.corr.pairs])
+    save(w, "model_updating")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
-         virtual_modal_test, modal_extraction, oma, oma_ssi, random_vibration, random_statistics, complex_modes, complex_sweep, jeffcott_rotor, jeffcott_run_up,
+         virtual_modal_test, modal_extraction, oma, oma_ssi, random_vibration, random_statistics, complex_modes, complex_sweep, model_updating, jeffcott_rotor, jeffcott_run_up,
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_newkirk, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked,
          duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup, continuum_string, continuum_beam,

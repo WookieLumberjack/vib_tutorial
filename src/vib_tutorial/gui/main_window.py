@@ -55,6 +55,7 @@ LAZY_PAGES = (
     ("oma_page", "Operational modal analysis"),
     ("random_page", "Random vibration"),
     ("complex_page", "Complex modes"),
+    ("updating_page", "Model updating"),
     ("rotor_page", "Jeffcott rotor"),
     ("duffing_page", "Duffing && Mathieu"),
     ("torsional_page", "Torsional vibration"),
@@ -73,6 +74,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "frf_page":
         from .frf_matrix import FrfMatrixPage
         return FrfMatrixPage
+    if name == "updating_page":
+        from .model_updating import ModelUpdatingPage
+        return ModelUpdatingPage
     if name == "complex_page":
         from .complex_modes import ComplexModesPage
         return ComplexModesPage
@@ -463,6 +467,7 @@ class MainWindow(QtWidgets.QMainWindow):
     continuum_page = property(lambda self: self._page("continuum_page"))
     random_page = property(lambda self: self._page("random_page"))
     complex_page = property(lambda self: self._page("complex_page"))
+    updating_page = property(lambda self: self._page("updating_page"))
 
     def _page(self, name: str) -> QtWidgets.QWidget:
         """The page `name` from LAZY_PAGES, built and put in its tab on first use."""

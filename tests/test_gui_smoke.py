@@ -3493,3 +3493,63 @@ def test_complex_modes_sweep_and_identification(app):
     w.set_theme("Dark")
     w.set_theme("Light")
     w.close()
+
+
+def test_model_updating_page(app):
+    """The model updating page measures the Simulation page's chain, correlates its own model with errors in it,
+    re-correlates without measuring again when the model or the sensors change, runs each trial, and follows the
+    chain's size."""
+    from vib_tutorial.core.model_updating import Source
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.model_updating import TRIALS
+
+    w = MainWindow()
+    w.show()
+    p = w.updating_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    p.recompute()
+    assert w.pages.tabText(w.pages.currentIndex()) == "Model updating"
+    assert p.source.currentData() is Source.HAMMER and len(p.sensors) == 4 and len(p.error_rows) == 4
+    assert p.error_rows[2][2].value() == pytest.approx(1.3)  # the first trial: k3 30 % too stiff
+    assert "found 3 of the structure's 4 modes" in p.test_info.text()
+    assert p.table.rowCount() == 3 and "3 pairs" in p.readout.text() and "+4.09 %" in p.readout.text()
+
+    test = p.test
+    p.error_rows[2][2].setValue(1.0)
+    p.recompute()
+    assert p.test is test and max(abs(x.error) for x in p.corr.pairs) < 0.003
+    p.sensors[1].setChecked(False)
+    p.recompute()
+    assert p.test is test and p.corr.test.sensors.sum() == 3 and p.corr.comac.size == 3
+    p.again.click()
+    assert p.test is not test and p.seed == 2
+    for tab in (p.shape_tab, p.auto_tab, p.comac_tab):
+        p.tabs.setCurrentWidget(tab)
+        app.processEvents()
+    p.table.selectRow(1)
+    assert "Test mode 2" in p.shape_note.text()
+
+    for i, (_, _, note) in enumerate(TRIALS):
+        p.trial.setCurrentIndex(i)
+        p.recompute()
+        assert p.trial_note.text() == note and p.corr.pairs
+    p.trial.setCurrentText("Two sensors")
+    p.recompute()
+    assert p.source.currentData() is Source.EXACT and [b.isChecked() for b in p.sensors] == [True, False, False, True]
+    assert "test modes 2 and 4. At 2 sensors" in p.auto_note.text()
+    p.clear_errors.click()
+    p.recompute()
+    assert all(box.value() == 1.0 for row in p.error_rows for box in row[1:])
+
+    p.dof.setValue(6)
+    app.processEvents()
+    p.recompute()
+    assert w.sim.system.n == 6 and len(p.sensors) == 6 and len(p.error_rows) == 6 and len(p.corr.result.modes) == 6
+    for b in p.sensors:
+        b.setChecked(False)
+    p.recompute()
+    assert "No sensors" in p.readout.text()
+    w.set_theme("Dark")
+    w.set_theme("Light")
+    w.close()
