@@ -56,6 +56,7 @@ LAZY_PAGES = (
     ("random_page", "Random vibration"),
     ("complex_page", "Complex modes"),
     ("updating_page", "Model updating"),
+    ("shock_page", "Shock spectrum"),
     ("rotor_page", "Jeffcott rotor"),
     ("duffing_page", "Duffing && Mathieu"),
     ("torsional_page", "Torsional vibration"),
@@ -74,6 +75,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "frf_page":
         from .frf_matrix import FrfMatrixPage
         return FrfMatrixPage
+    if name == "shock_page":
+        from .shock import ShockPage
+        return ShockPage
     if name == "updating_page":
         from .model_updating import ModelUpdatingPage
         return ModelUpdatingPage
@@ -468,6 +472,7 @@ class MainWindow(QtWidgets.QMainWindow):
     random_page = property(lambda self: self._page("random_page"))
     complex_page = property(lambda self: self._page("complex_page"))
     updating_page = property(lambda self: self._page("updating_page"))
+    shock_page = property(lambda self: self._page("shock_page"))
 
     def _page(self, name: str) -> QtWidgets.QWidget:
         """The page `name` from LAZY_PAGES, built and put in its tab on first use."""

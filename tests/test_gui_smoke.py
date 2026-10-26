@@ -3570,3 +3570,62 @@ def test_model_updating_page(app):
     w.set_theme("Dark")
     w.set_theme("Light")
     w.close()
+
+
+def test_shock_page(app):
+    """The shock spectrum page follows the chain, sets its pulse from it, records again only when the pulse changes,
+    picks an oscillator from the spectrum, runs each trial, and follows the chain's size."""
+    from vib_tutorial.core.shock import Shape
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.shock import TRIALS
+
+    w = MainWindow()
+    w.show()
+    p = w.shock_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    p.recompute()
+    assert w.pages.tabText(w.pages.currentIndex()) == "Shock spectrum"
+    assert p.shape.currentData() is Shape.HALF_SINE and p.duration.value() == pytest.approx(100.0)
+    assert not p.mass.isVisibleTo(p) and not p.noise.isVisibleTo(p)
+    assert "16.5 g at 8.3 Hz (f T = 0.83)" in p.readout.text() and "1.65 × the record's peak 10 g" in p.readout.text()
+    assert p.f_pick.value() == pytest.approx(8.3, abs=0.01) and "16.5 g" in p.osc_note.text()
+
+    rec = p.record
+    p.q.setValue(50.0)
+    p.recompute()
+    assert p.record is rec and "17.4 g" in p.readout.text()
+    p.f_pick.setValue(1.0)
+    assert p.pick_line.value() == pytest.approx(0.0) and "f = 1 Hz" in p.osc_note.text()
+    p.pick_line.setValue(math.log10(20.0))
+    assert p.f_pick.value() == pytest.approx(20.0)
+    for a, b in ((True, False), (False, True), (True, True)):
+        p.split_time.setChecked(a)
+        p.split_sign.setChecked(b)
+    assert len(p.srs_legend.items) == 5  # four parts and the maximax
+    p.duration.setValue(50.0)
+    p.recompute()
+    assert p.record is not rec and p.record.duration == pytest.approx(0.05)
+
+    for i, (_, _, note) in enumerate(TRIALS):
+        p.trial.setCurrentIndex(i)
+        p.recompute()
+        assert p.trial_note.text() == note and p.spectrum is not None and "Maximax" in p.readout.text()
+    p.trial.setCurrentText("A component on the last mass")
+    p.recompute()
+    assert p.mass.isVisibleTo(p) and p.mass.currentText() == "m4" and "3.32 ×" in p.readout.text()
+    assert p.f_pick.value() == pytest.approx(w.modal.modes[0].fn_hz, abs=1e-3)
+    p.trial.setCurrentText("Zero shift")
+    p.recompute()
+    assert p.offset.value() == pytest.approx(1.0) and p.again.isEnabled()
+    rec = p.record
+    p.again.click()
+    assert p.seed == 2 and p.record is not rec
+
+    p.dof.setValue(6)
+    app.processEvents()
+    p.recompute()
+    assert w.sim.system.n == 6 and p.mass.count() == 6 and p.readout.text().count(" Hz ") >= 6
+    w.set_theme("Dark")
+    w.set_theme("Light")
+    w.close()

@@ -49,7 +49,8 @@ as in a lab, **Operational modal analysis** finds the modes from the responses t
 ambient forces alone, **Random vibration** shakes it with a random force or base and
 predicts the response's spectrum and RMS, **Complex modes** shows when its damping makes the
 modes complex and what the usual approximation then misses, and **Model updating** correlates a
-model with errors in it against a modal test of the chain, and updates it to find them. The **Jeffcott rotor** page leaves the chain for a
+model with errors in it against a modal test of the chain, and updates it to find them, and **Shock
+spectrum** puts a pulse on a bank of single oscillators. The **Jeffcott rotor** page leaves the chain for a
 spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
 page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
 resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes,
@@ -668,6 +669,39 @@ error passed into the model. Update the masses as well and the fit gets better w
 every factor comes out 2 to 4 % high, because a model that is uniformly stiffer and heavier has exactly the
 same modes.
 
+### Shock spectrum
+
+The **Shock spectrum** page puts a short pulse on the base of a bank of single-degree-of-freedom
+oscillators, Q = 10 by custom, and plots each one's largest absolute acceleration against its natural
+frequency: the shock response spectrum (SRS), what a component with that natural frequency mounted on
+the base would see. The pulse's duration is set from the chain on the Simulation page, and the chain's
+modes are marked on the spectrum.
+
+- **The pulses**: the classical ones (half-sine, haversine, terminal- and initial-peak sawtooth,
+  trapezoid, square), and two measured records with noise and an offset if you like. One is the
+  acceleration of a mass on the chain with its base given a half-sine, the shock a component mounted
+  there sees. The other is a pyrotechnic-like transient, a burst of damped sines that ends at rest.
+- **The spectrum**: the maximax, and on request the primary (while the pulse lasts) and residual (after
+  it) spectra, and the positive and negative ones. Dashed lines mark its two asymptotes: the pulse's
+  peak, which stiff oscillators follow, and 2π f Δv, the ringing of soft oscillators that take the pulse
+  as an impulse.
+- **The oscillator** (*Oscillator* tab): pick a frequency on the spectrum (drag the line, or click), and
+  see that oscillator's acceleration against the pulse, its largest value marked, and its spring's
+  stretch.
+- **Things to try**:
+  - a half-sine, a square, a terminal-peak sawtooth and a haversine;
+  - light damping (Q = 50: the spectrum hardly changes);
+  - a component on the chain's last mass;
+  - a pyrotechnic transient;
+  - the same transient with an accelerometer's zero shift.
+
+![Shock spectrum page: a 10 g, 100 ms half-sine on the base. Its velocity rises to 6.24 m/s; the Q = 10 spectrum peaks at 16.5 g at 8.3 Hz (f T = 0.83), its primary part rising to it from the left and its residual part falling away to the right, between the dashed 2π f Δv line and the pulse's 10 g; the chain's modes are dotted at 1.1 to 6.0 Hz. The 8.3 Hz oscillator's acceleration peaks at 16.5 g near the end of the pulse, then rings at 11 to 13 g](docs/images/shock_spectrum.png)
+
+A 10 g half-sine lasting 100 ms, 0.6 of the default chain's fastest period, puts its modes on the
+rising side of the spectrum: a component tuned to mode 1 would see 4.1 g, one tuned to mode 4 15.7 g.
+The spectrum peaks at 1.65 × the pulse, for an oscillator whose period is a little longer than the
+pulse.
+
 ### Jeffcott rotor
 
 The **Jeffcott rotor** page spins a disc on a flexible shaft, between two bearings
@@ -1256,6 +1290,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
   the test (the virtual modal test's or the exact modes with noise) at chosen sensors, the MAC and
   its pairs, frequency errors, the auto-MAC and COMAC; frequency sensitivities in closed form, and
   Gauss–Newton updating of masses, springs and dampers with regularization.
+- `core/shock.py`: shock response spectra: the classical pulses and measured records, the oscillators
+  stepped by the exact first-order-hold update (primary, residual, positive and negative peaks), and
+  the chain on a shaken base.
 - `core/identification.py`: modal parameter extraction from a measured FRF column: peak
   picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
   modes (MAC).
