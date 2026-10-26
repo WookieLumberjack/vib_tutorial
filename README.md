@@ -40,15 +40,16 @@ uv run pytest         # run the tests
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
 
-Seven more pages work on the same chain, in order from analysis to simplification to test:
+Eight more pages work on the same chain, in order from analysis to simplification to test:
 **FRF matrix** shows every term of the receptance matrix and how the modes build it up,
 **Modal coupling** joins two halves of the chain one mode each, to show when their modes split,
 **Substructuring (CMS)** reduces the chain by component mode synthesis (Craig–Bampton, Rubin or
 MacNeal), **Virtual modal test** measures the FRF from simulated force and response signals,
 as in a lab, **Operational modal analysis** finds the modes from the responses to unmeasured
 ambient forces alone, **Random vibration** shakes it with a random force or base and
-predicts the response's spectrum and RMS, and **Complex modes** shows when its damping makes the
-modes complex and what the usual approximation then misses. The **Jeffcott rotor** page leaves the chain for a
+predicts the response's spectrum and RMS, **Complex modes** shows when its damping makes the
+modes complex and what the usual approximation then misses, and **Model updating** correlates a
+model with errors in it against a modal test of the chain. The **Jeffcott rotor** page leaves the chain for a
 spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
 page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
 resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes,
@@ -617,6 +618,36 @@ Swept, the same damper gives mode 1 at most ζ = 0.147, at 60 N·s/m; stiffer, i
 the modes become those of the three masses above it. Fitted with real modes, this chain's FRF misses by
 29 %, and mode 3's shape has a MAC of 0.51 with the exact one; with complex modes it misses by 0.28 %,
 the noise's share.
+
+### Model updating
+
+The **Model updating** page treats the chain on the Simulation page as the structure under test, and keeps
+a model of it with errors that you set: a factor on each mass, spring and damper. In practice the errors are
+unknown; here they are set, so you can check what the correlation says against what is actually wrong.
+
+- **The test**: the virtual modal test (a hammer on m1, H1, LSCF's stable poles and LSFD's shapes),
+  whose modes carry its noise and curve-fit errors and may miss the most damped. Or, quickly, the exact
+  modes with noise. *Sensors* choose the masses the shapes are read at.
+- **Correlation**: the MAC of every test shape with every model shape, the pairs it makes (best MAC first,
+  0.5 or more), and each pair's frequencies, damping ratios and frequency error. The tabs show:
+  - *Frequencies*: the model's frequencies against the test's.
+  - *Shapes*: a pair's two shapes.
+  - *Auto-MAC*: the test's shapes against each other (spatial aliasing with too few sensors).
+  - *COMAC*: the shapes' agreement at each sensor.
+- **Things to try**:
+  - a spring 30 % too stiff;
+  - a mass 20 % too heavy;
+  - every spring 10 % too soft (the frequencies move, the shapes don't);
+  - dampers twice too strong;
+  - only two sensors;
+  - no error at all, which leaves only the test's own scatter.
+
+![Model updating page: the model's k3 is 30 % too stiff, and the hammer test finds three of the four modes. The MAC matrix pairs T1–T3 with M1–M3 at 1.00, 1.00 and 0.93; the model's frequencies are 2.15, 4.09 and 0.31 % high; the Frequencies tab plots them against the test's, and their errors](docs/images/model_updating.png)
+
+With the model's third spring 30 % too stiff, every frequency comes out high, mode 2's most and mode 3's
+least, since that spring hardly stretches in mode 3. The MACs stay at 0.99 and up: the shapes don't
+show the error, the pattern of frequency errors does. The third test mode's MAC of 0.93 is the test's own:
+without any error in the model it is 0.92.
 
 ### Jeffcott rotor
 
@@ -1202,6 +1233,9 @@ $F_f$ times the distance slid, so the energy balance still closes.
   proportional approximation's damping, poles and FRF against the exact ones, the free decay
   from an undamped mode's shape, a damper's or spring's root locus, and LSFD with real and with
   complex modes.
+- `core/model_updating.py`: model updating and correlation: the model as the structure with errors,
+  the test (the virtual modal test's or the exact modes with noise) at chosen sensors, the MAC and
+  its pairs, frequency errors, the auto-MAC and COMAC.
 - `core/identification.py`: modal parameter extraction from a measured FRF column: peak
   picking, circle fit, LSCF with its stabilization diagram, LSFD, and matching to the exact
   modes (MAC).
