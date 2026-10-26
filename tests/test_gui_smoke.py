@@ -3110,3 +3110,69 @@ def test_torsional_start_up(app):
     w.set_theme("Dark")
     w.set_theme("Light")
     w.close()
+
+
+def test_oma_page(app):
+    """The operational modal analysis page follows the chain, finds its modes from the ambient record, picks
+    and drops peaks by clicking, reprocesses without recording again, runs each trial, and survives a theme
+    switch."""
+    from PySide6.QtCore import QPointF
+
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    p = w.oma_page
+    w.pages.setCurrentWidget(p)
+    app.processEvents()
+    assert w.pages.tabText(w.pages.currentIndex()) == "Operational modal analysis"
+    assert p.record is not None and p.dof.value() == 4 and p.input.count() == 5
+    assert p.readout.text().startswith("Found: mode 1 ") and "mode 4" in p.readout.text()
+    assert "2,000 periods of mode 1" in p.daq_info.text() and p.block.currentData() == 2048
+    assert p.results.table.rowCount() == 4 and p.mode_pick.count() == 4
+
+    record = p.record
+    p.noise.setValue(10.0)
+    p.recompute()
+    assert p.record is record  # processing only: the same record
+    p.new_record.click()
+    assert p.record is not record and p.seed == 2
+
+    # click on mode 1's peak: dropped; click there again: picked again
+    vb = p.sv.getPlotItem().getViewBox()
+
+    class Click:
+        def __init__(self, x):
+            lo, hi = vb.viewRange()[1]
+            self.at = vb.mapViewToScene(QPointF(x, 0.5 * (lo + hi)))
+
+        def scenePos(self):  # noqa: N802 (Qt's name)
+            return self.at
+
+    first = p.fdd.freqs[p.modes[0].line]
+    p._on_sv_click(Click(first))
+    assert len(p.modes) == 3 and p.peaks is not None
+    p._on_sv_click(Click(first))
+    assert len(p.modes) == 4
+    p.auto_peaks.click()
+    assert p.peaks is None
+
+    for i in range(p.trial.count()):
+        p.trial.setCurrentIndex(i)
+        p.recompute()
+        assert p.trial_note.text()
+    p.trial.setCurrentText("Forces at m3 only")
+    p.recompute()
+    assert p.input.currentText() == "m3" and "missed: mode 2" in p.results.notes.text()
+
+    p.tabs.setCurrentWidget(p.efdd_tab)
+    p.mode_pick.setCurrentIndex(1)
+    assert p.selected == 1 and "Bell of" in p.efdd_note.text()
+
+    w.params.dof.setValue(3)  # the chain changes: the page follows
+    app.processEvents()
+    p.recompute()
+    assert p.system.n == 3 and p.input.count() == 4 and p.record.y.shape[1] == 3
+    w.set_theme("Dark")
+    w.set_theme("Light")
+    w.close()
