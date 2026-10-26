@@ -52,6 +52,35 @@ The classical ones (half-sine, haversine, the two sawtooths, a trapezoid, a squa
 Either can have noise (white, seeded) and an offset added, as a measurement does. A small
 offset is an accelerometer's zero shift: integrated over the record it is a velocity change the
 real shock didn't have, and the SRS's low end rises with it.
+
+Synthesis
+---------
+A test is specified by its SRS, not a time history: here a plateau above a knee frequency, rising
+6 dB an octave (∝ f) below it (`target`), over knee/`SYNTH_SPAN` to knee·`SYNTH_SPAN`, at Q = 10.
+A shaker or shock machine needs a time history whose SRS matches it. It is built from components
+at `SYNTH_PER_OCTAVE` frequencies across the band, each scaled by the target over the SRS achieved
+there until every one is within `SYNTH_TOLERANCE` (`synthesize`):
+
+* damped sines, e^{−ζωt} sin ωt, each decaying within the record: their SRS is easy to shape, but
+  each has a net velocity, so the record ends moving and drifting, which a shaker can't follow;
+* wavelets (Smallwood's), sin(ωt/N) sin ωt over N half-cycles, N odd: each starts and ends at rest,
+  velocity and displacement both, so the record does too. The lowest has `WAVELET_FIRST`
+  half-cycles and N grows ∝ f up to `WAVELET_MOST`: fewer would spread its spectrum upward, past
+  the target's slope, where no amplitude could pull it back; more, and the SRS dips between them.
+
+Between the components the SRS strays further, within about 3 dB over the bank.
+
+The chain's peak
+----------------
+On the shaken base, in coordinates relative to it, M z'' + C z' + K z = −M 1 a. Mode r (mass-
+normalized φ_r) is a single oscillator driven by Γ_r a, Γ_r = φ_rᵀ M 1, so with proportional damping
+the chain's absolute acceleration is Σ φ_r Γ_r ÿ_r(t), ÿ_r the absolute acceleration of the
+oscillator at the mode's f and ζ, and a spring's force Σ k Δφ_r Γ_r u_r(t), u_r its relative
+displacement. The SRS gives each term's peak but not when it comes, so the peaks are combined
+(`ChainPeaks`): ABS, their sum (an upper bound); SRSS, the root of their squares (right when the
+modes' peaks are independent, as in a long random record; a shock's come together, early); NRL
+(the Naval Research Laboratory's), the largest plus the root of the others' squares. The exact
+response comes from `chain_response`.
 """
 
 from __future__ import annotations
@@ -88,6 +117,24 @@ TRANSIENT_START = 0.1
 TRANSIENT_RISE = 3.0  # each sine's rise rate, over ω
 TRANSIENT_HIGH = 400.0
 
+SYNTH_SPAN = 10.0  # the target's band: knee / SYNTH_SPAN to knee × SYNTH_SPAN
+SYNTH_PER_OCTAVE = 4  # components per octave (3 leave dips of 4–5 dB between them)
+SYNTH_Q = 10.0  # the target's
+SYNTH_TOLERANCE = 0.5  # dB, at the components' frequencies
+SYNTH_ITERATIONS = 60
+SYNTH_PATIENCE = 6  # rounds without a better worst error before giving up
+SYNTH_START = 0.1  # each component's first amplitude, of the target
+SYNTH_BELOW = 8.0  # the bank reaches the band's bottom / SYNTH_BELOW
+SYNTH_ABOVE = 2.0  # and its top × SYNTH_ABOVE
+WAVELET_FIRST = 5  # half-cycles of the lowest wavelet; N ∝ f above it, odd
+WAVELET_MOST = 15  # longer ones are so narrow the SRS dips between them
+WAVELET_SPREAD = 0.2  # the record is (1 + WAVELET_SPREAD) × the longest wavelet; delays within that
+SINE_PERIODS = 6.0  # a damped-sine record's length, in periods of its lowest component
+SINE_DECAY = 4.6  # each damped sine decays e^{−SINE_DECAY} (1 %) over the record ...
+SINE_ZETA = 0.02  # ... or faster: its ζ at least this
+SINE_SPREAD = 0.02  # of the record, the damped sines' delays
+MAX_ZETA = 0.99  # an overdamped mode's oscillator is taken at this
+
 
 class Shape(enum.Enum):
     HALF_SINE = "Half-sine"
@@ -98,20 +145,27 @@ class Shape(enum.Enum):
     SQUARE = "Square"
     AT_A_MASS = "Measured at a mass"
     TRANSIENT = "Measured transient"
+    SINES = "Damped sines to a spectrum"
+    WAVELETS = "Wavelets to a spectrum"
 
     @property
     def measured(self) -> bool:
         return self in (Shape.AT_A_MASS, Shape.TRANSIENT)
 
+    @property
+    def synthesized(self) -> bool:
+        return self in (Shape.SINES, Shape.WAVELETS)
 
-CLASSICAL = tuple(s for s in Shape if not s.measured)
+
+CLASSICAL = tuple(s for s in Shape if not (s.measured or s.synthesized))
 
 
 @dataclass(frozen=True)
 class Pulse:
     """A base acceleration: `peak` (g) and `duration` (s) set a classical pulse; AT_A_MASS's base half-sine and the
     TRANSIENT's scale. `mass` is AT_A_MASS's; `noise` (RMS) and `offset` are fractions of the peak, added to a
-    measured record (`seed`'s noise)."""
+    measured record (`seed`'s noise). A synthesized pulse's target has its plateau at `peak` above `knee` (Hz);
+    its length follows from the band (`length`), and `seed` sets its components' delays."""
 
     shape: Shape = Shape.HALF_SINE
     peak: float = 10.0
@@ -120,15 +174,29 @@ class Pulse:
     noise: float = 0.0
     offset: float = 0.0
     seed: int = 1
+    knee: float = 5.0
 
     def __post_init__(self) -> None:
-        if not self.duration > 0:
-            raise ValueError("the pulse's duration must be positive")
+        if not (self.duration > 0 and self.knee > 0):
+            raise ValueError("the pulse's duration and knee must be positive")
 
     @property
-    def high(self) -> float:
-        """The bank's highest f T."""
-        return TRANSIENT_HIGH if self.shape is Shape.TRANSIENT else HIGH
+    def band(self) -> tuple[float, float]:
+        """The bank's span (Hz): LOW / T to HIGH / T (TRANSIENT_HIGH for a transient), or round a synthesis's band."""
+        if self.shape.synthesized:
+            lo, hi = target_band(self)
+            return lo / SYNTH_BELOW, hi * SYNTH_ABOVE
+        T = self.duration
+        return LOW / T, (TRANSIENT_HIGH if self.shape is Shape.TRANSIENT else HIGH) / T
+
+    @property
+    def length(self) -> float:
+        """The record's length (s) before any ringing: the duration, or a synthesis's."""
+        if self.shape is Shape.WAVELETS:
+            return (1.0 + WAVELET_SPREAD) * WAVELET_FIRST / (2.0 * target_band(self)[0])
+        if self.shape is Shape.SINES:
+            return SINE_PERIODS / target_band(self)[0]
+        return self.duration
 
 
 def classical(shape: Shape, s: np.ndarray) -> np.ndarray:
@@ -160,6 +228,7 @@ class Record:
     fs: float
     a: np.ndarray
     end: float | None
+    synthesis: Synthesis | None = None
 
     @property
     def h(self) -> float:
@@ -191,9 +260,9 @@ class Record:
 
 
 def bank(pulse: Pulse, result: ModalResult | None = None, per_octave: int = PER_OCTAVE) -> np.ndarray:
-    """The oscillators' frequencies (Hz): LOW / T to the pulse's `high` / T, widened to a quarter of the chain's
-    lowest mode and four times its highest, `per_octave` to the octave."""
-    lo, hi = LOW / pulse.duration, pulse.high / pulse.duration
+    """The oscillators' frequencies (Hz): the pulse's `band`, widened to a quarter of the chain's lowest mode and
+    four times its highest, `per_octave` to the octave."""
+    lo, hi = pulse.band
     if result is not None:
         fn = [m.fn_hz for m in result.modes if m.fn_hz > 0]
         if fn:
@@ -204,11 +273,13 @@ def bank(pulse: Pulse, result: ModalResult | None = None, per_octave: int = PER_
 
 def sample_rate(pulse: Pulse, f_top: float) -> float:
     """SAMPLES_PER_PULSE across the pulse and PER_PERIOD to the fastest oscillator, whichever is more."""
-    return max(SAMPLES_PER_PULSE / pulse.duration, PER_PERIOD * f_top)
+    return max(SAMPLES_PER_PULSE / pulse.length, PER_PERIOD * f_top)
 
 
 def record(pulse: Pulse, fs: float, system: ChainSystem | None = None, result: ModalResult | None = None) -> Record:
     """Sample the pulse at fs, raised to a whole number of samples across it (AT_A_MASS runs the chain, `system`)."""
+    if pulse.shape.synthesized:
+        return synthesize(pulse, fs)
     T = pulse.duration
     A = pulse.peak * G
     k = max(2, int(math.ceil(T * fs - 1e-9)))
@@ -419,3 +490,179 @@ def chain_response(system: ChainSystem, a: np.ndarray, fs: float, result: ModalR
             prev = ak
     acc = z @ A[n:].T + np.outer(a, b[n:]) + a[:, None]
     return ChainResponse(z[:, :n], acc)
+
+
+# ------------------------------------------------------------- synthesis to a target spectrum
+def target_band(pulse: Pulse) -> tuple[float, float]:
+    return pulse.knee / SYNTH_SPAN, pulse.knee * SYNTH_SPAN
+
+
+def target(pulse: Pulse, f: np.ndarray) -> np.ndarray:
+    """The synthesis's target SRS (m/s², at SYNTH_Q): `peak` above the knee, ∝ f below it; NaN outside the band."""
+    f = np.asarray(f, dtype=float)
+    lo, hi = target_band(pulse)
+    level = pulse.peak * G * np.minimum(1.0, f / pulse.knee)
+    return np.where((f >= lo * (1 - 1e-9)) & (f <= hi * (1 + 1e-9)), level, np.nan)
+
+
+@dataclass(frozen=True)
+class Synthesis:
+    """The components (`f` Hz, `amplitude` m/s², `delay` s; a wavelet's `half_cycles` or a damped sine's `zeta`)
+    and how near the target the record came: `error` (dB, the target over the SRS, at f) after `iterations`."""
+
+    f: np.ndarray
+    amplitude: np.ndarray
+    delay: np.ndarray
+    half_cycles: np.ndarray | None
+    zeta: np.ndarray | None
+    error: np.ndarray
+    iterations: int
+
+    @property
+    def worst(self) -> float:
+        return float(np.max(np.abs(self.error)))
+
+
+def components(pulse: Pulse) -> np.ndarray:
+    lo, hi = target_band(pulse)
+    count = int(round(SYNTH_PER_OCTAVE * math.log2(hi / lo))) + 1
+    return lo * (hi / lo) ** (np.arange(count) / (count - 1))
+
+
+def synthesize(pulse: Pulse, fs: float) -> Record:
+    """A record of damped sines or wavelets whose SRS at Q = SYNTH_Q meets the pulse's target (see the module's
+    notes): each component's amplitude is multiplied by the target over the SRS at its frequency until all are
+    within SYNTH_TOLERANCE dB (or the worst hasn't improved for SYNTH_PATIENCE rounds: the best is kept), signs
+    alternating, delays drawn from `seed`."""
+    f = components(pulse)
+    T = pulse.length
+    k = max(2, int(math.ceil(T * fs - 1e-9)))
+    fs = k / T
+    t = np.arange(k + 1) / fs
+    w = TWO_PI * f
+    rng = np.random.default_rng(pulse.seed)
+    half, zeta = None, None
+    if pulse.shape is Shape.WAVELETS:
+        half = np.clip(2.0 * np.floor(WAVELET_FIRST * f / f[0] / 2.0) + 1.0, 3.0, WAVELET_MOST)
+        span = half / (2.0 * f)
+        delay = WAVELET_SPREAD * rng.uniform(0.0, T - span)
+        s = t[None, :] - delay[:, None]
+        on = (s >= 0.0) & (s <= span[:, None])
+        basis = np.where(on, np.sin(w[:, None] * s / half[:, None]) * np.sin(w[:, None] * s), 0.0)
+    else:
+        zeta = np.maximum(SINE_ZETA, SINE_DECAY / (w * T))
+        delay = rng.uniform(0.0, SINE_SPREAD * T, f.size)
+        s = np.maximum(t[None, :] - delay[:, None], 0.0)
+        basis = np.exp(-(zeta * w)[:, None] * s) * np.sin(w[:, None] * s)
+    goal = target(pulse, f)
+    amplitude = np.where(np.arange(f.size) % 2, -1.0, 1.0) * SYNTH_START * goal
+    z = 1.0 / (2.0 * SYNTH_Q)
+    best = None
+    for it in range(1, SYNTH_ITERATIONS + 1):
+        a = amplitude @ basis
+        ratio = goal / srs(Record(pulse, fs, a, None), f, z).maximax
+        error = 20.0 * np.log10(ratio)
+        worst = float(np.max(np.abs(error)))
+        if best is None or worst < best[0]:
+            best = (worst, it, a, amplitude, error)
+        if worst < SYNTH_TOLERANCE or it - best[1] >= SYNTH_PATIENCE:
+            break
+        amplitude = amplitude * ratio
+    _, it, a, amplitude, error = best
+    return Record(pulse, fs, a, None, Synthesis(f, amplitude, delay, half, zeta, error, it))
+
+
+# ------------------------------------------------------------- the chain's peak from the spectrum
+class Response(enum.Enum):
+    ACCELERATION = "Absolute acceleration"
+    SPRING = "Spring force"
+
+
+class Rule(enum.Enum):
+    ABS = "ABS"
+    SRSS = "SRSS"
+    NRL = "NRL"
+
+
+def base_record(rec: Record) -> Record:
+    """What shakes the chain's base: the record, or for AT_A_MASS the base's half-sine that made it."""
+    if rec.pulse.shape is not Shape.AT_A_MASS:
+        return rec
+    k = int(round(rec.pulse.duration * rec.fs))
+    a = rec.pulse.peak * G * classical(Shape.HALF_SINE, np.arange(k + 1) / k)
+    return Record(rec.pulse, rec.fs, a, k * rec.h)
+
+
+@dataclass(frozen=True)
+class ChainPeaks:
+    """The chain on the base record, mode by mode and exactly. Per mode r: `f`, `zeta` (the modal ζ, at most
+    MAX_ZETA), `gamma` (Γ_r = φ_rᵀ M 1) and `spectrum[response]`, the SRS at (f_r, ζ_r): the absolute acceleration
+    (m/s²) or the relative displacement (m). `coefficients[response]` (outputs, modes) turns them into each mass's
+    acceleration or each spring's force; `modal[response]` (modes, samples) are the oscillators' histories and
+    `exact[response]` (samples, outputs) the chain's, at t, the base record padded to ring."""
+
+    f: np.ndarray
+    zeta: np.ndarray
+    gamma: np.ndarray
+    effective: np.ndarray  # Γ_r² over the chain's mass
+    t: np.ndarray
+    spectrum: dict[Response, np.ndarray]
+    coefficients: dict[Response, np.ndarray]
+    modal: dict[Response, np.ndarray]
+    exact: dict[Response, np.ndarray]
+
+    def terms(self, response: Response) -> np.ndarray:
+        """Each mode's peak contribution to each output, signed: (outputs, modes)."""
+        return self.coefficients[response] * self.spectrum[response][None, :]
+
+    def estimate(self, response: Response, rule: Rule) -> np.ndarray:
+        c = np.abs(self.terms(response))
+        if rule is Rule.ABS:
+            return c.sum(axis=1)
+        squares = np.sum(c * c, axis=1)
+        if rule is Rule.SRSS:
+            return np.sqrt(squares)
+        big = c.max(axis=1, initial=0.0)
+        return big + np.sqrt(np.maximum(squares - big * big, 0.0))
+
+    def peak(self, response: Response) -> np.ndarray:
+        """The exact response's largest |value| at each output, refined between samples."""
+        return _refined(np.abs(self.exact[response].T))
+
+    def contributions(self, response: Response, output: int) -> np.ndarray:
+        """Each mode's term in the output's history: (modes, samples)."""
+        return self.coefficients[response][output][:, None] * self.modal[response]
+
+
+def chain_peaks(system: ChainSystem, rec: Record, result: ModalResult | None = None) -> ChainPeaks:
+    """The chain's peak accelerations and spring forces on the record's base (`base_record`) from the SRS at each
+    mode, and exactly, both over the record and RING periods of mode 1 after it."""
+    lin = linear(system)
+    result = result or modal_analysis(lin)
+    base = base_record(rec)
+    modes = [m for m in result.modes if m.fn_hz > 0]
+    f1 = min((m.fn_hz for m in modes), default=1.0 / base.duration)
+    n = base.a.size + int(round(RING / f1 * base.fs))
+    if n > MAX_SAMPLES:
+        raise ValueError(f"the chain's record is too long: {n:,} samples, at most {MAX_SAMPLES:,}")
+    padded = Record(base.pulse, base.fs, np.concatenate([base.a, np.zeros(n - base.a.size)]), base.end)
+    f = np.array([m.fn_hz for m in modes])
+    zeta = np.array([min(m.zeta_modal, MAX_ZETA) if math.isfinite(m.zeta_modal) else 0.0 for m in modes])
+    phi = np.array([m.shape_mass_normalized for m in modes]).T.reshape(lin.n, len(modes))
+    gamma = phi.T @ lin.masses
+    acc_s, disp_s = np.empty(f.size), np.empty(f.size)
+    acc_h, disp_h = np.empty((f.size, n)), np.empty((f.size, n))
+    for r in range(f.size):
+        sp = srs(base, f[r:r + 1], zeta[r])
+        acc_s[r], disp_s[r] = sp.maximax[0], sp.displacement[0]
+        eta, lam = _states(padded, f[r:r + 1], zeta[r])
+        acc_h[r], disp_h[r] = 2.0 * np.real(lam[0] ** 2 * eta[0]), 2.0 * np.real(eta[0])
+    dphi = np.diff(phi, prepend=0.0, axis=0) * lin.stiffness[:, None]
+    response = chain_response(lin, padded.a, padded.fs, result)
+    springs = np.diff(response.displacement, prepend=0.0, axis=1) * lin.stiffness
+    return ChainPeaks(
+        f, zeta, gamma, gamma ** 2 / float(np.sum(lin.masses)), padded.t,
+        {Response.ACCELERATION: acc_s, Response.SPRING: disp_s},
+        {Response.ACCELERATION: phi * gamma, Response.SPRING: dphi * gamma},
+        {Response.ACCELERATION: acc_h, Response.SPRING: disp_h},
+        {Response.ACCELERATION: response.acceleration, Response.SPRING: springs})

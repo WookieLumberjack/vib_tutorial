@@ -900,11 +900,35 @@ def shock_spectrum():
     save(w, "shock_spectrum")
 
 
+def shock_chain():
+    w = window()
+    page = w.shock_page
+    w.pages.setCurrentWidget(page)
+    page.trial.setCurrentText("Modes combined")
+    page.recompute()
+    settle()
+    print(page.chain_note.text())
+    save(w, "shock_chain")
+
+
+def shock_synthesis():
+    w = window()
+    page = w.shock_page
+    w.pages.setCurrentWidget(page)
+    page.trial.setCurrentText("Wavelets to a spectrum")
+    page.recompute()
+    page.tabs.setCurrentWidget(page.tri_tab)
+    settle()
+    print(page.readout.text())
+    print(page.tri_note.text())
+    save(w, "shock_synthesis")
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
          substructuring_three, substructuring_time, substructuring_recovery, substructuring_compare,
-         virtual_modal_test, modal_extraction, oma, oma_ssi, random_vibration, random_statistics, complex_modes, complex_sweep, model_updating, model_updating_springs, shock_spectrum, jeffcott_rotor, jeffcott_run_up,
+         virtual_modal_test, modal_extraction, oma, oma_ssi, random_vibration, random_statistics, complex_modes, complex_sweep, model_updating, model_updating_springs, shock_spectrum, shock_chain, shock_synthesis, jeffcott_rotor, jeffcott_run_up,
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_newkirk, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked,
          duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup, continuum_string, continuum_beam,
