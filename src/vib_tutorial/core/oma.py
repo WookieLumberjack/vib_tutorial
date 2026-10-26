@@ -30,6 +30,26 @@ still looks like the peak's (MAC above a threshold) are that mode's single-degre
 cosine: the zero crossings give the damped frequency and the extremes' logarithmic decay
 the damping. Leakage (the window, the block length) and the bell's cut-off edges bias it.
 
+Stochastic subspace identification (SSI-cov)
+--------------------------------------------
+The outputs' correlations R_i = E[y_{k+i} y_kᵀ] of a linear system driven by white noise are
+an impulse response in disguise: R_i = C Aⁱ⁻¹ G, with A and C the sampled system's state and
+output matrices. Stacked into a block Toeplitz matrix of lags 1 … 2s − 1, they factor as the
+observability matrix times a controllability-like one, so the Toeplitz matrix has rank 2N
+(two states per mode). Its SVD's leading p singular vectors give the observability matrix
+O_p = U_p S_p^½ at model order p; C is its first block row, and A follows from its shift
+structure, O↑ A = O↓ by least squares. A's eigenvalues μ are the poles, λ = fs ln μ, and
+C's view of its eigenvectors the shapes. As with LSCF, the order is unknown: the poles are
+found at every order and the stable ones picked from a stabilization diagram.
+
+Harmonics
+---------
+A machine running on the structure adds a sine: a sharp peak in s₁, a pole with almost no
+damping. It looks like a lightly damped mode. A mode's response, band-pass filtered round its
+frequency, is Gaussian (kurtosis E[x⁴]/E[x²]² = 3); a sine's is 1.5. The kurtosis of the
+response projected on a peak's shape and filtered round it tells them apart (`kurtosis`); a
+mode with a sine in its band reads low too, but keeps its damping (`harmonics`).
+
 Nothing here scales the shapes: without the force, the modal masses are unknown.
 """
 
@@ -42,8 +62,33 @@ from dataclasses import dataclass
 import numpy as np
 
 from .frf_matrix import MAX_EIGVEC_CONDITION
-from .identification import IdentifiedMode, ModeMatch, mac, match_modes, pole_from
-from .measurement import AA_CUTOFF, MAX_OVERSAMPLE, MIN_OVERSAMPLE, Response, settle_time
+from .identification import (
+    MAX_ZETA,
+    IdentifiedMode,
+    ModeMatch,
+    Stabilization,
+    _classify,
+    auto_select,
+    lscf,
+    lsfd,
+    mac,
+    match_modes,
+    pole_from,
+)
+from .measurement import (
+    AA_CUTOFF,
+    MAX_OVERSAMPLE,
+    MIN_OVERSAMPLE,
+    Acquisition,
+    Excitation,
+    FrfEstimator,
+    MeasurementSettings,
+    Processing,
+    Response,
+    Window,
+    settle_time,
+    to_receptance,
+)
 from .modal import TWO_PI, ModalResult, modal_analysis
 from .model import ChainSystem, state_space
 from .simulator import foh_discretize
@@ -55,6 +100,9 @@ DECAY_FROM = 0.9  # EFDD: the extremes and zero crossings used, from where the e
 DECAY_TO = 0.1  # ... to where it falls below this
 MIN_EXTREMES = 3
 MAX_SAMPLES = 2_000_000  # in the record, per channel
+HARMONIC_KURTOSIS = 2.0  # below this a peak's filtered response is more like a sine (1.5) than a mode (3)
+HARMONIC_ZETA = 0.01  # ... and its damping (a sine's pole has next to none) below this
+KURTOSIS_BAND = 0.03  # the band-pass round a peak: ± this fraction of its frequency, at least the bell
 
 
 class Colour(enum.Enum):
@@ -70,6 +118,8 @@ class AmbientSettings:
     colour: Colour = Colour.WHITE
     corner_hz: float = 5.0  # the low-pass's corner, if coloured
     response: Response = Response.ACCELERATION
+    harmonic_hz: float = 0.0  # a machine running: a sine force on the first mass (0: none)
+    harmonic_force: float = 0.0  # its amplitude, N (the random forces' RMS is 1 N at each analog sample)
     seed: int | None = None
 
     @property
@@ -116,8 +166,10 @@ def ambient_record(system: ChainSystem, settings: AmbientSettings, result: Modal
     h = 1.0 / fs_sim
     A, B = state_space(linear)
     Phi, G0, G1 = foh_discretize(A, B, h)
-    inputs = list(range(n)) if s.input_dof is None else [s.input_dof]
-    G0, G1 = G0[:, inputs], G1[:, inputs]
+    inputs = list(range(n)) if s.input_dof is None else [s.input_dof]  # the random forces'
+    harmonic = s.harmonic_hz > 0 and s.harmonic_force > 0
+    cols = inputs + ([0] if harmonic and 0 not in inputs else [])  # and the machine's, on m1
+    G0, G1 = G0[:, cols], G1[:, cols]
     rng = np.random.default_rng(s.seed)
     mu, V = np.linalg.eig(Phi)
     modal = np.linalg.cond(V) < MAX_EIGVEC_CONDITION
@@ -126,23 +178,27 @@ def ambient_record(system: ChainSystem, settings: AmbientSettings, result: Modal
         b0, b1 = Vinv @ G0, Vinv @ G1
         eta = np.zeros(2 * n, dtype=complex)
     z = np.zeros(2 * n)
-    f_prev = np.zeros(len(inputs))
+    f_prev = np.zeros(len(cols))
     colour = None
     if s.colour is Colour.LOW_PASS:
         colour = scipy.signal.butter(2, min(s.corner_hz, 0.45 * fs_sim), fs=fs_sim, output="sos")
         colour_zi = np.zeros((colour.shape[0], 2, len(inputs)))
     aa = scipy.signal.ellip(8, 0.05, 90.0, AA_CUTOFF * s.fs / 2.0, fs=fs_sim, output="sos")
     aa_zi = np.zeros((aa.shape[0], 2, n))
-    out_a, out_b = A[n:], B[n:][:, inputs]  # accelerations: a = A[n:] z + B[n:] f
+    out_a, out_b = A[n:], B[n:][:, cols]  # accelerations: a = A[n:] z + B[n:] f
     settle = settle_time(result)
     skip = int(math.ceil(settle * fs_sim / R)) * R  # analog samples before the record, whole samples
     total = skip + s.samples * R
     kept = []
     for start in range(0, total, CHUNK):
         m = min(CHUNK, total - start)
-        f = rng.standard_normal((m, len(inputs)))
+        f = np.zeros((m, len(cols)))
+        f[:, :len(inputs)] = rng.standard_normal((m, len(inputs)))
         if colour is not None:
-            f, colour_zi = scipy.signal.sosfilt(colour, f, axis=0, zi=colour_zi)
+            f[:, :len(inputs)], colour_zi = scipy.signal.sosfilt(colour, f[:, :len(inputs)], axis=0, zi=colour_zi)
+        if harmonic:
+            t = (start + 1 + np.arange(m)) * h
+            f[:, cols.index(0)] += s.harmonic_force * np.sin(TWO_PI * s.harmonic_hz * t)
         if modal:
             u = np.vstack([f_prev[None, :], f[:-1]]) @ b0.T + f @ b1.T  # (m, 2n)
             states = np.empty((m, 2 * n), dtype=complex)
@@ -324,3 +380,125 @@ def identify(result: Fdd, lines: list[int], mac_min: float = MAC_MIN) -> list[Fd
 def compare(modes: list[FddMode], result: ModalResult, f_max: float) -> list[ModeMatch]:
     """The identified modes paired with the exact ones below f_max (identification.match_modes)."""
     return match_modes([m.identified for m in modes], result, f_max)
+
+
+# ------------------------------------------------------------------ harmonics
+def kurtosis(y: np.ndarray, fs: float, shape: np.ndarray, freq_hz: float, half_width: float) -> float:
+    """E[q⁴]/E[q²]² of the response projected on `shape` and band-passed over freq_hz ± half_width
+    (at least KURTOSIS_BAND of it): 3 for a mode's random response, 1.5 for a sine."""
+    import scipy.signal  # deferred: scipy.signal adds ~0.9 s to startup
+
+    half = max(half_width, KURTOSIS_BAND * freq_hz)
+    lo, hi = max(freq_hz - half, 1e-3 * fs), min(freq_hz + half, 0.49 * fs)
+    if not lo < hi:
+        return math.nan
+    q = y @ shape.conj()
+    q = (q * np.exp(-1j * np.angle(q @ q) / 2)).real  # turned to its real direction
+    sos = scipy.signal.butter(4, (lo, hi), btype="bandpass", fs=fs, output="sos")
+    x = scipy.signal.sosfiltfilt(sos, q)
+    x = x[x.size // 20: -x.size // 20 or None]  # the filter's ends
+    m2 = np.mean(x**2)
+    return float(np.mean(x**4) / m2**2) if m2 > 0 else math.nan
+
+
+def harmonic_flags(y: np.ndarray, fs: float, result: Fdd, modes: list[FddMode]) -> list[float]:
+    """The kurtosis at each FDD mode: below HARMONIC_KURTOSIS, a harmonic rather than a mode."""
+    df = float(result.freqs[1] - result.freqs[0])
+    out = []
+    for m in modes:
+        span = np.flatnonzero(m.bell)
+        half = 0.5 * (span[-1] - span[0] + 1) * df
+        out.append(kurtosis(y, fs, m.shape, m.peak_hz, half))
+    return out
+
+
+# ------------------------------------------------------------------ SSI-cov
+@dataclass
+class SsiStabilization(Stabilization):
+    """The SSI poles at every order (as LSCF's), with each pole's shape."""
+
+    shapes: list[np.ndarray] = None  # per order, (n, poles) complex
+
+
+def correlations(y: np.ndarray, lags: int) -> np.ndarray:
+    """R_i = mean of y_{k+i} y_kᵀ for i = 0 … lags − 1: (lags, n, n)."""
+    N = y.shape[0]
+    y = y - y.mean(axis=0)
+    return np.stack([y[i:].T @ y[:N - i] / (N - i) for i in range(lags)])
+
+
+def ssi_cov(y: np.ndarray, fs: float, rows: int, max_order: int, band: tuple[float, float]) -> SsiStabilization:
+    """Covariance-driven SSI (see the module's notes) at every even order 2 … max_order, `rows` block rows."""
+    n = y.shape[1]
+    R = correlations(y, 2 * rows)
+    # T[a, b] = R_{rows + a − b}: lags 1 … 2 rows − 1
+    T = np.block([[R[rows + a - b] for b in range(rows)] for a in range(rows)])
+    U, S, _ = np.linalg.svd(T)
+    top = min(max_order, n * (rows - 1))
+    lo, hi = band
+    orders, poles, status, runs, shapes = [], [], [], [], []
+    for p in range(2, top + 1, 2):
+        O = U[:, :p] * np.sqrt(S[:p])
+        A = np.linalg.lstsq(O[:-n], O[n:], rcond=None)[0]
+        mu, psi = np.linalg.eig(A)
+        keep = np.abs(mu) > 0
+        lam = np.log(mu[keep].astype(complex)) * fs
+        phi = (O[:n] @ psi)[:, keep]
+        fn = np.abs(lam) / TWO_PI
+        ok = (lam.imag > 0) & (lam.real < 0) & (fn >= lo) & (fn <= hi) & (-lam.real / np.abs(lam) <= MAX_ZETA)
+        lam, phi = lam[ok], phi[:, ok]
+        order = np.argsort(np.abs(lam))
+        lam, phi = lam[order], phi[:, order]
+        st, run = _classify(lam, poles[-1] if poles else None, runs[-1] if runs else None)
+        orders.append(p)
+        poles.append(lam)
+        status.append(st)
+        runs.append(run)
+        shapes.append(phi)
+    return SsiStabilization(orders, poles, status, runs, band, shapes)
+
+
+def ssi_modes(stab: SsiStabilization, picked: list[tuple[int, int]]) -> list[IdentifiedMode]:
+    """The picked poles (order, index) as modes, lowest first, each shape scaled to its largest entry."""
+    out = []
+    for order, i in picked:
+        k = stab.orders.index(order)
+        phi = real_shape(stab.shapes[k][:, i])
+        out.append(IdentifiedMode(complex(stab.poles[k][i]), phi, phi.conj()))
+    return sorted(out, key=lambda m: m.fn_hz)
+
+
+# ------------------------------------------------------------------ the hammer test
+HAMMER_BLOCK = 2048
+HAMMER_AVERAGES = 5
+HAMMER_NOISE = 0.01  # response noise, a fraction of each channel's peak
+HAMMER_ORDER = 30
+
+
+def hammer_modes(system: ChainSystem, result: ModalResult, fs: float, seed: int | None = None
+                 ) -> tuple[list[IdentifiedMode], float]:
+    """The virtual modal test's way to the modes, for comparison: hammer hits on m1, the force and the
+    displacements measured, H1 averaged under a force-exponential window, LSCF's stable poles picked
+    automatically and LSFD's residues, the window's damping taken off. The modes and the force window's
+    time constant (s)."""
+    linear = ChainSystem(system.masses, system.stiffness, system.damping)
+    settings = MeasurementSettings(excitation=Excitation.IMPACT, input_dof=0, response=Response.DISPLACEMENT,
+                                   fs=fs, block=HAMMER_BLOCK, averages=HAMMER_AVERAGES, seed=seed)
+    processing = Processing(window=Window.FORCE_EXPONENTIAL, exp_end=0.05, response_noise=HAMMER_NOISE)
+    acq = Acquisition(linear, settings, result)
+    while not acq.done:
+        acq.step()
+    est = FrfEstimator(acq, processing).estimate()
+    H = to_receptance(est.freqs, est.H, settings.response)
+    band = (0.0, settings.band)
+    stab = lscf(est.freqs, H, band, HAMMER_ORDER)
+    ident = lsfd(est.freqs, H, band, [stab.pole(o, i) for o, i in auto_select(stab)])
+    tau = processing.exp_tau(settings)
+    return sorted(ident.shifted(1.0 / tau).modes, key=lambda m: m.fn_hz), tau
+
+
+def harmonics(zetas: list[float], kurt: list[float]) -> list[bool]:
+    """Which peaks (or poles) are harmonics: a kurtosis below HARMONIC_KURTOSIS and almost no damping. A sine
+    inside a mode's filtered band lowers the mode's kurtosis too, but the mode keeps its damping."""
+    return [math.isfinite(k) and k < HARMONIC_KURTOSIS and not (math.isfinite(z) and z >= HARMONIC_ZETA)
+            for z, k in zip(zetas, kurt)]
