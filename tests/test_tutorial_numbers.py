@@ -712,3 +712,51 @@ def test_beams_plates_trials():
     assert [m.freq_hz for m in circle] == pytest.approx([191, 397, 652, 743], abs=0.5)
     per_hz = plate.area / (2 * plate.scale)
     assert (per_hz, 1 / per_hz) == pytest.approx((0.026, 39), rel=0.02)
+
+
+def test_seismic_trials():
+    from vib_tutorial.core.seismic import (
+        GROUNDS,
+        Design,
+        Rule,
+        building,
+        combine,
+        correlation,
+        modal,
+        suite,
+        with_tank,
+    )
+
+    d = Design()
+    five = building(5)
+    m = modal(five, d)
+    rho = correlation(m.f, d.zeta)
+    assert m.T[0] == pytest.approx(0.99, abs=0.005)
+    assert (m.mass_share[0], m.mass_share[:2].sum()) == pytest.approx((0.88, 0.97), abs=0.005)
+    assert m.sa[0] / 9.81 == pytest.approx(0.52, abs=0.005)
+    shear = {r: float(combine(m.shear, r, rho)[0]) for r in Rule}
+    assert (shear[Rule.CQC], shear[Rule.SRSS], shear[Rule.ABS]) == pytest.approx((229e3, 229e3, 277e3), abs=1e3)
+    records = suite(five, d).base_shear
+    assert records == pytest.approx(235e3, abs=1e3)
+    assert shear[Rule.ABS] / records - 1 == pytest.approx(0.18, abs=0.005)
+    assert rho[0, 1] == pytest.approx(0.007, abs=5e-4)
+    tank = with_tank(five, 0.01)
+    mt = modal(tank, d)
+    rt = correlation(mt.f, d.zeta)
+    assert (mt.f[0], mt.f[1], rt[0, 1]) == pytest.approx((0.96, 1.06, 0.50), abs=0.005)
+    vt = suite(tank, d).base_shear
+    assert float(combine(mt.shear, Rule.SRSS, rt)[0]) / vt - 1 == pytest.approx(-0.21, abs=0.01)
+    assert abs(float(combine(mt.shear, Rule.CQC, rt)[0]) / vt - 1) < 0.11
+    swing = suite(tank, d).displacement[-1]
+    assert float(combine(mt.displacement, Rule.SRSS, rt)[-1]) / swing - 1 == pytest.approx(0.54, abs=0.01)
+    assert abs(float(combine(mt.displacement, Rule.CQC, rt)[-1]) / swing - 1) < 0.11
+    soft = modal(five, Design(ground=GROUNDS[3]))
+    assert soft.sa[0] / 9.81 == pytest.approx(0.82, abs=0.005)
+    assert float(combine(soft.shear, Rule.CQC, correlation(soft.f, 0.05))[0]) == pytest.approx(357e3, abs=1e3)
+    eight = modal(building(8), d)
+    assert (eight.T[0], eight.mass_share[0]) == pytest.approx((1.52, 0.86), abs=0.005)
+    assert eight.sa[0] / 9.81 == pytest.approx(0.34, abs=0.005) and eight.sa[1:4] / 9.81 == pytest.approx(0.86, abs=0.005)
+    total = combine(eight.shear, Rule.CQC, correlation(eight.f, 0.05))
+    alone = abs(eight.shear[:, 0]) / total
+    assert (alone[0], alone[-1]) == pytest.approx((0.96, 0.74), abs=0.005)
+    assert Design(zeta=0.10).eta == pytest.approx(0.82, abs=0.005)

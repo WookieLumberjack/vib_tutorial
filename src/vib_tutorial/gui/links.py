@@ -67,6 +67,8 @@ COURSE = (
         ("fatigue_page", "Fatigue",
          "a random stress counted by rainflow: S–N curves, Miner's rule, narrow-band and Dirlik estimates"),
         ("shock_page", "Shock spectrum", "a short pulse on a bank of oscillators, and on the chain"),
+        ("seismic_page", "Seismic response",
+         "the chain as a building: a design spectrum, effective modal mass, and ABS, SRSS and CQC against records"),
     )),
     ("Building models", (
         ("coupling_page", "Modal coupling", "two parts joined, one mode each: when their modes split"),
@@ -120,6 +122,7 @@ PAGE_TITLES = {
     "random_page": "Random vibration page",
     "fatigue_page": "Fatigue page",
     "shock_page": "Shock spectrum page",
+    "seismic_page": "Seismic response page",
     "coupling_page": "Modal coupling page",
     "cms_page": "Substructuring page",
     "signals_page": "Signals & spectra page",
