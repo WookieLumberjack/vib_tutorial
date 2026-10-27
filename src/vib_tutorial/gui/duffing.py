@@ -102,8 +102,8 @@ NOTES_HTML = """
 <p>A mass on a spring whose force is not proportional to its stretch:</p>
 <p align="center">m x″ + c x′ + k x + k<sub>3</sub> x³ = F cos φ, &nbsp; φ′ = Ω</p>
 <p>With k<sub>3</sub> &gt; 0 the spring <i>hardens</i>: the further it stretches, the stiffer it gets, so a big
-swing is a fast one. With k<sub>3</sub> &lt; 0 it <i>softens</i>, and its force peaks at the escape amplitude
-√(k / −k<sub>3</sub>): past that the spring pushes outward, and a mass carried over the potential's hilltop runs
+swing is a fast one. With k<sub>3</sub> &lt; 0 it <i>softens</i>: its force peaks at √(k / −3k<sub>3</sub>) and falls
+back to zero at the escape amplitude √(k / −k<sub>3</sub>), the potential's hilltop. Past that the spring pushes outward, and a mass carried over the potential's hilltop runs
 away.</p>
 
 <h3>Harmonic balance</h3>

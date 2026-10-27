@@ -79,7 +79,8 @@ legible on its background. The choice is remembered.
   static friction. *Static / sliding friction* (one ratio for the whole floor) sets
   F<sub>s</sub> above F<sub>f</sub>: a stuck mass then holds until its springs pull harder
   than F<sub>s</sub>, and lurches off against the smaller F<sub>f</sub>, which gives
-  stick-slip under a slow pull. The simulation includes friction exactly. The modes and
+  stick-slip under a slow pull. The simulation steps friction exactly between stick and slip, and finds each change
+  within its step to fourth order. The modes and
   frequency responses use the linear chain, with two approximations of friction beside them:
   the modal table's *ζ friction* column (each mode's equivalent viscous damping at the
   release amplitude, c<sub>eq</sub> = 4F<sub>f</sub>/πωX, so it falls as the amplitude

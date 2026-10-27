@@ -106,7 +106,10 @@ class Duffing:
 
     @property
     def escape(self) -> float:
-        """A softening spring's escape amplitude (m), where its force peaks; inf for a hardening one."""
+        """A softening spring's escape amplitude (m), its potential's hilltop; inf for a hardening one.
+
+        The force k x + k3 x^3 peaks at 1/sqrt(3) of it and is back to zero there.
+        """
         return math.sqrt(self.stiffness / -self.cubic) if self.cubic < 0 else math.inf
 
     def restoring(self, x):

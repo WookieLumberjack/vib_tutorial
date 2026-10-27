@@ -284,7 +284,7 @@ much locks the absorber to m<sub>1</sub> and the old resonance comes back. If th
 itself is undamped, every curve of |X<sub>1</sub>/F|, whatever c<sub>a</sub>, passes through
 the same two <i>fixed points</i>. Den Hartog's optimum tunes the absorber so the fixed points
 are equally high, then picks the damping that puts the peaks on them (strictly, Brock's
-average of the two values that each put one peak on its fixed point):</p>
+average of the two values of ζ<sub>a</sub>² that each put one peak on its fixed point):</p>
 <p>&nbsp;&nbsp;f<sub>a</sub>/f<sub>1</sub> = 1/(1 + μ), &nbsp;&nbsp;
 ζ<sub>a</sub> = √(3μ / 8(1 + μ)³), &nbsp;&nbsp; peak |X<sub>1</sub>|k<sub>1</sub>/F =
 √(1 + 2/μ)</p>

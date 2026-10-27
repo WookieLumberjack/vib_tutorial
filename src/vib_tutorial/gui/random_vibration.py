@@ -155,8 +155,8 @@ second. Their ratio, the <b>irregularity factor</b> α = ν₀/ν<sub>p</sub>, s
 peak per cycle, their heights Rayleigh distributed; towards 0, many small peaks riding on the big swings, some
 below zero, their heights nearly Gaussian.</p>
 <p>The <b>largest peak</b> in a time T grows only slowly with T. Counting each upward crossing as independent,
-<b>Davenport</b> finds its expected value σ(√(2 ln ν₀T) + 0.577/√(2 ln ν₀T)): about 3σ over a hundred cycles, 4σ
-over three thousand, 5σ over 270,000. "3σ" is not a maximum: a long life sees more. A narrow-band response's
+<b>Davenport</b> finds its expected value σ(√(2 ln ν₀T) + 0.577/√(2 ln ν₀T)): about 3.2σ over a hundred cycles,
+4.1σ over three thousand, 5.1σ over 270,000. "3σ" is not a maximum: a long life sees more. A narrow-band response's
 crossings come in clumps, on the swells of its slowly varying envelope, so there are fewer independent chances
 than ν₀T, and Davenport overestimates the largest peak, most over short times. <b>Vanmarcke</b> counts the clumps,
 through the band's width δ = √(1 − m₁²/m₀m₂). The <i>Statistics</i> tab compares both with the record's own
