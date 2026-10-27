@@ -237,6 +237,7 @@ class ContinuumPage(QtWidgets.QWidget):
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
+        self._errors_stale = False  # the Errors tab wants drawing when it next shows
         self.continuum: Continuum = PRESETS[0].continuum
         self.models: dict[Scheme, FEModel] = {}
         self._loading = False
@@ -767,6 +768,8 @@ class ContinuumPage(QtWidgets.QWidget):
             self.run.set_playback(float(self.playback.currentData()))
 
     def _on_view(self, _index: int) -> None:
+        if self.views.currentWidget() is self.errors_tab and self._errors_stale:
+            self._draw_errors()
         if self.views.currentWidget() is self.waves_tab:
             if self.run is None:
                 self.restart()
@@ -915,6 +918,11 @@ class ContinuumPage(QtWidgets.QWidget):
             f"<b>{per:.3g} elements</b> (κh = {k * h:.3g}). Exact {fmt_hz(exact)}; {found}.")
 
     def _draw_errors(self) -> None:
+        # Drawn only while its tab shows: the convergence study is ~2 s of eigensolves for a new
+        # kind or set of ends (cached after), which made the page's first opening hang.
+        self._errors_stale = self.views.currentWidget() is not self.errors_tab
+        if self._errors_stale:
+            return
         p = self.errors
         p.clear()
         self.errors_legend.clear()

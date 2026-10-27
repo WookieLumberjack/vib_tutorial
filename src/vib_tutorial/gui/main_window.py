@@ -604,6 +604,10 @@ class MainWindow(QtWidgets.QMainWindow):
         widget = self.pages.widget(index)
         for name, holder in list(self._placeholders.items()):
             if holder is widget:
+                # Building a page and working out what it first shows takes up to a second (the rotor's
+                # analysis, a first record): say so with the cursor until the event loop is back.
+                QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+                QtCore.QTimer.singleShot(0, QtWidgets.QApplication.restoreOverrideCursor)
                 self._page(name)
 
     # --------------------------------------------------------------- theme

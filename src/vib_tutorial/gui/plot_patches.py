@@ -10,7 +10,7 @@ the background, and goes behind the ViewBox, so that the lines pass under the cu
 Titles. A LabelItem's minimum width is its text's, so a long plot title (the Virtual modal
 test's FRF says what each line style means) made its plot wider than a 1280 px window's pane
 leaves it, and the layout overflowed its view: the plot's right side and legend were cut off.
-A level label (not a legend's) now wraps to the width it's given, centred, and only asks for TITLE_MIN_WIDTH.
+A level, centred label (a title, not a legend's entry) now wraps to the width it's given, centred, and only asks for TITLE_MIN_WIDTH.
 """
 
 from __future__ import annotations
@@ -55,8 +55,11 @@ def _set_grid(self, grid) -> None:
 
 
 def _wraps(label) -> bool:
-    """A level label that isn't a legend's entry (a legend sizes itself to its entries)."""
-    return getattr(label, "angle", 0) == 0 and not isinstance(label.parentItem(), pg.LegendItem)
+    """A level, centred label: a title. Not a legend's entry (left-justified), which a legend sizes itself to.
+
+    Only the label's own state is read: this runs as items are torn down too, where asking for a parent
+    that is being deleted crashed."""
+    return getattr(label, "angle", 0) == 0 and label.opts.get("justify", "center") == "center"
 
 
 def _wrap_to_width(self, ev) -> None:
