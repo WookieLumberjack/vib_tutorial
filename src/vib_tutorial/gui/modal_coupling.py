@@ -36,7 +36,7 @@ from ..core.modal_coupling import (
 )
 from .animation import MASS_WIDTH, spring_path
 from .axes import log_axes
-from .coupling_notes import THEORY_HTML, matrices_html
+from .coupling_notes import THEORY_HTML, TRIALS, matrices_html
 from .layouts import ColumnScroll
 from .style import MAX_DOF, colors, text_on
 from .substructuring import error_color, zeta_text
@@ -515,6 +515,7 @@ class ModalCouplingPage(QtWidgets.QWidget):
 
     dof_requested = QtCore.Signal(int)  # the user changed N here; the main window owns the system
     edit_parameters = QtCore.Signal()  # the user wants the Simulation page's parameter panel
+    system_requested = QtCore.Signal(object)  # a trial's chain, for the Simulation page
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -525,6 +526,22 @@ class ModalCouplingPage(QtWidgets.QWidget):
         self._dirty = False
         self._split_wanted: int | None = None  # None: the middle of the chain
         self._modes_wanted = [0, 0]
+
+        trials = QtWidgets.QGroupBox("Things to try")
+        tv = QtWidgets.QVBoxLayout(trials)
+        self.trial = QtWidgets.QComboBox()
+        self.trial.addItem("Pick one…")
+        self.trial.addItems([t.name for t in TRIALS])
+        self.trial.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.trial.setToolTip("<p>Each loads a chain into the Simulation page and splits and couples it to "
+                              "show one idea from the Theory tab.</p>")
+        self.trial.currentIndexChanged.connect(self._on_trial)
+        tv.addWidget(self.trial)
+        self.trial_note = QtWidgets.QLabel()
+        self.trial_note.setWordWrap(True)
+        mute(self.trial_note)
+        self.trial_note.setVisible(False)
+        tv.addWidget(self.trial_note)
 
         box = QtWidgets.QGroupBox("Modal coupling")
         form = QtWidgets.QFormLayout(box)
@@ -612,6 +629,7 @@ class ModalCouplingPage(QtWidgets.QWidget):
         mute(self.result_note)
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
+        lv.addWidget(trials)
         lv.addWidget(box)
         lv.addWidget(self.schematic)
         lv.addWidget(self.summary)
@@ -695,6 +713,34 @@ class ModalCouplingPage(QtWidgets.QWidget):
         super().showEvent(event)
         if self._dirty:
             self.refresh()
+
+    def load_trial(self, index: int) -> None:
+        """Load TRIALS[index]: its chain (through the Simulation page), split, modes and A's mass."""
+        trial = TRIALS[index]
+        self.trial_note.setText(trial.note)
+        self.trial_note.setVisible(True)
+        system = trial.system()
+        self.system_requested.emit(system)
+        if self.system is None or self.system.n != system.n or not np.allclose(self.system.masses, system.masses):
+            self.set_system(system)  # nobody passed it back: show it here alone
+        self.a_mass.blockSignals(True)
+        self.a_mass.setCurrentIndex(self.a_mass.findData(trial.a_mass))
+        self.a_mass.blockSignals(False)
+        self.residual.blockSignals(True)
+        self.residual.setChecked(True)
+        self.residual.blockSignals(False)
+        self._split_wanted = trial.split
+        self._modes_wanted = [trial.mode_a, trial.mode_b]
+        self.refresh()
+        self.tabs.setCurrentIndex(trial.tab)
+
+    def _on_trial(self, index: int) -> None:
+        if index <= 0:
+            return
+        self.trial.blockSignals(True)
+        self.trial.setCurrentIndex(0)
+        self.trial.blockSignals(False)
+        self.load_trial(index - 1)
 
     def _on_split(self, i: int) -> None:
         self._split_wanted = i + 1

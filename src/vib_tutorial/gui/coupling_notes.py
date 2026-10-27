@@ -2,12 +2,77 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
-from ..core import ModalResult
+from ..core import ChainSystem, ModalResult
 from ..core.modal_coupling import CoupledModel
+from ..core.presets import presets
 from .cms_notes import _side_by_side, fmt, matrix_html
+from .links import before, takeaways
 from .style import colors
+
+
+@dataclass(frozen=True)
+class CouplingTrial:
+    """A chain for the Simulation page, and how this page splits and couples it."""
+
+    name: str
+    note: str
+    chain: str  # "absorber", "uniform", "light" or "eight"
+    split: int  # A is masses 1..split
+    mode_a: int = 0  # 0-based
+    mode_b: int = 0
+    a_mass: str = "tip"
+    tab: int = 0  # the right-hand tab: veering, shapes, FRF
+
+    def system(self) -> ChainSystem:
+        if self.chain == "absorber":
+            return next(p.system for p in presets() if p.name.startswith("Vibration absorber")).copy()
+        if self.chain == "eight":
+            return ChainSystem.uniform(8)
+        system = ChainSystem.uniform(4)
+        if self.chain == "light":  # B a tenth of A, tuned to it, still C = K/200
+            system.masses[2:] = 0.1
+            system.stiffness[2:] = 40.0
+            system.damping[2:] = 0.2
+        return system
+
+
+TRIALS = (
+    CouplingTrial(
+        "An absorber is already a 2-DOF model",
+        "The Vibration absorber chain, split after m1: A is the machine, B the absorber, tuned to it with "
+        "μ = 0.1. The 2-DOF model is the chain itself, so the errors are 0. The two modes sit "
+        "√0.1 ≈ 32% of f<sub>A</sub> apart, one either side.",
+        "absorber", split=1),
+    CouplingTrial(
+        "Two equal halves: pushed far apart",
+        "The uniform chain split after m2. Both halves have the same mode 1, so f<sub>B</sub> = "
+        "f<sub>A</sub>, but μ = 1.37 is large: the modes are pushed far apart. The upper one is 4.9% too "
+        "high, with a MAC of 0.96, because the halves' second modes aren't far off and are left out.",
+        "uniform", split=2),
+    CouplingTrial(
+        "A light half, tuned: splitting",
+        "m3 and m4 at 0.1 kg on 40 N/m springs: B is tuned to A with μ = 0.14, and the 2-DOF model is "
+        "within 0.2% and 0.3%, both above the chain (the Rayleigh–Ritz bound). The Veering tab sweeps B's "
+        "frequency: the two curves veer apart instead of crossing. Switch it to the mass ratio to see the "
+        "splitting shrink as B gets lighter.",
+        "light", split=2),
+    CouplingTrial(
+        "The wrong mass for A",
+        "The same light half, with A's oscillator given its effective mass instead of its modal mass at the "
+        "interface. The errors grow to 2.9% and −2.2%: no longer Rayleigh–Ritz, so they can have either sign.",
+        "light", split=2, a_mass="effective"),
+    CouplingTrial(
+        "A mode left out (8 masses)",
+        "Eight masses split after m6, A's mode 2 coupled with B's mode 1. The pair now stands for the "
+        "chain's modes 2 and 3, but the lower is 14% too low with a MAC of 0.63: A's mode 1 moves the tip "
+        "too and couples to B's just as much, but it is left out. The bound still holds by mode number: "
+        "the 2-DOF mode 1 is above the chain's mode 1. The Mode shapes tab shows the mismatch.",
+        "eight", split=6, mode_a=1, tab=1),
+)
 
 NOTATION_HTML = """
 <table border="1" cellspacing="0" cellpadding="4">
@@ -42,12 +107,11 @@ NOTATION_HTML = """
 """
 
 THEORY_HTML = """
-<p><i>Before this page: <b>Undamped normal modes</b> (mass normalization) and <b>Vibration
-absorbers and tuned mass dampers</b> in the Simulation page's Background tab.</i></p>
+<!--BEFORE-->
 <p><i>Symbols are defined in the <a href="#notation">Notation</a> table at the end. The
 <i>Matrices (step by step)</i> tab works every formula below through with the current
 numbers.</i></p>
-<h3>Two systems, joined</h3>
+<h3><a name="two-systems"></a>Two systems, joined</h3>
 <p>A machine on a floor, a pipe on a support, an instrument on a panel: each part has its
 own natural frequencies, measured or computed on its own. What happens to them when the
 parts are joined? If the parts' frequencies are far apart, not much: each keeps its
@@ -91,7 +155,7 @@ interface moves in the mode: 1/φ<sub>tip</sub>².</li>
 comes from how hard it pushes back when the interface moves: Γ².</li>
 </ul>
 
-<h3>A: its modal mass at the interface</h3>
+<h3><a name="a-modal-mass"></a>A: its modal mass at the interface</h3>
 <p>A is grounded on the left, and B is joined to its <b>free tip</b>. In A's mode the tip
 moves, so the natural coordinate for A's oscillator is the tip displacement u<sub>a</sub>.
 Take the mass-normalized mode φ (φ<sup>T</sup>Mφ = 1) and scale it so the tip moves exactly
@@ -124,7 +188,7 @@ load is a <i>point load</i>, F<b>e</b><sub>tip</sub>, with <b>e</b><sub>tip</sub
 1]<sup>T</sup>. Projecting A's mode on it, φ<sup>T</sup><b>e</b><sub>tip</sub> = φ<sub>tip</sub>, keeps
 one entry only. The <i>Matrices (step by step)</i> tab puts the two projections side by side.</p>
 
-<h3>B: its effective mass</h3>
+<h3><a name="effective-mass"></a>B: its effective mass</h3>
 <p>B's own modes are computed with its base held (its first spring and damper tied to
 ground). In them <b>the interface does not move</b>: φ<sub>base</sub> = 0, so a
 "1/φ<sub>base</sub>²" would be infinite. B cannot couple to the joint through its mode's
@@ -178,10 +242,10 @@ mass-normalized φ = [0.526, 0.851], so</p>
 drive its mode. But A's ground does not move here, and B pushes on A's tip. For a uniform
 chain Γ² is well above 1/φ<sub>tip</sub>² (1.89 against 1.38 kg above), because the tip
 moves more than the average mass. Switch <i>Mass of A's oscillator</i> to the effective
-mass to see it: the errors grow (in the tuned example of <i>Try it</i> from about 0.2% to
+mass to see it: the errors grow (in <i>The wrong mass for A</i> under Things to try, from about 0.2% to
 about 3%), and the model is no longer Rayleigh–Ritz, so its errors can have either sign.</p>
 
-<h3>Why this works: it is a Rayleigh–Ritz model</h3>
+<h3><a name="rayleigh-ritz"></a>Why this works: it is a Rayleigh–Ritz model</h3>
 <p>With both choices above, the 2-DOF model is exactly the chain restricted to two shapes:</p>
 <ul>
 <li>A in its mode φ<sub>A</sub>, scaled to u<sub>a</sub> at the tip, with all of B carried
@@ -191,7 +255,7 @@ u<sub>a</sub>).</li>
 </ul>
 <p>Writing the kinetic and strain energies in u<sub>a</sub> and u<sub>b</sub> gives the
 2-DOF masses and springs above. For B this is <b>Craig–Bampton</b> with one fixed-interface
-mode kept (see the Substructuring page): its reduced mass matrix [[1, Γ], [Γ, m<sub>B</sub>]]
+mode kept (see the <a href="page:cms_page#craig-bampton">Substructuring page</a>): its reduced mass matrix [[1, Γ], [Γ, m<sub>B</sub>]]
 is the effective mass plus the residual mass in other coordinates. For A it is one
 free-interface mode with no residual flexibility.</p>
 <p>Being Rayleigh–Ritz, the 2-DOF frequencies are <b>upper bounds</b>: its mode 1 is never
@@ -200,7 +264,7 @@ the chain because it allows fewer shapes. (Couple higher modes, and a 2-DOF mode
 shape with a higher chain mode and fall below it: the bound is by mode number.) Leave out the residual
 mass, or use A's effective mass, and that guarantee is gone.</p>
 
-<h3>The 2-DOF system and mode splitting</h3>
+<h3><a name="splitting"></a>The 2-DOF system and mode splitting</h3>
 <p>With μ = m<sub>b</sub>/m<sub>a</sub>, ω<sub>a</sub>² = k<sub>a</sub>/m<sub>a</sub> and
 ω<sub>b</sub>² = k<sub>b</sub>/m<sub>b</sub>, the undamped frequencies solve</p>
 <p>&nbsp;&nbsp;ω⁴ − ω²[ω<sub>a</sub>² + (1 + μ)ω<sub>b</sub>²] + ω<sub>a</sub>²ω<sub>b</sub>² = 0.</p>
@@ -239,32 +303,35 @@ the absorber none, and both coupled modes come out at 0.012. Far apart, each kee
 well matched if the other modes are far off in frequency. A MAC well below 1 means they
 take part too. Couple A's mode 2 with B's mode 1, say, to follow a different pair.</li>
 <li><b>A's residual flexibility.</b> A's other modes add static flexibility at its tip,
-which the 2-DOF model leaves out (MacNeal's and Rubin's methods, on the Substructuring
-page, put it back). That is why the model is too stiff.</li>
+which the 2-DOF model leaves out (MacNeal's and Rubin's methods, on the <a href="page:cms_page#basis">Substructuring
+page</a>, put it back). That is why the model is too stiff.</li>
 <li><b>Non-proportional damping</b>: the modal damping ratios are the diagonal of
-Φ<sup>T</sup>CΦ, as on the Simulation page's classical method.</li>
+Φ<sup>T</sup>CΦ, as in the Simulation page's <a href="page:sim_page#proportional-damping">classical
+method</a>.</li>
 </ul>
 
-<h3>Try it</h3>
-<ol>
-<li>Load <i>Vibration absorber (undamped)</i>, split after m1. A is the machine, B the
-absorber. f<sub>B</sub>/f<sub>A</sub> = 1 and μ = 0.1: the 2-DOF model is the chain, so
-the error is 0. The modes are √0.1 ≈ 32% of f<sub>A</sub> apart.</li>
-<li>Uniform chain, 4 masses, split after m2. Both halves are the same, so f<sub>B</sub> =
-f<sub>A</sub>, but μ is large: the modes are pushed far apart, and the upper one has a
-lower MAC because the second modes of A and B are not far off.</li>
-<li>Now make m3 and m4 light (0.1 kg) and k3, k4 small (40 N/m): B is tuned to A with μ ≈
-0.14. The 2-DOF model is within a fraction of a percent. Sweep the mass ratio to see the
-splitting shrink as B gets lighter.</li>
-<li>Switch <i>Mass of A's oscillator</i> to the effective mass: the errors grow and can
-change sign.</li>
-<li>With 8 masses, split after m6 and couple A's mode 2 with B's mode 1: the pairing moves
-to the chain's modes 2 and 3, but the lower one is 14% too low and its MAC is poor. A's mode 1
-moves the tip too, and couples to B1 just as much, but it is left out. The Rayleigh–Ritz bound
-still holds, by mode number: the 2-DOF mode 1 is above the chain's mode 1.</li>
-</ol>
+<h3><a name="try-it"></a>Things to try</h3>
+<p>Each of these loads a chain into the Simulation page and sets the split and the modes (Things to try,
+top left).</p>
+<!--TRIALS-->
+<!--TAKEAWAYS-->
 <h3><a name="notation"></a>Notation</h3>
 """ + NOTATION_HTML
+THEORY_HTML = THEORY_HTML.replace("<!--BEFORE-->", before(
+    ("sim_page", "undamped-normal-modes-real", "Undamped normal modes"),
+    ("sim_page", "rayleigh-quotient", "Estimating a frequency from a guessed shape"),
+    ("sim_page", "vibration-absorbers-and-tuned-mass-dampers", "Vibration absorbers and tuned mass dampers"),
+)).replace("<!--TRIALS-->", "<ul>" + "".join(f"<li><b>{t.name}.</b> {t.note}</li>" for t in TRIALS) + "</ul>"
+).replace("<!--TAKEAWAYS-->", takeaways(
+    "Two parts' modes joined stay apart when their frequencies differ by much more than √μ, and split "
+    "into two either side when they're closer; tuned, exactly √μ ω apart.",
+    "A part joined at a point that moves in its mode (A's tip) acts with its modal mass there, "
+    "1/φ<sub>tip</sub>²; a part whose modes hold the joint still (B) acts with its effective mass Γ², "
+    "plus a residual mass that rides along.",
+    "With those two masses the 2-DOF model is a Rayleigh–Ritz model of the chain, so its frequencies are "
+    "upper bounds, mode by mode.",
+    "A MAC well below 1 means modes left out take part.",
+))
 
 
 # ------------------------------------------------------------------ step by step (live numbers)
