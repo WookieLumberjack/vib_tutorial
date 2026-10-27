@@ -172,7 +172,8 @@ def test_a_dampers_root_locus():
         value, zeta = sw.peak(k)
         assert sw.values[0] < value < sw.values[-1]
         assert k == 1 or zeta > 2 * sw.zeta_exact[-1, k]
-    assert sw.peak(0) == pytest.approx((59.7, 0.147), abs=0.05)  # the notes' and the README's
+    value, zeta = sw.peak(0)
+    assert value == pytest.approx(59.7, abs=0.5) and zeta == pytest.approx(0.147, abs=0.001)  # the notes' and the README's
     assert sw.zeta_approx[:, 0] / sw.values == pytest.approx(np.full(values.size, sw.zeta_approx[0, 0] / values[0]))
     # nearly real at both ends: barely damped, then a chain with no damping left in it
     assert np.nanmax(sw.mpd[0]) < 1.0 and np.nanmax(sw.mpd[-1]) < 1.0 and np.nanmax(sw.mpd) > 30

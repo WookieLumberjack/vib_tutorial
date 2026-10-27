@@ -51,7 +51,8 @@ FRICTION_TIP = (
     "<p><b>Coulomb friction</b> between mass i and the floor: a force of size "
     "F<sub>f</sub> = μN (N) against the mass's velocity while it slides. At rest it holds "
     "the mass still as long as the pull of the springs, dampers and force on it is no more "
-    "than F<sub>f</sub>. 0 means no friction.</p>"
+    "than the static friction F<sub>s</sub> (F<sub>f</sub> unless <i>Static / sliding</i> is "
+    "raised). 0 means no friction.</p>"
     "<p>Friction makes the chain <b>nonlinear</b>: the force does not grow with the motion, "
     "so doubling the input does not double the response. Released from rest, a single mass "
     "still swings at its undamped natural frequency, but loses a fixed 4F<sub>f</sub>/k of "
@@ -262,8 +263,8 @@ CHIRP_TIP = (
     "late and low, and it rings on after the sweep has moved on.</p>"
     "<p><b>Log sweep:</b> equal time per octave rather than per hertz. A mode's bandwidth "
     "(2ζf<sub>n</sub>) and its cycles per second both grow with frequency, so a linear sweep "
-    "rushes through the low modes; a log sweep gives each mode a similar number of cycles "
-    "across its peak.</p>"
+    "rushes through the low modes; a log sweep gives each mode (at equal damping) about the "
+    "same time across its peak.</p>"
 )
 
 

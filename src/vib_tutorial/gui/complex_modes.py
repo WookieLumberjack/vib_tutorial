@@ -164,7 +164,7 @@ stiffens it holds them together, and the chain's modes turn into those of the ch
 whose frequencies are different and whose damping falls back towards zero. So each mode's damping rises
 to a peak and falls again, and on the way one pair (the motion across the damper) leaves as two real,
 overdamped roots. There is a best damper for each mode, and it is not the stiffest. A damper at the base of
-the default chain gives mode 1 at most ζ = 0.15, at about 60 N·s/m; the approximation's ζ keeps growing for
+the default chain, its other dampers taken out, gives mode 1 at most ζ = 0.147, at about 60 N·s/m; the approximation's ζ keeps growing for
 ever. The modes are most complex near those peaks, where the damper both works hard and changes the shapes.
 Sweeping a spring instead moves the modes, and how complex they get depends on how close they come.</p>
 

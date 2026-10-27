@@ -204,8 +204,8 @@ the root of the sum of squares, assumes the peaks come at unrelated times, as in
 shock's don't: it sets every mode off at once, and they peak early, nearly together, so the SRSS falls short.
 <b>NRL</b> (the Naval Research Laboratory's rule, used for shipboard shock) adds the largest term in full to the
 SRSS of the rest. The <i>Chain</i> tab sets them against the exact response, mass by mass and spring by spring.
-Γ<sub>r</sub>² over the total mass is the mode's effective mass: the modes that carry most of it carry the
-shock.</p>
+Γ<sub>r</sub>² is the mode's effective mass (the modes' add up to the total mass): the modes that carry most of
+it carry the shock.</p>
 
 <h3>Four-way paper</h3>
 <p>The relative displacement's peak |z|, times ω, is the <b>pseudo-velocity</b>, and times ω² the

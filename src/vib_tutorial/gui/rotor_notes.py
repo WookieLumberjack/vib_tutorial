@@ -718,9 +718,11 @@ classic case. Choose δ<sub>b</sub> = e, opposite, and the disc's centre of mass
 bearings' axis. Then nothing whirls at any speed, and the probe reads a steady 20 µm, the bow.</li>
 </ul>
 <p>Measured from its bent shape, the shaft's deflection y = x − δ<sub>b</sub> obeys
-(k − mΩ² + icΩ) y = (me + mδ<sub>b</sub>e<sup>iβ</sup>)Ω². Relative to its bow, the shaft sees the
-disc's mass carried round on the bow: an unbalance mδ<sub>b</sub>. The probe adds the bow itself, as
-runout. With the disc at midspan the bow is flat there, so that is all of it, and one weight can take out
+(k − mΩ² + icΩ) y = (me + mδ<sub>b</sub>e<sup>iβ</sup>)Ω² − icΩδ<sub>b</sub>e<sup>iβ</sup>. Relative to
+its bow, the shaft sees the disc's mass carried round on the bow: an unbalance mδ<sub>b</sub>. The last term
+is a damper on the disc itself dragged round the bow; here the damping is at the bearings, which the bow
+doesn't move, so it drops out. The probe adds the bow itself, as runout. With the disc at midspan the bow is
+flat there, so the unbalance is all of it, and one weight can take out
 every force the bow makes, at every speed, but not the runout. That is why the <b>slow-roll vector is
 subtracted</b> from the 1X readings before balancing (see <i>Single-plane balancing</i> below).</p>
 <p>Off centre, the bow also tilts the disc, by the bowed shaft's slope θ<sub>b</sub> there. The disc's
@@ -1056,7 +1058,8 @@ the onset up to 6,220 rpm, and 40 N·s/m down to 2,760 rpm. Below the critical, 
 rest the first mode's ζ rises from 0.046 to 0.078 with c<sub>i</sub> = 20 N·s/m.</p>
 <p><b>The stability map</b> draws the damping ratio of each mode against speed, or its log decrement
 δ = 2πζ/√(1 − ζ²). The <b>onset speed</b> is where the first forward mode crosses zero. Industry practice
-(API 684) asks for δ ≥ 0.1 at the running speed; the defaults' first mode has δ = 0.29.</p>
+(API 684) asks for δ ≥ 0.1 at the running speed; the defaults' first mode has δ = 0.29. (The criterion is for the
+modes in and near the running range: the defaults' lightly damped conical mode, at 315 Hz, is far above it.)</p>
 <p><b>Beyond the onset</b> a tap, or just the unbalance's start-up transient, sets off a whirl that
 grows exponentially at the mode's own natural frequency, not at the speed: a <b>subsynchronous</b> whirl.
 With c<sub>i</sub> = 20 N·s/m at 5,000 rpm it is at 26.9 Hz (0.32×), growing by e every 0.28 s, while the

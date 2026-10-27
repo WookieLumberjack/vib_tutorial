@@ -26,6 +26,7 @@ import scipy.linalg
 from .model import ChainSystem, state_space
 
 TWO_PI = 2.0 * np.pi
+COUPLING_TOL = 1e-12  # entries of Φ^T C Φ below this times its largest are round-off, not coupling
 
 
 @dataclass(frozen=True)
@@ -118,8 +119,13 @@ def modal_analysis(system: ChainSystem) -> ModalResult:
     Phi *= np.sign(Phi[np.argmax(np.abs(Phi), axis=0), np.arange(Phi.shape[1])])
     omegas = np.sqrt(np.clip(w2, 0.0, None))
     Cm = Phi.T @ C @ Phi
-    d = np.sqrt(np.abs(np.outer(np.diag(Cm), np.diag(Cm))))
+    # Round-off below this is no coupling: a rigid-body mode's C_rr is ~1e-31, not 0, and dividing the
+    # off-diagonal's ~1e-16 by its root would call an exactly proportional free chain coupled.
+    tol = COUPLING_TOL * float(np.abs(Cm).max()) if Cm.size else 0.0
+    diag = np.where(np.diag(Cm) > tol, np.diag(Cm), 0.0)
+    d = np.sqrt(np.outer(diag, diag))
     off = np.abs(Cm - np.diag(np.diag(Cm)))
+    off[off <= tol] = 0.0
     with np.errstate(divide="ignore", invalid="ignore"):
         ratios = np.where(d > 0, off / d, 0.0)
     coupling = float(ratios.max()) if ratios.size else 0.0

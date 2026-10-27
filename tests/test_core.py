@@ -64,6 +64,17 @@ def test_stiffness_proportional_damping_is_exact():
         assert md.damped.omega_n == pytest.approx(md.omega_n, rel=1e-8)
 
 
+@pytest.mark.parametrize("n", [2, 3, 4, 8])
+def test_free_chain_with_stiffness_proportional_damping_is_proportional(n):
+    # k1 = c1 = 0: a rigid-body mode with no damping, whose C_rr is round-off. C = beta K is still proportional.
+    k = np.r_[0.0, np.full(n - 1, 400.0)]
+    res = modal_analysis(ChainSystem(np.ones(n), k, 0.005 * k))
+    assert res.is_proportional and res.coupling == 0.0
+    if n > 2:  # and a coupled free chain still says so, within the Cauchy-Schwarz bound
+        res = modal_analysis(ChainSystem(np.ones(n), k, np.r_[0.0, 20.0, np.full(n - 2, 2.0)]))
+        assert not res.is_proportional and res.coupling <= 1.0 + 1e-9
+
+
 def test_nonproportional_damping_flagged():
     s = ChainSystem([1.0, 1.0, 1.0, 1.0], [400.0] * 4, [20.0, 0.0, 0.0, 0.0])
     res = modal_analysis(s)
