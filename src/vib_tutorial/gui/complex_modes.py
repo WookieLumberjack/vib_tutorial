@@ -220,7 +220,7 @@ the default chain, its other dampers taken out, gives mode 1 at most ζ = 0.147,
 ever. The modes are most complex near those peaks, where the damper both works hard and changes the shapes.
 Sweeping a spring instead moves the modes, and how complex they get depends on how close they come.</p>
 
-<h3>Identification</h3>
+<h3><a name="identification"></a>Identification</h3>
 <p>This tab looks ahead to the <a href="page:test_page#extraction">Virtual modal test</a> page, which
 explains how modes are fitted to a measurement; come back to it after that page. A modal test fits a model
 to measured FRFs. The <i>Identification</i> tab fits one column (a force on one

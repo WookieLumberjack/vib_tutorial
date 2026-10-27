@@ -406,7 +406,7 @@ class OmaPage(QtWidgets.QWidget):
         self.tabs = QtWidgets.QTabWidget()
         self.efdd_tab = efdd_tab
         self.methods_tab = methods_tab
-        self.tabs.addTab(self.results, "Modal parameters")
+        self.tabs.addTab(self.results, "Modes")
         self.tabs.addTab(efdd_tab, "EFDD")
         self.tabs.addTab(self.stab_plot, "Stabilization")
         self.tabs.addTab(methods_tab, "Methods")

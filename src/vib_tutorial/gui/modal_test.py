@@ -11,6 +11,7 @@ recorded; changing only noise or processing reuses the same data.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import numpy as np
 import pyqtgraph as pg
@@ -54,6 +55,7 @@ from ..core.measurement import AA_CUTOFF, FORCE_RMS, IMPACT_PEAK, SINE_AMPLITUDE
 from . import frame_stats, settle_plots
 from .axes import log_axes
 from .layouts import ColumnScroll
+from .links import before, takeaways
 from .modal_extraction import EXTRACTION_THEORY_HTML, ExtractionControls, ResultsView, StabilizationPlot
 from .panels import spin
 from .style import MAX_DOF, colors
@@ -65,6 +67,74 @@ STEP_BUDGET_MS = 25  # measuring per frame, so the page stays responsive
 SPEEDS = [("Instant", None), ("100× real time", 100.0), ("30× real time", 30.0), ("10× real time", 10.0),
           ("3× real time", 3.0), ("Real time", 1.0)]
 BLOCK_SIZES = [256, 512, 1024, 2048, 4096, 8192]
+
+
+@dataclass(frozen=True)
+class TestTrial:
+    """A test of the uniform 4-mass chain (with friction if given): what each control is set to."""
+
+    name: str
+    note: str
+    input: int = 3  # the mass the force is on
+    excitation: Excitation = Excitation.IMPACT
+    response: Response = Response.DISPLACEMENT
+    window: Window | None = None  # None: the excitation's usual one
+    block: int = 1024
+    fs: float | None = None  # None: Auto
+    anti_alias: bool = True
+    force_noise: float = 0.0  # %
+    response_noise: float = 0.0
+    method: Method = Method.LSCF
+    friction: float = 0.0  # N on every mass
+    tab: int = 1  # Setup, Modes, Stabilization
+
+    def system(self) -> ChainSystem:
+        return ChainSystem.uniform(4, friction=self.friction)
+
+
+TRIALS = (
+    TestTrial(
+        "A force at a node",
+        "The hammer hits m3, which doesn't move in mode 2 of the uniform chain. Mode 2 isn't excited, drops "
+        "out of every FRF, and no method can find it: the Modes tab lists three. Move the "
+        "force to m4 and it's back.",
+        input=2),
+    TestTrial(
+        "Force noise: H1 against H2",
+        "5% noise on the force channel. H1 reads low at the resonances, where the structure barely resists the "
+        "force and the force signal is smallest, and the coherence dips there. Switch the estimator to H2: "
+        "the peaks come back.",
+        force_noise=5.0),
+    TestTrial(
+        "Response noise: the antiresonances",
+        "5% noise on the response channels. H1 stays unbiased; switch to H2 and it reads high, most at the "
+        "antiresonances, where the response is small. Look at m1's FRF (Show response of).",
+        response_noise=5.0),
+    TestTrial(
+        "A short block: leakage",
+        "Nb = 256 with no window: the hit is still ringing when the block ends, so the peaks leak, low and "
+        "wide, and the damping comes out too high. Pick the Force + exponential window: the leakage goes, but "
+        "every mode gains Δζ = 1/(τ<sub>w</sub>ω) (the dashed grey curve), which the extraction takes off "
+        "again unless you untick <i>Remove the exponential window's damping</i>.",
+        block=256, window=Window.RECTANGULAR),
+    TestTrial(
+        "Peak picking on coarse lines",
+        "Peak picking with Nb = 256: each frequency snaps to a spectral line and ζ, from the half-power "
+        "points, comes out too high. Lengthen the block, or switch to the circle fit or LSCF.",
+        block=256, method=Method.PEAK),
+    TestTrial(
+        "Acceleration evens out the modes",
+        "Periodic random with 2% response noise, measuring displacement: the top modes sink into the noise "
+        "and LSCF can miss one. Switch the response sensor to Acceleration: every mode comes through, but "
+        "the FRF below the first mode turns to noise.",
+        excitation=Excitation.PERIODIC_RANDOM, response_noise=2.0, tab=2),
+    TestTrial(
+        "Friction: the linearity check",
+        "0.5 N of friction on every mass, hammer at 100%. Press <i>Hold for comparison</i>, then set the force "
+        "level to 1000%: the peaks grow taller and sharper, towards the exact (frictionless) FRF, and the "
+        "coherence drops even with no noise. See <i>Nonlinearity: friction</i>.",
+        friction=0.5),
+)
 
 
 def saved_playback() -> str:
@@ -482,6 +552,7 @@ class ModalTestPage(QtWidgets.QWidget):
 
     dof_requested = QtCore.Signal(int)  # the user changed N here; the main window owns the system
     edit_parameters = QtCore.Signal()  # the user wants the Simulation page's parameter panel
+    system_requested = QtCore.Signal(object)  # a trial's chain, for the Simulation page
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -505,6 +576,23 @@ class ModalTestPage(QtWidgets.QWidget):
         self._live: Estimate | None = None
         self._shown: float | None = None
         self._frame = QtCore.QElapsedTimer()
+
+        # --- things to try
+        trials = QtWidgets.QGroupBox("Things to try")
+        tv = QtWidgets.QVBoxLayout(trials)
+        self.trial = QtWidgets.QComboBox()
+        self.trial.addItem("Pick one…")
+        self.trial.addItems([t.name for t in TRIALS])
+        self.trial.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.trial.setToolTip("<p>Each sets up a test of the uniform 4-mass chain that shows one thing that can "
+                              "go wrong (or right). Loading one replaces the Simulation page's chain.</p>")
+        self.trial.currentIndexChanged.connect(self._on_trial)
+        tv.addWidget(self.trial)
+        self.trial_note = QtWidgets.QLabel()
+        self.trial_note.setWordWrap(True)
+        mute(self.trial_note)
+        self.trial_note.setVisible(False)
+        tv.addWidget(self.trial_note)
 
         # --- test setup
         setup = QtWidgets.QGroupBox("Test")
@@ -692,7 +780,7 @@ class ModalTestPage(QtWidgets.QWidget):
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
         self.extract = ExtractionControls()
-        for w in (setup, daq, noise, proc):
+        for w in (trials, setup, daq, noise, proc):
             lv.addWidget(w)
         lv.addLayout(speed_row)
         lv.addLayout(run_row)
@@ -725,12 +813,12 @@ class ModalTestPage(QtWidgets.QWidget):
         # --- right
         self.check = QtWidgets.QTextBrowser()
         self.theory = QtWidgets.QTextBrowser()
-        self.theory.setHtml(THEORY_HTML + EXTRACTION_THEORY_HTML)
+        self.theory.setHtml(THEORY_HTML)
         self.results = ResultsView()
         self.stab_plot = StabilizationPlot()
         self.tabs = QtWidgets.QTabWidget()
-        self.tabs.addTab(self.check, "Setup check")
-        self.tabs.addTab(self.results, "Modal parameters")
+        self.tabs.addTab(self.check, "Setup")
+        self.tabs.addTab(self.results, "Modes")
         self.tabs.addTab(self.stab_plot, "Stabilization")
         self.tabs.addTab(self.theory, "Theory")
 
@@ -879,6 +967,59 @@ class ModalTestPage(QtWidgets.QWidget):
             for w in widgets:
                 w.setVisible(on)
         self.window.setEnabled(e is not Excitation.STEPPED_SINE)
+
+    def load_trial(self, index: int) -> None:
+        """Set up TRIALS[index]: its chain (through the Simulation page) and every control, then measure."""
+        trial = TRIALS[index]
+        self.trial_note.setText(trial.note)
+        self.trial_note.setVisible(True)
+        values = (
+            (self.excitation, trial.excitation), (self.response, trial.response), (self.block, trial.block),
+            (self.estimator_combo, Estimator.H1), (self.extract.method, trial.method),
+        )
+        widgets = [w for w, _ in values] + [self.input, self.window, self.fs, self.fs_auto, self.anti_alias,
+                                            self.force_noise, self.response_noise, self.force_level, self.exp_end]
+        for w in widgets:
+            w.blockSignals(True)
+        for combo, value in values:
+            combo.setCurrentIndex(combo.findData(value))
+        if self.input.count() > trial.input:
+            self.input.setCurrentIndex(trial.input)
+        self._select_window(trial.excitation)
+        if trial.window is not None:
+            self.window.setCurrentIndex(self.window.findData(trial.window))
+        self.fs_auto.setChecked(trial.fs is None)
+        if trial.fs is not None:
+            self.fs.setValue(trial.fs)
+        self.anti_alias.setChecked(trial.anti_alias)
+        self.force_noise.setValue(trial.force_noise)
+        self.response_noise.setValue(trial.response_noise)
+        self.force_level.setValue(100.0)
+        self.exp_end.setValue(100.0)
+        for w in widgets:
+            w.blockSignals(False)
+        if self.hold.isChecked():
+            self.hold.setChecked(False)
+        self.extract.changed.emit()
+        self._show_rows()
+        measured = self.acq
+        self.system_requested.emit(trial.system())
+        if self.input.currentIndex() != trial.input:  # the chain's size changed and reset it
+            self.input.setCurrentIndex(trial.input)
+        elif self.acq is measured:  # the chain came back unchanged, or nobody passed it on
+            if self.system is None or not np.allclose(self.system.friction, trial.friction):
+                self.set_system(trial.system())
+            else:
+                self.restart()
+        self.tabs.setCurrentIndex(trial.tab)
+
+    def _on_trial(self, index: int) -> None:
+        if index <= 0:
+            return
+        self.trial.blockSignals(True)
+        self.trial.setCurrentIndex(0)
+        self.trial.blockSignals(False)
+        self.load_trial(index - 1)
 
     def _on_fs_auto(self, on: bool) -> None:
         self.fs.setEnabled(not on)
@@ -1092,6 +1233,14 @@ class ModalTestPage(QtWidgets.QWidget):
         response = acq.settings.response
         H = to_receptance(est.freqs, est.H, response)  # the methods fit receptance
         self.stab, self.poles = None, []
+        if not np.isfinite(H[band_mask(est.freqs, band)]).all():  # e.g. a hit shorter than a sample, unfiltered
+            self.ident = None
+            self.frf_view.set_fit(None, None)
+            self.results.set_results([], np.zeros((0, 0)), "No FRF to fit: the force measured nothing at "
+                                     "some lines in the band (a hammer pulse shorter than a sample, with no "
+                                     "anti-alias filter to spread it, misses every sample).")
+            self.stab_plot.set_data(None, [], np.zeros(0), np.zeros(0), [])
+            return
         if method is Method.PEAK:
             ident = peak_picking(est.freqs, H, band, n)
         elif method is Method.CIRCLE:
@@ -1225,20 +1374,19 @@ class ModalTestPage(QtWidgets.QWidget):
 
 
 THEORY_HTML = """
-<p><i>Before this page: <b>Start with one mass</b> and <b>Exact damped modes are complex</b>
-in the Simulation page's Background tab, then the FRF matrix page's Theory tab.</i></p>
-<h3>A virtual modal test</h3>
+<!--BEFORE-->
+<h3><a name="virtual-test"></a>A virtual modal test</h3>
 <p>In a lab the FRF is not computed from M, C and K: it is <i>measured</i>. A known force
 excites the structure, sensors record the force and the responses, and the FRF is estimated
 from those signals. This page does the same with the simulated chain, so each step of the
 measurement, and each error it can bring in, can be compared with the exact answer.</p>
 
-<h3>What is measured, and where</h3>
+<h3><a name="measured"></a>What is measured, and where</h3>
 <ul>
 <li><b>Displacement or acceleration.</b> The <i>Response sensor</i> setting picks what is
 recorded at each mass. <b>Displacement</b> gives the receptance H = X/F directly, as on the
 other pages. A lab usually measures with accelerometers and a force transducer, so its FRF is
-the <b>accelerance</b> A = −ω²H (see <i>Three forms of the same FRF</i> on the FRF matrix
+the <b>accelerance</b> A = −ω²H (see <a href="page:frf_page#three-forms">Three forms of the same FRF</a> on the FRF matrix
 page); pick <b>Acceleration</b> to measure that way. The acceleration is that of the simulated
 chain, a = M<sup>−1</sup>(f − Cv − Kx), not a converted displacement, so it passes through
 the same filter, sampling and noise as a real accelerometer signal. The plots then show
@@ -1265,7 +1413,7 @@ nothing, so this error is absent; in practice it is checked by moving or doublin
 mass.</li>
 </ul>
 
-<h3>Sampling</h3>
+<h3><a name="sampling"></a>Sampling</h3>
 <p>Each channel is sampled at f<sub>s</sub>. Only frequencies up to the <b>Nyquist frequency</b>
 f<sub>s</sub>/2 can be represented; anything above <b>aliases</b>, appearing at
 |f − k f<sub>s</sub>| as if it were real response. So an <b>anti-alias filter</b> removes it
@@ -1273,7 +1421,7 @@ before sampling. The filter rolls off below Nyquist, so only the lower part of t
 (here 80%) is usable. Analyzers usually express the same margin as f<sub>s</sub> ≈ 2.56
 f<sub>max</sub>. The same filter on the force and every response cancels in their ratio.</p>
 
-<h3>Blocks, the DFT and leakage</h3>
+<h3><a name="leakage"></a>Blocks, the DFT and leakage</h3>
 <p>The analyzer takes blocks of N<sub>b</sub> samples, lasting T = N<sub>b</sub>/f<sub>s</sub>,
 and takes their discrete Fourier transform (FFT). That gives spectral lines Δf = 1/T apart.
 The DFT treats the block as one period of a signal that repeats forever.
@@ -1290,7 +1438,7 @@ upward, as leakage does, though much less.</li>
 needs a long block to get lines across it.</li>
 </ul>
 
-<h3>Averaging and estimators</h3>
+<h3><a name="estimators"></a>Averaging and estimators</h3>
 <p>With F and X the spectra of a block (X of the response, displacement or acceleration;
 the estimators are the same for either), averaging over blocks gives the auto-spectra
 G<sub>ff</sub> = ⟨|F|²⟩, G<sub>xx</sub> = ⟨|X|²⟩ and the cross-spectrum
@@ -1308,7 +1456,7 @@ Noise, leakage and aliasing all lower it. With one average it is always 1, which
 least a few averages are needed. In practice a coherence above about 0.9 near the resonances
 is taken as a good measurement.</p>
 
-<h3>Excitation</h3>
+<h3><a name="excitation"></a>Excitation</h3>
 <ul>
 <li><b>Impact hammer:</b> quick and portable. The tip sets the pulse length τ<sub>p</sub>, and
 the force spectrum is flat only up to about 1/τ<sub>p</sub>. Each hit is checked before it is
@@ -1331,26 +1479,8 @@ frequencies. Near the band edge there are only 2.5 samples per cycle, which is e
 fit at a known frequency.</li>
 </ul>
 
-<h3>Where to look</h3>
-<ul>
-<li>Put the force on a mass at a node of a mode: that mode is not excited and drops out of
-every FRF. In the default uniform 4-mass chain, m3 does not move in mode 2 (and so mode 2
-cannot be extracted either; see <i>Things to try</i> below).</li>
-<li>Add 5% force noise and compare H1 with H2 at the resonances. Add response noise and look
-at the antiresonances.</li>
-<li>Make the block short so a hit is still ringing at the end: the rectangular window leaks,
-the exponential window fixes the leakage but adds damping (dashed grey curve).</li>
-<li>Turn the anti-alias filter off and raise the stiffness until the top mode is above
-Nyquist: it appears at the wrong frequency.</li>
-<li>Give the masses friction (F<sub>f</sub> = 0.5 N on the Simulation page) and measure with
-the hammer at force levels of 100% and 1000%, holding the first for comparison. See
-<i>Nonlinearity: friction</i> below.</li>
-<li>Add 2% response noise with periodic random excitation: with displacement the top modes
-sink into the noise and LSCF can miss one. Switch the response sensor to <b>Acceleration</b>:
-every mode comes through, but the FRF below the first mode turns to noise.</li>
-</ul>
-
-<h3>Nonlinearity: friction</h3>
+<!--EXTRACTION-->
+<h3><a name="friction"></a>Nonlinearity: friction</h3>
 <p>Everything above assumes the structure is <b>linear</b>: double the force and every response
 doubles, so the FRF is a property of the structure alone. Real joints rub, and friction breaks
 this. Give the masses Coulomb friction (F<sub>f</sub> under <i>System parameters</i> on the
@@ -1377,4 +1507,30 @@ and the estimate there is meaningless.</li>
 </ul>
 <p>The modal extraction still fits a linear model, so with friction the identified damping
 ratios and frequencies are those of the linear fit at this level, not properties of the chain.</p>
+
+<h3><a name="try-it"></a>Things to try</h3>
+<p>Each of these sets up a test of the uniform 4-mass chain (Things to try, top left).</p>
+<!--TRIALS-->
+<p>And one by hand: turn the anti-alias filter off and raise the stiffness on the Simulation page until
+the top mode is above Nyquist (untick fs Auto first). It appears at |f − f<sub>s</sub>|, at the wrong
+frequency.</p>
+<!--TAKEAWAYS-->
 """
+THEORY_HTML = THEORY_HTML.replace("<!--BEFORE-->", before(
+    ("sim_page", "start-with-one-mass", "Start with one mass"),
+    ("frf_page", "three-forms", "Three forms of the same FRF"),
+    ("frf_page", "sum-of-modes", "Every term is a sum of modes"),
+)).replace("<!--EXTRACTION-->", EXTRACTION_THEORY_HTML).replace(
+    "<!--TRIALS-->", "<ul>" + "".join(f"<li><b>{t.name}.</b> {t.note}</li>" for t in TRIALS) + "</ul>"
+).replace("<!--TAKEAWAYS-->", takeaways(
+    "A measured FRF is an estimate: sampling, blocks, windows, noise and averaging each leave their mark, "
+    "and the coherence says how much to trust each line.",
+    "H1 for noise on the response (antiresonances), H2 for noise on the force (resonances).",
+    "Leakage and windows both widen peaks, so both read as extra damping; an exponential window's "
+    "share can be taken off exactly.",
+    "Filter before sampling, or a mode above Nyquist shows up as a false one below it.",
+    "Curve fitting turns the FRFs into poles and shapes; the stabilization diagram separates the "
+    "physical poles from the fit's.",
+    "If the FRF changes with the force level, the structure is nonlinear and its modal parameters "
+    "belong to that level.",
+))
