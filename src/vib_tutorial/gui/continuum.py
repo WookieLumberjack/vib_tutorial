@@ -449,7 +449,7 @@ class ContinuumPage(QtWidgets.QWidget):
         self.shape_tab = shape_tab
         self.tabs.addTab(shape_tab, "Mode shape")
         self.tabs.addTab(self.table, "Frequencies")
-        self.tabs.addTab(self.notes, "Notes")
+        self.tabs.addTab(self.notes, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)

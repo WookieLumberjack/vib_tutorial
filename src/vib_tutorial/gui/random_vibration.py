@@ -396,7 +396,7 @@ class RandomVibrationPage(QtWidgets.QWidget):
         self.tabs.addTab(record_tab, "Record")
         self.stats_tab = stats_scroll
         self.tabs.addTab(stats_scroll, "Statistics")
-        self.tabs.addTab(self.notes, "Notes")
+        self.tabs.addTab(self.notes, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)

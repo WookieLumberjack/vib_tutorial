@@ -440,7 +440,7 @@ class ModelUpdatingPage(QtWidgets.QWidget):
         self.update_tab, self.sens_tab = update_scroll, sens_tab
         self.tabs.addTab(update_scroll, "Updating")
         self.tabs.addTab(sens_tab, "Sensitivity")
-        self.tabs.addTab(self.notes, "Notes")
+        self.tabs.addTab(self.notes, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)

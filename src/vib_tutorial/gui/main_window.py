@@ -5,9 +5,10 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable
+from dataclasses import replace
 
 import numpy as np
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..core import (
     ChainSystem,
@@ -33,6 +34,9 @@ from .layouts import FlowLayout, ColumnScroll, group
 from .modes import Method, mode_entries
 from .panels import ForcePanel, ParameterPanel, SimControls, spin
 from .plots import FrfPlot, ModalTable, ModeShapePlot, PhasorPanel, TimeHistoryPlot
+from .sim_trials import TRIALS as SIM_TRIALS
+from .tab_groups import PageGroups
+from . import links
 from . import frame_stats, settle_plots, theming
 from .style import SYSTEM, colors
 
@@ -45,23 +49,11 @@ PROBE_STEPS = 200  # steps in a frame while the cost of a step isn't known yet (
 STORE_DT = 1e-3  # s
 STORE_PER_PERIOD = 16
 
-# The pages after the Simulation one, in tab order: (attribute, tab title). Each is
-# imported and built the first time it's opened (MainWindow._page), not at startup.
-LAZY_PAGES = (
-    ("frf_page", "FRF matrix"),
-    ("coupling_page", "Modal coupling"),
-    ("cms_page", "Substructuring (CMS)"),
-    ("test_page", "Virtual modal test"),
-    ("oma_page", "Operational modal analysis"),
-    ("random_page", "Random vibration"),
-    ("complex_page", "Complex modes"),
-    ("updating_page", "Model updating"),
-    ("shock_page", "Shock spectrum"),
-    ("rotor_page", "Jeffcott rotor"),
-    ("duffing_page", "Duffing && Mathieu"),
-    ("torsional_page", "Torsional vibration"),
-    ("continuum_page", "Continuous systems"),
-)
+# The pages in reading order, in groups: (group title, ((attribute, tab title), ...)), from links.COURSE.
+# All but the Simulation page are imported and built the first time they're opened (MainWindow._page).
+PAGE_GROUPS = tuple((group, tuple((name, title) for name, title, _ in pages)) for group, pages in links.COURSE)
+# The pages built on first use, in reading order: (attribute, tab title).
+LAZY_PAGES = tuple(page for _, pages in PAGE_GROUPS for page in pages if page[0] != "sim_page")
 
 
 def _follows_chain(page: QtWidgets.QWidget) -> bool:
@@ -210,6 +202,23 @@ THEME_TIP = (
     "<p>Colours of the whole app: plots, animation and controls.</p>"
     "<p><b>System</b> follows the desktop's light or dark setting, and switches with it.</p>"
 )
+THEORY_TIP = (
+    "<p>Show this page's <i>Theory</i> tab: what the page shows, the ideas behind it, things to try, "
+    "and its symbols. (F1)</p>"
+    "<p>Ctrl+1 to Ctrl+5 switch between the groups of pages.</p>"
+)
+ABOUT_HTML = """<h3>Vibration Tutorial {version}</h3>
+<p>An interactive teaching tool for mechanical vibration: a chain of masses, springs and dampers, and the
+systems built from it. Start with <i>Foundations</i> and read each page's <i>Theory</i> tab (F1); the pages
+are in the order they are meant to be read.</p>
+<p><b>For educational use only.</b> This program was written with an AI coding assistant (Claude Code).
+Although it has an automated test suite, its results are <b>not guaranteed to be technically correct</b>:
+the simulations, analyses and theory notes may contain errors. Check any calculation independently before
+relying on it, and do not use it for design, certification, safety-related or other engineering
+decisions.</p>
+<p>Provided "as is", without warranty of any kind. Released under the MIT License.
+<a href="https://github.com/WookieLumberjack/vib_tutorial">github.com/WookieLumberjack/vib_tutorial</a></p>
+"""
 COMPARE_TIP = (
     "<p>Also draws, thin and dashed, the frequency response of the chain with its last mass "
     "removed. When the last mass is a vibration absorber or tuned mass damper (see "
@@ -259,9 +268,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.params = ParameterPanel(system)
         self.force_panel = ForcePanel(self.force)
         self.controls = SimControls()
+        trials = QtWidgets.QGroupBox("Things to try")
+        tv = QtWidgets.QVBoxLayout(trials)
+        self.trial = QtWidgets.QComboBox()
+        self.trial.addItem("Pick one…")
+        self.trial.addItems([t.name for t in SIM_TRIALS])
+        self.trial.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.trial.setToolTip("<p>Sets up the chain and the controls to show one idea, and says what to look "
+                              "for. The Theory tab (F1) lists them all.</p>")
+        self.trial.activated.connect(self._on_trial)
+        tv.addWidget(self.trial)
+        self.trial_note = QtWidgets.QLabel(
+            "New here? Press <b>Space</b> to switch the force on, or pick one of these. Then read the "
+            "<i>Theory</i> tab (F1).")
+        self.trial_note.setWordWrap(True)
+        theming.mute(self.trial_note)
+        tv.addWidget(self.trial_note)
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
-        for w in (self.params, self.force_panel, self.controls):
+        for w in (trials, self.params, self.force_panel, self.controls):
             lv.addWidget(w)
         lv.addStretch(1)
         left_scroll = ColumnScroll(left)
@@ -386,7 +411,7 @@ class MainWindow(QtWidgets.QMainWindow):
         tabs.addTab(modal_tab, "Modal analysis")
         self.frf_tab = frf_tab
         tabs.addTab(frf_tab, "Frequency response")
-        tabs.addTab(self.background, "Background")
+        tabs.addTab(self.background, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)
@@ -397,15 +422,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # --- the other pages: same chain, each its own layout. An empty placeholder
         # holds each tab until the page is first opened (see _page).
-        self.pages = QtWidgets.QTabWidget()
-        self.pages.setDocumentMode(True)
-        self.pages.addTab(self.sim_page, "Simulation && modal analysis")
+        self.pages = PageGroups()
         self._built: dict[str, QtWidgets.QWidget] = {}
         self._placeholders: dict[str, QtWidgets.QWidget] = {}
-        for name, title in LAZY_PAGES:
-            self._placeholders[name] = QtWidgets.QWidget()
-            self.pages.addTab(self._placeholders[name], title)
+        for group_title, pages in PAGE_GROUPS:
+            tabs_in_group = []
+            for name, title in pages:
+                if name == "sim_page":
+                    tabs_in_group.append((self.sim_page, title))
+                    continue
+                self._placeholders[name] = QtWidgets.QWidget()
+                tabs_in_group.append((self._placeholders[name], title))
+            self.pages.add_group(group_title, *tabs_in_group)
         self.pages.currentChanged.connect(self._on_page_changed)
+        self._wire_links(self.sim_page)
         self.theme_combo = QtWidgets.QComboBox()
         self.theme_combo.addItems(theming.names())
         self.theme_combo.setCurrentText(theming.current_name())
@@ -415,11 +445,26 @@ class MainWindow(QtWidgets.QMainWindow):
         corner = QtWidgets.QWidget()
         cl = QtWidgets.QHBoxLayout(corner)
         cl.setContentsMargins(6, 2, 6, 2)
+        self.theory_button = QtWidgets.QToolButton()
+        self.theory_button.setText("Theory")
+        self.theory_button.setToolTip(THEORY_TIP)
+        self.theory_button.clicked.connect(self.show_theory)
+        about = QtWidgets.QToolButton()
+        about.setText("About")
+        about.setToolTip("Version, disclaimer and licence.")
+        about.clicked.connect(self._about)
+        cl.addWidget(self.theory_button)
+        cl.addWidget(about)
+        cl.addSpacing(8)
         cl.addWidget(theme_label)
         cl.addWidget(self.theme_combo)
         self.pages.setCornerWidget(corner, QtCore.Qt.Corner.TopRightCorner)
         self.setCentralWidget(self.pages)
         self.resize(1700, 900)
+        QtGui.QShortcut(QtGui.QKeySequence("F1"), self, self.show_theory)
+        for i in range(len(PAGE_GROUPS)):  # Ctrl+1 … Ctrl+5: a group, at the page it last showed
+            QtGui.QShortcut(QtGui.QKeySequence(f"Ctrl+{i + 1}"), self,
+                            lambda i=i: self.pages.groups.setCurrentIndex(i))
 
         # --- wiring
         self.params.changed.connect(self._on_system_changed)
@@ -486,17 +531,52 @@ class MainWindow(QtWidgets.QMainWindow):
             if hasattr(page, "system_requested"):
                 page.system_requested.connect(self.params.set_system)
             page.set_system(self.sim.system, self.modal)
-        # Insert the page before its placeholder, switch to it if the placeholder was
-        # showing, then drop the placeholder: only the real page is ever shown.
+        # Put the page in its placeholder's tab (showing, if that was): only the real page is ever shown.
         holder = self._placeholders.pop(name)
-        index = self.pages.indexOf(holder)
-        showing = self.pages.currentIndex() == index
-        self.pages.insertTab(index, page, dict(LAZY_PAGES)[name])
-        if showing:
-            self.pages.setCurrentIndex(index)
-        self.pages.removeTab(index + 1)
+        self.pages.replace(holder, page)
+        self._wire_links(page)
         holder.deleteLater()
         return page
+
+    def show_theory(self) -> QtWidgets.QTextBrowser | None:
+        """Bring the page showing's Theory tab to the front (and any group of tabs it sits in); its browser."""
+        page = self.pages.currentWidget()
+        browser = None
+        for tabs in page.findChildren(QtWidgets.QTabWidget):
+            for i in range(tabs.count()):
+                if tabs.tabText(i) == "Theory":
+                    tabs.setCurrentIndex(i)
+                    found = tabs.widget(i)
+                    if not isinstance(found, QtWidgets.QTextBrowser):
+                        found = found.findChild(QtWidgets.QTextBrowser)
+                    browser = found or browser
+        return browser
+
+    def go_to(self, name: str, anchor: str = "") -> None:
+        """Show page `name` (an attribute in PAGE_GROUPS) at its Theory, scrolled to `anchor`."""
+        page = self.sim_page if name == "sim_page" else self._page(name)
+        self.pages.setCurrentWidget(page)
+        browser = self.show_theory()
+        if browser is not None and anchor:
+            QtCore.QTimer.singleShot(0, lambda: browser.scrollToAnchor(anchor))  # once it's laid out
+
+    def _wire_links(self, page: QtWidgets.QWidget) -> None:
+        for browser in page.findChildren(QtWidgets.QTextBrowser):
+            links.wire(browser, self.go_to)
+
+    def _about(self) -> None:
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            v = version("vib-tutorial")
+        except PackageNotFoundError:
+            v = ""
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("About Vibration Tutorial")
+        box.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        box.setText(ABOUT_HTML.format(version=v))
+        box.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
+        box.exec()
 
     def _on_page_changed(self, index: int) -> None:
         widget = self.pages.widget(index)
@@ -551,6 +631,50 @@ class MainWindow(QtWidgets.QMainWindow):
         self.frf_compare.setChecked(preset.absorber)
         if preset.absorber:
             self.tabs.setCurrentWidget(self.frf_tab)
+
+    def _on_trial(self, index: int) -> None:
+        """Set up one of the Things to try (index 0 is the prompt)."""
+        if index <= 0:
+            return
+        t = SIM_TRIALS[index - 1]
+        self.trial_note.setText(t.note)
+        self.force.switch_off()
+        if t.preset:
+            self.params.load_preset(next(p for p in self.params.presets if p.name.startswith(t.preset)))
+        else:
+            system = ChainSystem.uniform(t.n)
+            for i, c in t.damping.items():
+                system.damping[i] = c
+            system.friction[:] = t.friction
+            self.params.set_system(system)
+            settings = ForceSettings(target=t.n - 1)
+            if t.kind is not None:
+                settings = replace(settings, kind=t.kind)
+            if t.sweep is not None:
+                settings = replace(settings, sweep_start_hz=t.sweep[0], sweep_end_hz=t.sweep[1],
+                                   sweep_time=t.sweep[2])
+            if t.base is not None:
+                settings = replace(settings, base=True, base_amplitude=t.base[0] * 1e-3, freq_hz=t.base[1])
+            self.force_panel.load(settings)
+            self.frf_compare.setChecked(False)
+            self.tabs.setCurrentWidget(self.frf_tab if t.frf_tab else self.tabs.widget(0))
+        if t.tune:
+            self.force_panel.tune.activated.emit(t.tune)
+        self.method_combo.setCurrentIndex(1 if t.state_space else 0)
+        self.coords_combo.setCurrentIndex(self.coords_combo.findText(t.coords, QtCore.Qt.MatchFlag.MatchStartsWith))
+        self.energy.view.setCurrentIndex(1 if t.by_mode else 0)
+        self.controls.speed.setCurrentIndex(self.controls.SPEEDS.index(t.speed))
+        self.controls.window.setValue(t.window)
+        self.animate_modes.setChecked(t.animate)
+        self.release_amp.setValue(t.amplitude)
+        self._reset()
+        if t.release is not None:
+            self.table.selectRow(t.release)
+            self._release_mode()
+        elif t.apply:
+            self.force_panel.button.click()
+        if not self.running:
+            self.controls.run.click()
 
     def _apply_dof(self, n: int) -> None:
         self.history.reset(n)

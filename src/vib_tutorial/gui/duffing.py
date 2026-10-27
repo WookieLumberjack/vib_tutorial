@@ -438,7 +438,7 @@ class DuffingPage(QtWidgets.QWidget):
         self.tabs.addTab(phase_tab, "Phase plane")
         self.chart_tab = chart_tab
         self.tabs.addTab(chart_tab, "Ince–Strutt chart")
-        self.tabs.addTab(self.notes, "Notes")
+        self.tabs.addTab(self.notes, "Theory")
         self.tabs.currentChanged.connect(lambda _: self._draw_chart())
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)

@@ -100,10 +100,11 @@ def test_secondary_pages_build_when_opened(app):
     titles = [w.pages.tabText(i) for i in range(w.pages.count())]
     w.params.dof.setValue(5)  # a page built later gets the current system
 
-    w.pages.setCurrentIndex(2)  # as a click on the tab does
+    w.pages.groups.setCurrentIndex(2)  # as a click on the group's tab does: its first page shows
     page = w.pages.currentWidget()
     assert isinstance(page, ModalCouplingPage) and page is w.coupling_page
     assert list(w._built) == ["coupling_page"]
+    assert w.pages.group_title(w.pages.currentIndex()) == "Building models"
     assert page.system.n == 5
     assert [w.pages.tabText(i) for i in range(w.pages.count())] == titles
 
@@ -2585,7 +2586,7 @@ def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path)
         assert len(frames) >= 4
         assert all(float(r["paint_ms"]) > 0 for r in frames[1:])  # each frame's repaint was timed
         view = next(r for r in rows if r["kind"] == "view")
-        assert view["detail"].startswith("Simulation & modal analysis > Modal analysis | ")
+        assert view["detail"].startswith("Foundations > Simulation & modal analysis > Modal analysis | ")
 
         # What the user does is logged between the frames, with what the control is called.
         from PySide6.QtTest import QTest
@@ -2593,9 +2594,15 @@ def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path)
         box = next(b for b in w.params.rows[0] if isinstance(b, QtWidgets.QAbstractSpinBox))
         box.setFocus()
         QTest.keyClick(box, QtCore.Qt.Key.Key_Up)
-        bar = w.pages.tabBar()
         rotor = next(i for i in range(w.pages.count()) if "rotor" in w.pages.tabText(i).lower())
-        QTest.mouseClick(bar, QtCore.Qt.MouseButton.LeftButton, pos=bar.tabRect(rotor).center())
+        bar = w.pages.groups.tabBar()  # its group, then the page in the group's row
+        group = next(i for i in range(bar.count()) if bar.tabText(i) == w.pages.group_title(rotor))
+        QTest.mouseClick(bar, QtCore.Qt.MouseButton.LeftButton, pos=bar.tabRect(group).center())
+        for _ in range(3):
+            app.processEvents()
+        row = w.pages.groups.currentWidget()
+        bar = row.tabBar()
+        QTest.mouseClick(bar, QtCore.Qt.MouseButton.LeftButton, pos=bar.tabRect(row.count() - 1).center())
         for _ in range(3):
             app.processEvents()
         page = w.pages.currentWidget()
@@ -2604,8 +2611,10 @@ def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path)
         w.frame_overlay.refresh()
         rows = list(csv.DictReader(log.open(encoding="utf-8")))
         inputs = [r["detail"] for r in rows if r["kind"] == "input"]
-        assert inputs[0].startswith("1 m [kg]: ") and inputs[1:] == ["tab: Jeffcott rotor", "Gravity: on"]
-        assert rows[-1]["kind"] == "view" and rows[-1]["detail"].startswith("Jeffcott rotor > [Custom] > ")
+        assert inputs[0].startswith("1 m [kg]: ") and inputs[1:] == ["tab: Beyond the chain", "tab: Jeffcott rotor",
+                                                                 "Gravity: on"]
+        assert rows[-1]["kind"] == "view" and rows[-1]["detail"].startswith(
+            "Beyond the chain > Jeffcott rotor > [Custom] > ")
         # A combo alone in its group is named by its tooltip, not by a label outside the group;
         # scrolling a panel isn't an input.
         assert frame_stats.describe_input(page.supports, "click") == ("What holds the journals",

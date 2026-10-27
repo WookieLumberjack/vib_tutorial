@@ -515,7 +515,7 @@ class TorsionalPage(QtWidgets.QWidget):
         self.shapes_tab = shapes_tab
         self.tabs.addTab(drawing_tab, "Drive train")
         self.tabs.addTab(shapes_tab, "Mode shapes")
-        self.tabs.addTab(self.notes, "Notes")
+        self.tabs.addTab(self.notes, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)

@@ -225,8 +225,8 @@ def _plain(text: str) -> str:
 
 
 def _page_title(window: QtWidgets.QWidget) -> str:
-    tabs = getattr(window, "pages", None)
-    return _plain(tabs.tabText(tabs.currentIndex())) if isinstance(tabs, QtWidgets.QTabWidget) else ""
+    tabs = getattr(window, "pages", None)  # a QTabWidget, or the window's PageGroups (the same methods)
+    return _plain(tabs.tabText(tabs.currentIndex())) if hasattr(tabs, "tabText") else ""
 
 
 def describe_view(window: QtWidgets.QWidget) -> str:
@@ -240,6 +240,9 @@ def describe_view(window: QtWidgets.QWidget) -> str:
             break
         parts.append(_plain(tabs.tabText(tabs.currentIndex())))
         widget = tabs.currentWidget()
+        while isinstance(widget, QtWidgets.QTabWidget) and widget.currentWidget() is not None:
+            parts.append(_plain(widget.tabText(widget.currentIndex())))  # a group's own row of tabs
+            widget = widget.currentWidget()
         context = getattr(widget, "frame_context", None)
         if callable(context) and (text := context()):
             parts.append(f"[{text}]")

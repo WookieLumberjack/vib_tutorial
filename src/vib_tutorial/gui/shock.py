@@ -490,7 +490,7 @@ class ShockPage(QtWidgets.QWidget):
         self.tabs.addTab(self.chain_tab, "Chain")
         self.tabs.addTab(self.tri_tab, "Tripartite")
         self.tabs.addTab(self.shapes_tab, "Pulse shapes")
-        self.tabs.addTab(self.notes, "Notes")
+        self.tabs.addTab(self.notes, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)
