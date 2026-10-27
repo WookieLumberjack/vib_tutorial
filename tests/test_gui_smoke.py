@@ -3792,3 +3792,31 @@ def test_single_undamped_mass_draws_its_frf(app):
     app.processEvents()
     assert len(w.modal.modes) == 1
     w.close()
+
+
+def test_grid_is_opaque_and_under_the_data(app):
+    """A grid's translucent lines cost ~35 ms a frame on a plot that rescales; gui.axes draws them
+    opaque in the colour they'd have had over the background, and behind the ViewBox."""
+    import pyqtgraph as pg
+
+    from vib_tutorial import gui
+    from vib_tutorial.gui import axes
+    from vib_tutorial.gui.style import colors
+
+    gui.make_app("Light")
+    w = pg.PlotWidget()
+    w.resize(400, 300)
+    w.plot([0, 1, 2], [0, 1, 0])
+    w.showGrid(x=True, y=True, alpha=0.15)
+    w.show()
+    app.processEvents()
+    axis = w.getAxis("left")
+    assert axis.zValue() == axes.GRID_Z < w.getViewBox().zValue()
+    from PySide6 import QtGui
+
+    _, ticks, _ = axis.generateDrawSpecs(QtGui.QPainter())
+    assert ticks and all(pen.color().alpha() == 255 for pen, _, _ in ticks)
+    assert {pen.color().name() for pen, _, _ in ticks} != {colors.foreground}  # blended toward the background
+    w.showGrid(x=False, y=False)
+    assert axis.zValue() == axes.AXIS_Z
+    w.close()

@@ -17,9 +17,10 @@ def make_app(theme: str | None = None):
     import pyqtgraph as pg
     from PySide6 import QtWidgets
 
-    from . import theming
+    from . import axes, theming
 
     pg.setConfigOptions(antialias=True)
+    axes.install_opaque_grid()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Vibration Tutorial")
     theming.apply(theme or theming.saved_name())
