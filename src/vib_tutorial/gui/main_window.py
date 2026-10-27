@@ -64,6 +64,21 @@ def _follows_chain(page: QtWidgets.QWidget) -> bool:
 
 def _page_class(name: str) -> type[QtWidgets.QWidget]:
     # Plain imports, not importlib, so PyInstaller still finds these modules.
+    if name == "sdof_page":
+        from .sdof import SdofPage
+        return SdofPage
+    if name == "damping_page":
+        from .damping_models import DampingModelsPage
+        return DampingModelsPage
+    if name == "transient_page":
+        from .transient import TransientPage
+        return TransientPage
+    if name == "signals_page":
+        from .signals import SignalsPage
+        return SignalsPage
+    if name == "isolation_page":
+        from .isolation import IsolationPage
+        return IsolationPage
     if name == "frf_page":
         from .frf_matrix import FrfMatrixPage
         return FrfMatrixPage
@@ -205,7 +220,7 @@ THEME_TIP = (
 THEORY_TIP = (
     "<p>Show this page's <i>Theory</i> tab: what the page shows, the ideas behind it, things to try, "
     "and its symbols. (F1)</p>"
-    "<p>Ctrl+1 to Ctrl+5 switch between the groups of pages.</p>"
+    "<p>Ctrl+1 to Ctrl+6 switch between the groups of pages.</p>"
 )
 ABOUT_HTML = """<h3>Vibration Tutorial {version}</h3>
 <p>An interactive teaching tool for mechanical vibration: a chain of masses, springs and dampers, and the
@@ -434,6 +449,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._placeholders[name] = QtWidgets.QWidget()
                 tabs_in_group.append((self._placeholders[name], title))
             self.pages.add_group(group_title, *tabs_in_group)
+        # The window opens on the Simulation page, the app's home, though the course starts a group earlier.
+        self.pages.setCurrentWidget(self.sim_page)
         self.pages.currentChanged.connect(self._on_page_changed)
         self._wire_links(self.sim_page)
         self.theme_combo = QtWidgets.QComboBox()
@@ -462,7 +479,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(self.pages)
         self.resize(1700, 900)
         QtGui.QShortcut(QtGui.QKeySequence("F1"), self, self.show_theory)
-        for i in range(len(PAGE_GROUPS)):  # Ctrl+1 … Ctrl+5: a group, at the page it last showed
+        for i in range(len(PAGE_GROUPS)):  # Ctrl+1 … Ctrl+6: a group, at the page it last showed
             QtGui.QShortcut(QtGui.QKeySequence(f"Ctrl+{i + 1}"), self,
                             lambda i=i: self.pages.groups.setCurrentIndex(i))
 
@@ -505,6 +522,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.frame_overlay = frame_stats.install(self)  # only with VIB_FRAME_STATS set
 
     # --------------------------------------------------------------- pages
+    sdof_page = property(lambda self: self._page("sdof_page"))
+    transient_page = property(lambda self: self._page("transient_page"))
+    damping_page = property(lambda self: self._page("damping_page"))
+    isolation_page = property(lambda self: self._page("isolation_page"))
+    signals_page = property(lambda self: self._page("signals_page"))
     frf_page = property(lambda self: self._page("frf_page"))
     coupling_page = property(lambda self: self._page("coupling_page"))
     cms_page = property(lambda self: self._page("cms_page"))
@@ -618,11 +640,14 @@ class MainWindow(QtWidgets.QMainWindow):
         n_changed = system.n != self.sim.system.n
         self.sim.set_system(system)
         self._step_cost = 0.0  # friction, or a new size, changes it: measure it afresh
+        # The modes first: a new size redraws the FRF (through the force panel), which needs this system's.
+        modal = modal_analysis(system)
+        self.modal = modal
         if n_changed:
             self._apply_dof(system.n)
         else:
             self.chain.set_masses(system.masses)
-        self._refresh_modal()
+        self._refresh_modal(modal)
 
     def _on_preset(self, preset: Preset) -> None:
         """The preset's system is loaded; set its excitation and start from rest."""
@@ -683,8 +708,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chain.set_masses(self.sim.system.masses)
         self.force_panel.set_dof(n)
 
-    def _refresh_modal(self) -> None:
-        self.modal = modal_analysis(self.sim.system)
+    def _refresh_modal(self, modal=None) -> None:
+        self.modal = modal if modal is not None else modal_analysis(self.sim.system)
         for page in self._built.values():  # the rest are given the system when built
             if _follows_chain(page):
                 page.set_system(self.sim.system, self.modal)
