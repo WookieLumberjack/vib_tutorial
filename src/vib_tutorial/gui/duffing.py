@@ -119,7 +119,7 @@ can be one steady amplitude or three. The curve leans along the <b>backbone</b>,
 which the mass would swing freely at amplitude a. A hardening spring's leans to the right, a softening one's to
 the left.</p>
 
-<h3>The jump</h3>
+<h3><a name="jump"></a>The jump</h3>
 <p>Where there are three amplitudes, the middle one is unstable (a saddle): nudged, the mass leaves it for one of
 the other two, which are both stable. So the response depends on where it came from. Sweeping a hardening spring
 up, the mass rides the upper branch past the linear resonance until the branch ends at a <b>fold</b>, and drops

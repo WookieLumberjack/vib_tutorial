@@ -78,6 +78,8 @@ COURSE = (
     ("Beyond the chain", (
         ("torsional_page", "Torsional vibration", "a drive train of discs, shafts and gears, and its start-up"),
         ("duffing_page", "Duffing && Mathieu", "a nonlinear spring: jumps, chaos, and parametric resonance"),
+        ("self_excited_page", "Self-excited vibration",
+         "negative damping and limit cycles: van der Pol, galloping, vortex-induced vibration and flutter"),
         ("rotor_page", "Jeffcott rotor", "a spinning shaft: critical speeds, balancing, bearings, stability, rub"),
     )),
 )
@@ -118,6 +120,7 @@ PAGE_TITLES = {
     "updating_page": "Model updating page",
     "torsional_page": "Torsional vibration page",
     "duffing_page": "Duffing & Mathieu page",
+    "self_excited_page": "Self-excited vibration page",
     "rotor_page": "Jeffcott rotor page",
 }
 

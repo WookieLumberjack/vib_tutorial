@@ -560,3 +560,47 @@ def test_fatigue_trials():
     assert abs(dirlik_damage(wide, c) / rw.damage_rate(c) - 1) < 0.02
     short = [record(two, 20.0, k).damage_rate(c5) / r2.damage_rate(c5) for k in range(1, 11)]
     assert (min(short), max(short)) == pytest.approx((0.67, 1.53), abs=0.005)
+
+
+def test_self_excited_trials():
+    from vib_tutorial.core.self_excited import (
+        Flutter,
+        Galloping,
+        VanDerPol,
+        Viv,
+        dominant_hz,
+        galloping_branches,
+        settled_amplitude,
+    )
+
+    v = VanDerPol()
+    t, x, _ = v.simulate(60)
+    assert settled_amplitude(x) == pytest.approx(0.0089, abs=0.00005) and -v.eps / 2 == pytest.approx(-0.1)
+    t, x, _ = VanDerPol(eps=5.0).simulate(20)
+    assert 1 / dominant_hz(x, t[1] - t[0]) == pytest.approx(1.84, abs=0.03)
+    g = Galloping()
+    assert g.onset == pytest.approx(3.81, abs=0.005)
+    U = np.linspace(4.0, 7.5, 351)
+    pairs = [b for b in galloping_branches(g, U) if not b.stable]
+    band = U[np.isfinite(pairs[0].amplitude)]
+    assert (band.min(), band.max()) == pytest.approx((4.7, 7.0), abs=0.05)
+    at6 = sorted(b.amplitude[0] / g.side for b in galloping_branches(g, np.array([6.0])) if b.stable)
+    assert at6 == pytest.approx([0.51, 1.28], abs=0.005)
+    for start, want in ((0.001, 0.51), (0.12, 1.28)):
+        _, y, _ = Galloping(speed=6.0, start=start).simulate(600)
+        assert settled_amplitude(y) / g.side == pytest.approx(want, abs=0.01)
+    _, y, _ = Galloping(speed=12.0).simulate(200)
+    assert settled_amplitude(y) / g.side == pytest.approx(2.7, abs=0.05) and 12 / g.onset == pytest.approx(3.1, abs=0.1)
+    viv = Viv()
+    assert viv.mass_ratio == pytest.approx(10.2, abs=0.05) and viv.strouhal * 5.5 == pytest.approx(1.1)
+    amp, freq = viv.sweep(np.array([4.0, 4.5, 5.5, 6.25, 6.5, 9.0]))
+    assert amp[2] == pytest.approx(0.21, abs=0.005) and freq[2] == pytest.approx(1.0, abs=0.01)
+    assert freq[1:4] == pytest.approx([1.0, 1.0, 1.0], abs=0.04) and abs(freq[4] - 1) > 0.04
+    assert abs(freq[0] - 1) > 0.04
+    assert amp[5] == pytest.approx(0.019, abs=0.0005) and freq[5] == pytest.approx(1.7, abs=0.02)
+    f = Flutter()
+    assert f.flutter_speed() == pytest.approx(19.1, abs=0.05) and f.divergence_speed() == pytest.approx(39, abs=0.5)
+    fr, _ = f.modes(np.array([0.0, 19.0]))
+    assert fr[0] == pytest.approx([2.93, 6.71], abs=0.1) and fr[1] == pytest.approx([3.4, 5.0], abs=0.05)
+    assert Flutter(x_cg=-0.2).flutter_speed() == pytest.approx(f.divergence_speed(), abs=0.05)
+    assert Flutter(x_cg=0.0).flutter_speed() == pytest.approx(17.7, abs=0.05)

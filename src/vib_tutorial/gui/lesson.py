@@ -224,3 +224,12 @@ def theory(html: str) -> QtWidgets.QTextBrowser:
     browser = QtWidgets.QTextBrowser()
     browser.setHtml(html)
     return browser
+
+
+def relabel(p: pg.PlotWidget, side: str, text: str, units: str | None = None) -> None:
+    """Change an axis's label; a pure number (no units) gets no SI prefix."""
+    axis = p.getAxis(side)
+    axis.enableAutoSIPrefix(units is not None)
+    if units is None:
+        axis.autoSIPrefixScale = 1.0  # disabling keeps the last prefix's scale
+    p.setLabel(side, text, units=units)
