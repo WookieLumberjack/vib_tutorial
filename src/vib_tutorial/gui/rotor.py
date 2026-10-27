@@ -84,6 +84,7 @@ DIRECTION_NAMES = ("x (horizontal probe)", "y (vertical probe)", "Orbit (major a
 PHASE, OMEGA, PUSH = 8, 9, 10
 STORE_DT = 2.5e-4  # s; samples kept for the plots are at least this far apart
 MIN_PEAK = 1e-9  # m; never magnify motion smaller than this
+RESCALE = 0.04  # an orbit's range follows its peak, but only once it has moved this share
 TAP_IMPULSE = 0.005  # N·s, downward on the disc
 ORBIT_REVS = 3  # revolutions in each orbit trail
 ORBIT_MAX_TIME = 1.0  # s, the longest orbit trail (at low speed)
@@ -315,6 +316,24 @@ ORBIT_TIP = (
 )
 
 
+class Dot(QtWidgets.QGraphicsEllipseItem):
+    """A marker `size` px across, moved by setData(x, y) to the last point given (hidden for none), as a
+    one-point ScatterPlotItem would be: that rebuilds its spot table on every setData (~0.2 ms), and the
+    rotor page moves a handful each frame. Add it to a plot with ignoreBounds=True."""
+
+    def __init__(self, size: float) -> None:
+        super().__init__(-0.5 * size, -0.5 * size, size, size)
+        self.setFlag(QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+        self.setZValue(10)  # over the trails
+
+    def setData(self, x, y) -> None:  # noqa: N802 (pyqtgraph's name)
+        if len(x):
+            self.setPos(float(x[-1]), float(y[-1]))
+            self.show()
+        else:
+            self.hide()
+
+
 class RotorView(pg.PlotWidget):
     """The rotor in 3D, orthographically projected; drag to turn it."""
 
@@ -343,7 +362,7 @@ class RotorView(pg.PlotWidget):
         self.shaft = pg.PlotCurveItem()
         self.disc = QtWidgets.QGraphicsPathItem()
         self.spoke = pg.PlotCurveItem()
-        self.heavy = pg.ScatterPlotItem(size=9)
+        self.heavy = Dot(9)
         self.weight_dots = pg.ScatterPlotItem(size=7, symbol="s")  # balance weights, on the disc or the shaft
         self.mark = pg.PlotCurveItem()  # the keyphasor mark: a tick across the disc's rim
         self.stiff_axis = pg.PlotCurveItem()  # an asymmetric shaft's stiff axis: a diameter across the disc
@@ -356,8 +375,9 @@ class RotorView(pg.PlotWidget):
         self.triad_labels = [pg.TextItem(t, anchor=(0.5, 0.5)) for t in ("x", "y", "z")]
         self.end_labels = [pg.TextItem(t, anchor=(0.5, 0.0)) for t in ("A", "B")]
         for item in (self.frame, self.axis, self.supports, self.stator_ring, *self.trails, self.shaft, self.disc,
-                     self.spoke, self.stiff_axis, self.crack_mark, self.heavy, self.weight_dots, self.mark, self.stations, self.triad, *self.triad_labels, *self.end_labels):
+                     self.spoke, self.stiff_axis, self.crack_mark, self.weight_dots, self.mark, self.stations, self.triad, *self.triad_labels, *self.end_labels):
             plot.addItem(item)
+        plot.addItem(self.heavy, ignoreBounds=True)
         self.scale_label = pg.TextItem(anchor=(1.0, 0.0))
         plot.addItem(self.scale_label)
         self.apply_theme()
@@ -654,9 +674,10 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
         self.setToolTip(ORBIT_TIP)
         self.plots: list[pg.PlotItem] = []
         self.trails: list[pg.PlotDataItem] = []
-        self.dots: list[pg.ScatterPlotItem] = []
+        self.dots: list[Dot] = []
         self.keys: list[pg.ScatterPlotItem] = []
         self.spans = [MIN_PEAK] * len(STATIONS)
+        self._shown_spans = [0.0] * len(STATIONS)  # the ranges set, which move only past RESCALE
         self.same_scale = False
         for i, name in enumerate(STATIONS):
             p = self.addPlot(row=0, col=i)
@@ -676,9 +697,9 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
                 p.addItem(line)
             self.trails.append(p.plot())
             self.keys.append(pg.ScatterPlotItem(size=6, symbol="o"))
-            self.dots.append(pg.ScatterPlotItem(size=8))
+            self.dots.append(Dot(8))
             p.addItem(self.keys[-1])
-            p.addItem(self.dots[-1])
+            p.addItem(self.dots[-1], ignoreBounds=True)
             self.plots.append(p)
             self.ci.layout.setColumnStretchFactor(i, 1)  # equal shares, whatever the width
         self.heavy = self.plots[1].plot()
@@ -751,7 +772,9 @@ class OrbitPlots(pg.GraphicsLayoutWidget):
                 self.dots[i].setData([], [])
             k = keys[i]
             self.keys[i].setData(k[:, 0], k[:, 1]) if k.size else self.keys[i].setData([], [])
-            p.setRange(xRange=(-span, span), yRange=(-span, span), padding=0)
+            if abs(span - self._shown_spans[i]) > RESCALE * span:  # a new range re-lays out the axes and repaints
+                self._shown_spans[i] = span
+                p.setRange(xRange=(-span, span), yRange=(-span, span), padding=0)
         if heavy_angle is None:
             self.heavy.setData([], [])
         else:
@@ -871,6 +894,10 @@ class CampbellPlot(pg.GraphicsLayoutWidget):
         p.addItem(self.speed_line)
         for item in (*self.points.values(), self.damped, self.sync, self.crit, self.uncrit, self.unstable):
             self.legend.addItem(item, item.name())
+        # The speed line moves every frame during a run-up, and repainted the thousands of dots under it;
+        # cached, they are drawn again only when the analysis or the plot's range changes.
+        for item in (*self.points.values(), self.damped):
+            item.setCacheMode(QtWidgets.QGraphicsItem.CacheMode.DeviceCoordinateCache)
         self.result: Campbell | None = None
         self._reference_shown = False
         self.apply_theme()
