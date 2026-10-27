@@ -27,6 +27,9 @@ def plot(left: str, left_units: str | None, bottom: str, bottom_units: str | Non
     p.showGrid(x=True, y=True, alpha=0.15)
     p.setLabel("left", left, units=left_units)
     p.setLabel("bottom", bottom, units=bottom_units)
+    for side, units in (("left", left_units), ("bottom", bottom_units)):
+        if units is None:  # a pure number: no "(x0.001)" prefix
+            p.getAxis(side).enableAutoSIPrefix(False)
     if log_x or log_y:
         p.setLogMode(x=log_x, y=log_y)
     plot_height(p, height)

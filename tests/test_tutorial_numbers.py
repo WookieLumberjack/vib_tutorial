@@ -406,3 +406,65 @@ def test_periodic_trials():
     assert series_error(osc, sq1, 3) == pytest.approx(0.057, abs=0.0005)
     assert series_error(osc, tri, 9) == pytest.approx(0.0010, abs=0.00005)
     assert series_error(osc, sq1, 9) == pytest.approx(0.0065, abs=0.00005)
+
+
+def test_energy_methods_trials():
+    from vib_tutorial.core.energy_methods import (
+        Basis,
+        Shape,
+        contaminated,
+        dunkerley,
+        dunkerley_terms,
+        exact,
+        holzer,
+        holzer_roots,
+        iterate,
+        rayleigh,
+        ritz_table,
+        trial_shape,
+    )
+    from vib_tutorial.gui.energy_methods import chain
+
+    def hz(w2):
+        return np.sqrt(w2) / (2 * np.pi)
+
+    s = chain()
+    f = exact(s)[0] / (2 * np.pi)
+    assert f == pytest.approx([1.105, 3.183, 4.877, 5.982], abs=0.0005)
+
+    def ray(shape, eps=0.0, passes=0, system=s):
+        return hz(rayleigh(system, iterate(system, contaminated(system, trial_shape(system, shape), eps), passes)))
+
+    assert ray(Shape.STATIC) == pytest.approx(1.112, abs=0.0005)
+    assert ray(Shape.STATIC) / f[0] - 1 == pytest.approx(0.0055, abs=0.00005)
+    assert ray(Shape.LINEAR) / f[0] - 1 == pytest.approx(0.051, abs=0.0005)
+    assert ray(Shape.LINEAR, passes=1) / f[0] - 1 == pytest.approx(0.00063, abs=0.000005)
+    assert ray(Shape.SINE) == pytest.approx(f[0], rel=1e-12)
+    assert ray(Shape.SINE, 0.1) / f[0] - 1 == pytest.approx(0.046, abs=0.0005)
+    assert ray(Shape.SINE, 0.2) / f[0] - 1 == pytest.approx(0.166, abs=0.0005)
+    assert ray(Shape.TIP) == pytest.approx(3.18, abs=0.005) and ray(Shape.TIP) / f[0] - 1 == pytest.approx(1.88, abs=0.005)
+    assert ray(Shape.TIP, passes=1) / f[0] - 1 == pytest.approx(0.051, abs=0.0005)
+    assert ray(Shape.TIP, passes=2) / f[0] - 1 == pytest.approx(0.00063, abs=0.000005)
+    assert (f[0] / f[1]) ** 2 == pytest.approx(0.12, abs=0.005)
+    assert hz(dunkerley_terms(s)) == pytest.approx([3.18, 2.25, 1.84, 1.59], abs=0.005)
+    assert hz(dunkerley(s)) == pytest.approx(1.007, abs=0.0005) and hz(dunkerley(s)) / f[0] - 1 == pytest.approx(
+        -0.089, abs=0.0005)
+    tip = chain(masses=(1.0, 1.0, 1.0, 5.0))
+    ft = exact(tip)[0] / (2 * np.pi)
+    assert hz(dunkerley_terms(tip))[-1] == pytest.approx(0.71, abs=0.005)
+    assert (hz(dunkerley(tip)), ft[0]) == pytest.approx((0.624, 0.653), abs=0.0005)
+    assert hz(dunkerley(tip)) / ft[0] - 1 == pytest.approx(-0.044, abs=0.0005)
+    assert ray(Shape.STATIC, system=tip) / ft[0] - 1 == pytest.approx(0.0025, abs=0.00005)
+    table = ritz_table(s, Basis.KRYLOV)
+    assert table[1, 0] == pytest.approx(f[0], abs=0.00005)
+    assert table[1, 1] == pytest.approx(3.30, abs=0.005) and table[1, 1] / f[1] - 1 == pytest.approx(0.036, abs=0.0005)
+    assert (table[2, 1], table[2, 2]) == pytest.approx((3.184, 5.02), abs=0.005)
+    stiff = chain(stiffness=(4000.0, 400.0, 400.0, 400.0))
+    fs = exact(stiff)[0] / (2 * np.pi)
+    powers = ritz_table(stiff, Basis.POWERS)
+    assert (powers[1, 0], fs[0]) == pytest.approx((1.63, 1.38), abs=0.005)
+    assert powers[1, 0] / fs[0] - 1 == pytest.approx(0.18, abs=0.005)
+    assert (powers[1, 1], fs[1]) == pytest.approx((6.04, 3.89), abs=0.005)
+    assert ritz_table(stiff, Basis.KRYLOV)[0, 0] / fs[0] - 1 < 0.008
+    assert holzer(s, 2 * np.pi * 1.0)[-1].spring == pytest.approx(61, abs=0.5)
+    assert holzer_roots(s, 7.0) == pytest.approx(f, abs=0.0005)

@@ -49,6 +49,8 @@ COURSE = (
     ("Foundations", (
         ("sim_page", "Simulation && modal analysis",
          "one mass, then a chain of them: modes, damping, energy, forcing, absorbers, friction"),
+        ("energy_page", "Energy methods",
+         "Rayleigh, Dunkerley, Rayleigh–Ritz and Holzer: frequencies from the energies, and how good they are"),
         ("frf_page", "FRF matrix", "every receptance H<sub>jk</sub>, and how the modes add up to it"),
         ("complex_page", "Complex modes", "when damping makes the modes complex, and what the usual approximation misses"),
         ("continuum_page", "Continuous systems",
@@ -96,6 +98,7 @@ PAGE_TITLES = {
     "damping_page": "Damping models page",
     "isolation_page": "Vibration isolation page",
     "sim_page": "Simulation page",
+    "energy_page": "Energy methods page",
     "frf_page": "FRF matrix page",
     "complex_page": "Complex modes page",
     "continuum_page": "Continuous systems page",

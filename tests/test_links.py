@@ -17,11 +17,13 @@ def notes() -> dict[str, str]:
         coupling_notes,
         damping_models,
         duffing,
+        energy_methods,
         frf_matrix,
         isolation,
         modal_test,
         model_updating,
         oma,
+        periodic,
         random_vibration,
         rotor_notes,
         sdof,
@@ -29,7 +31,6 @@ def notes() -> dict[str, str]:
         signals,
         torsional,
         transient,
-        periodic,
     )
 
     return {
@@ -52,6 +53,7 @@ def notes() -> dict[str, str]:
         "torsional_page": torsional.NOTES_HTML,
         "duffing_page": duffing.NOTES_HTML,
         "rotor_page": rotor_notes.THEORY_HTML,
+        "energy_page": energy_methods.NOTES_HTML,
         "periodic_page": periodic.NOTES_HTML,
     }
 
