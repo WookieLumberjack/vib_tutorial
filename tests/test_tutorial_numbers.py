@@ -343,9 +343,17 @@ def test_isolation_trials():
 
 
 def test_signals_trials():
-    from vib_tutorial.core.signals import Kind, Source, Window, mass_loaded, nearest_line_reading, sample
+    from vib_tutorial.core.signals import (
+        Kind,
+        Source,
+        Window,
+        mass_loaded,
+        nearest_line_reading,
+        sample,
+        usable_band,
+        window_props,
+    )
     from vib_tutorial.core.signals import spectrum as averaged
-    from vib_tutorial.core.signals import usable_band, window_props
 
     def reading(source, f, window, block=1024, averages=1, filtered=True):
         n = block + (averages - 1) * block // 2
@@ -381,7 +389,14 @@ def test_signals_trials():
 def test_periodic_trials():
     import math
 
-    from vib_tutorial.core.periodic import Forcing, Wave, periodic_steady, response_coefficients, series, series_error
+    from vib_tutorial.core.periodic import (
+        Forcing,
+        Wave,
+        periodic_steady,
+        response_coefficients,
+        series,
+        series_error,
+    )
     from vib_tutorial.core.sdof import Oscillator
 
     osc = Oscillator()
@@ -394,7 +409,7 @@ def test_periodic_trials():
     assert 4 / (3 * math.pi) == pytest.approx(0.42, abs=0.005) and 1 / (2 * osc.omega_n) == pytest.approx(0.025)
     X = np.abs(response_coefficients(osc, third, 3))
     assert (X[3], X[1]) == pytest.approx((0.0106, 0.0036), abs=5e-5)
-    swing = lambda fo: float(np.max(periodic_steady(osc, fo, t * fo.period)))  # noqa: E731
+    swing = lambda fo: float(np.max(periodic_steady(osc, fo, t * fo.period)))
     assert swing(third) == pytest.approx(0.0139, abs=5e-5)
     assert swing(Forcing(Wave.SQUARE, freq_hz=osc.natural_hz / 2)) == pytest.approx(0.0050, abs=5e-5)
     blows = periodic_steady(osc, Forcing(Wave.IMPULSES, 0.1), t)
@@ -473,7 +488,15 @@ def test_energy_methods_trials():
 def test_integration_trials():
     import math
 
-    from vib_tutorial.core.integration import Load, Model, Scheme, exact, simulate, spectral, stable_limit
+    from vib_tutorial.core.integration import (
+        Load,
+        Model,
+        Scheme,
+        exact,
+        simulate,
+        spectral,
+        stable_limit,
+    )
 
     def at(per_period, scheme, alpha=-0.1):
         return spectral(scheme, 2 * math.pi / per_period, 0.0, alpha)
@@ -609,7 +632,15 @@ def test_self_excited_trials():
 def test_pendulum_trials():
     import math
 
-    from vib_tutorial.core.pendulum import Kind, Pendulum, conjugate_pivot, duffing_period, period, rod_period, swing
+    from vib_tutorial.core.pendulum import (
+        Kind,
+        Pendulum,
+        conjugate_pivot,
+        duffing_period,
+        period,
+        rod_period,
+        swing,
+    )
 
     p = Pendulum()
     assert (p.natural_hz, p.period0) == pytest.approx((0.498, 2.006), abs=5e-4)
@@ -635,6 +666,6 @@ def test_pendulum_trials():
     assert 1 - period(inv, math.radians(60)) / inv.period0 == pytest.approx(0.10, abs=0.005)
     lean = Pendulum(Kind.INVERTED, spring=9.0, zeta=0.1)
     assert math.degrees(lean.leaning()) == pytest.approx(40.8, abs=0.05)
-    t, th, _ = swing(lean, math.radians(1.0), 70.0)
+    _, th, _ = swing(lean, math.radians(1.0), 70.0)
     assert math.degrees(th[-1]) == pytest.approx(40.8, abs=0.1)
     assert Pendulum(gravity=1.62).period0 == pytest.approx(4.94, abs=0.005)

@@ -35,7 +35,7 @@ def test_period_matches_the_stepped_swing(pendulum):
 def test_small_swings_are_linear():
     p = Pendulum(Kind.ROD, pivot=0.3)
     assert period(p, 1e-4) == pytest.approx(p.period0, rel=1e-8)
-    t, th, tl = swing(p, 1e-3, 3 * p.period0)
+    _, th, tl = swing(p, 1e-3, 3 * p.period0)
     assert np.max(np.abs(th - tl)) < 1e-8
 
 
