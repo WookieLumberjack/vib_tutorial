@@ -39,6 +39,7 @@ def notes() -> dict[str, str]:
         signals,
         torsional,
         transient,
+        variability,
     )
 
     return {
@@ -61,6 +62,7 @@ def notes() -> dict[str, str]:
         "torsional_page": torsional.NOTES_HTML,
         "duffing_page": duffing.NOTES_HTML,
         "rotor_page": rotor_notes.THEORY_HTML,
+        "variability_page": variability.NOTES_HTML,
         "quarter_car_page": quarter_car.NOTES_HTML,
         "seismic_page": seismic.NOTES_HTML,
         "beams_page": beams_plates.NOTES_HTML,

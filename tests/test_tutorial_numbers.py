@@ -806,3 +806,48 @@ def test_quarter_car_trials():
     for record, spectral in ((d.body, r.rms[Output.BODY]), (d.travel, r.rms[Output.TRAVEL]),
                              (d.tyre, r.rms[Output.TYRE])):
         assert np.std(record[skip:]) == pytest.approx(spectral, rel=0.02)
+
+
+def test_variability_trials():
+    from vib_tutorial.core.model import ChainSystem
+    from vib_tutorial.core.variability import (
+        Ring,
+        Scatter,
+        amplification,
+        amplification_curve,
+        monte_carlo,
+        participation,
+        ring_modes,
+        sensitivity_sigma,
+        tuned_band,
+        whitehead,
+    )
+
+    chain = ChainSystem.uniform(4)
+    f = np.linspace(0.1, 10.0, 200)
+    springs = monte_carlo(chain, Scatter(0.0, 0.05, 0.0), 200, f, 3, 3)
+    assert springs.nominal_freqs[0] == pytest.approx(1.105, abs=5e-4)
+    assert springs.freqs[:, 0].std() == pytest.approx(0.015, abs=5e-4)
+    assert np.mean(springs.freqs.std(axis=0) / springs.nominal_freqs) == pytest.approx(0.014, abs=5e-4)
+    assert sensitivity_sigma(chain, Scatter(0.0, 0.05, 0.0)) / springs.nominal_freqs == pytest.approx(
+        0.0144, abs=5e-5)
+    both = monte_carlo(chain, Scatter(0.05, 0.05, 0.0), 200, f, 3, 3)
+    assert both.freqs[:, 0].std() == pytest.approx(0.023, abs=5e-4)
+    assert np.mean(both.freqs.std(axis=0) / both.nominal_freqs) == pytest.approx(0.02, abs=1e-3)
+    dampers = monte_carlo(chain, Scatter(0.0, 0.0, 0.3), 200, f, 3, 3)
+    assert np.ptp(dampers.freqs, axis=0) == pytest.approx(0.0, abs=1e-12)
+
+    tuned = Ring()
+    assert tuned_band(tuned) == pytest.approx((15.9, 17.4), abs=0.05)
+    p = participation(ring_modes(tuned)[1])
+    assert (p.min(), p.max()) == pytest.approx((6.0, 12.0), abs=0.05)
+    weak = Ring(coupling=0.005, mistuning=0.01)
+    assert participation(ring_modes(weak)[1])[0] == pytest.approx(1.3, abs=0.05)
+    strong = participation(ring_modes(Ring(coupling=0.2, mistuning=0.01))[1])
+    assert (strong.min(), strong.max()) == pytest.approx((6.0, 12.0), abs=0.1)
+
+    forced = Ring(coupling=0.02, mistuning=0.01)
+    assert amplification(forced, 3) == pytest.approx(1.06, abs=0.005)
+    _, top = amplification_curve(forced, 3, np.array([0.01, 0.02, 0.1]), 12)
+    assert top == pytest.approx([1.34, 1.42, 1.28], abs=0.005)
+    assert whitehead(12) == pytest.approx(2.23, abs=0.005)

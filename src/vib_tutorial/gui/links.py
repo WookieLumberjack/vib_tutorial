@@ -82,6 +82,8 @@ COURSE = (
         ("test_page", "Virtual modal test", "measuring the FRF from force and response signals, and fitting modes"),
         ("oma_page", "Operational modal analysis", "the modes from the responses alone, the forces unknown"),
         ("updating_page", "Model updating", "comparing a model with a test, and correcting it"),
+        ("variability_page", "Variability && localization",
+         "scatter in the chain's properties by Monte Carlo, and modes localized in a mistuned ring of blades"),
     )),
     ("Beyond the chain", (
         ("torsional_page", "Torsional vibration", "a drive train of discs, shafts and gears, and its start-up"),
@@ -132,6 +134,7 @@ PAGE_TITLES = {
     "test_page": "Virtual modal test page",
     "oma_page": "Operational modal analysis page",
     "updating_page": "Model updating page",
+    "variability_page": "Variability & localization page",
     "torsional_page": "Torsional vibration page",
     "duffing_page": "Duffing & Mathieu page",
     "self_excited_page": "Self-excited vibration page",

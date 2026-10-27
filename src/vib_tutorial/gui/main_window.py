@@ -145,6 +145,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "quarter_car_page":
         from .quarter_car import QuarterCarPage
         return QuarterCarPage
+    if name == "variability_page":
+        from .variability import VariabilityPage
+        return VariabilityPage
     from .modal_test import ModalTestPage
     return ModalTestPage
 MODE_ANIMATION_HZ = 0.5  # visual rate for the animated mode-shape plot
@@ -570,6 +573,7 @@ class MainWindow(QtWidgets.QMainWindow):
     complex_page = property(lambda self: self._page("complex_page"))
     updating_page = property(lambda self: self._page("updating_page"))
     shock_page = property(lambda self: self._page("shock_page"))
+    variability_page = property(lambda self: self._page("variability_page"))
     quarter_car_page = property(lambda self: self._page("quarter_car_page"))
     seismic_page = property(lambda self: self._page("seismic_page"))
     beams_page = property(lambda self: self._page("beams_page"))

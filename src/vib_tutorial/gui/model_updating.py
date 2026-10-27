@@ -166,7 +166,7 @@ noise is spread over every sensor.</p>
 excited modes may be missed. The correlation can't be finer than that: with no error at all in the model, the
 MACs and frequency errors left are the test's.</p>
 
-<h3>Updating by sensitivities</h3>
+<h3><a name="sensitivities"></a>Updating by sensitivities</h3>
 <p>Updating changes the model's parameters p (here its masses, springs or dampers) until it matches the test.
 The residual r is test minus model: each pair's frequency, relatively, and if asked its shape at the sensors
 and its damping ratio. How the model's frequencies move with each parameter is its <b>sensitivity</b>; with
