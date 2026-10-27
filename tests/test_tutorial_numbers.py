@@ -468,3 +468,57 @@ def test_energy_methods_trials():
     assert ritz_table(stiff, Basis.KRYLOV)[0, 0] / fs[0] - 1 < 0.008
     assert holzer(s, 2 * np.pi * 1.0)[-1].spring == pytest.approx(61, abs=0.5)
     assert holzer_roots(s, 7.0) == pytest.approx(f, abs=0.0005)
+
+
+def test_integration_trials():
+    import math
+
+    from vib_tutorial.core.integration import Load, Model, Scheme, exact, simulate, spectral, stable_limit
+
+    def at(per_period, scheme, alpha=-0.1):
+        return spectral(scheme, 2 * math.pi / per_period, 0.0, alpha)
+
+    assert Model().frequencies_hz()[0] == pytest.approx(3.18, abs=0.005)
+    assert at(10, Scheme.CENTRAL).period_error == pytest.approx(-0.017, abs=0.0005)
+    assert at(10, Scheme.AVERAGE).period_error == pytest.approx(0.032, abs=0.0005)
+    assert at(10, Scheme.LINEAR).period_error == pytest.approx(0.016, abs=0.0005)
+    assert at(10, Scheme.RK4).period_error == pytest.approx(0.0011, abs=0.00005)
+    assert at(10, Scheme.RK4).damping == pytest.approx(0.00065, abs=0.000005)
+    assert 10 * at(10, Scheme.AVERAGE).period_error == pytest.approx(1 / 3, abs=0.02)
+    assert 2 * math.pi / 3.0 == pytest.approx(2.09, abs=0.005) and at(3.0, Scheme.CENTRAL).radius > 1
+    assert 2 * math.pi / 3.2 == pytest.approx(1.96, abs=0.005)
+    assert at(3.2, Scheme.CENTRAL).radius == pytest.approx(1.0)
+    assert at(3.2, Scheme.CENTRAL).period_error == pytest.approx(-0.29, abs=0.005)
+    assert at(3.0, Scheme.AVERAGE).period_error == pytest.approx(0.30, abs=0.005)
+    assert at(1.0, Scheme.AVERAGE).period_error + 1 == pytest.approx(2.5, abs=0.05)
+    assert at(1.0, Scheme.AVERAGE).radius == pytest.approx(1.0)
+    assert stable_limit(Scheme.LINEAR) == pytest.approx(2 * math.sqrt(3)) and 2 * math.sqrt(3) / (2 * math.pi) == (
+        pytest.approx(0.55, abs=0.005))
+    assert at(1.0, Scheme.LINEAR).radius > 1
+    rk = at(5, Scheme.RK4)
+    assert rk.period_error == pytest.approx(0.011, abs=0.0005) and 1 - rk.radius == pytest.approx(0.022, abs=0.0005)
+    assert rk.damping == pytest.approx(0.018, abs=0.0005) and rk.radius ** 50 == pytest.approx(0.33, abs=0.005)
+    assert at(5, Scheme.AVERAGE).period_error == pytest.approx(0.12, abs=0.005)
+    eu = at(50, Scheme.EULER).radius
+    assert eu - 1 == pytest.approx(0.008, abs=0.0005) and eu ** 50 - 1 == pytest.approx(0.48, abs=0.005)
+    assert eu ** 500 == pytest.approx(50, abs=1)
+    stiff = Model(stiff_hz=1000.0)
+    f = stiff.frequencies_hz()
+    assert f == pytest.approx([3.03, 1049], abs=0.5) and f[0] == pytest.approx(3.03, abs=0.005)
+    h = 1 / f[0] / 50
+    assert 2 * math.pi * f[1] * h == pytest.approx(43, abs=0.5) and 1 / (f[1] * h) == pytest.approx(1 / 7, abs=0.005)
+    for scheme in (Scheme.CENTRAL, Scheme.RK4):
+        x = simulate(scheme, stiff, Load(), h, 250)
+        assert np.isnan(x[: int(0.020 / h) + 1]).any()
+    assert np.all(np.isfinite(simulate(Scheme.AVERAGE, stiff, Load(), h, 250)))
+    assert spectral(Scheme.HHT, 2 * math.pi * f[1] * h, 0.0, -0.3).radius == pytest.approx(0.57, abs=0.005)
+    assert spectral(Scheme.HHT, 2 * math.pi * f[0] * h, 0.0, -0.3).damping == pytest.approx(0.00004, abs=0.000005)
+    m, load = Model(), Load(0.0, 1.0, 2.0)
+    h = 1 / m.frequencies_hz()[0] / 10
+    t = np.arange(101) * h
+    ref = exact(m, load, t)
+    errs = {s: np.max(np.abs(simulate(s, m, load, h, 100) - ref)) / np.max(np.abs(ref))
+            for s in (Scheme.FOH, Scheme.CENTRAL, Scheme.AVERAGE, Scheme.RK4)}
+    assert errs[Scheme.FOH] == pytest.approx(0.013, abs=0.0005)
+    assert [errs[s] for s in (Scheme.RK4, Scheme.CENTRAL, Scheme.AVERAGE)] == pytest.approx([0.03, 0.41, 0.61],
+                                                                                           abs=0.005)

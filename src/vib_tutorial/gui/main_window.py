@@ -121,6 +121,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "energy_page":
         from .energy_methods import EnergyMethodsPage
         return EnergyMethodsPage
+    if name == "integration_page":
+        from .integration import IntegrationPage
+        return IntegrationPage
     from .modal_test import ModalTestPage
     return ModalTestPage
 MODE_ANIMATION_HZ = 0.5  # visual rate for the animated mode-shape plot
@@ -546,6 +549,7 @@ class MainWindow(QtWidgets.QMainWindow):
     complex_page = property(lambda self: self._page("complex_page"))
     updating_page = property(lambda self: self._page("updating_page"))
     shock_page = property(lambda self: self._page("shock_page"))
+    integration_page = property(lambda self: self._page("integration_page"))
     energy_page = property(lambda self: self._page("energy_page"))
     periodic_page = property(lambda self: self._page("periodic_page"))
 

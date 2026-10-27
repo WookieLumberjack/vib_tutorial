@@ -55,6 +55,8 @@ COURSE = (
         ("complex_page", "Complex modes", "when damping makes the modes complex, and what the usual approximation misses"),
         ("continuum_page", "Continuous systems",
          "a string, a bar or a beam cut into a chain: which of its modes to trust"),
+        ("integration_page", "Numerical integration",
+         "central difference, Newmark, HHT-α and Runge–Kutta against the exact update: stability, period error, numerical damping"),
     )),
     ("Responses", (
         ("random_page", "Random vibration", "a random force or base: the response's spectrum, RMS and peaks"),
@@ -102,6 +104,7 @@ PAGE_TITLES = {
     "frf_page": "FRF matrix page",
     "complex_page": "Complex modes page",
     "continuum_page": "Continuous systems page",
+    "integration_page": "Numerical integration page",
     "random_page": "Random vibration page",
     "shock_page": "Shock spectrum page",
     "coupling_page": "Modal coupling page",

@@ -19,6 +19,7 @@ def notes() -> dict[str, str]:
         duffing,
         energy_methods,
         frf_matrix,
+        integration,
         isolation,
         modal_test,
         model_updating,
@@ -53,6 +54,7 @@ def notes() -> dict[str, str]:
         "torsional_page": torsional.NOTES_HTML,
         "duffing_page": duffing.NOTES_HTML,
         "rotor_page": rotor_notes.THEORY_HTML,
+        "integration_page": integration.NOTES_HTML,
         "energy_page": energy_methods.NOTES_HTML,
         "periodic_page": periodic.NOTES_HTML,
     }

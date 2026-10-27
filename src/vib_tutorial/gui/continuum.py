@@ -140,7 +140,7 @@ the same speed (the medium is <b>non-dispersive</b>), so a pulse keeps its shape
 one end and free at the other, an odd number of quarters: 1 : 3 : 5. A beam's ends give a transcendental
 equation, cos βL cosh βL = −1 for a cantilever, so its overtones are no multiples at all (1 : 6.27 : 17.5).</p>
 
-<h3>The chain's waves</h3>
+<h3><a name="dispersion"></a>The chain's waves</h3>
 <p>On an endless chain of masses m = μh joined by springs k = T/h, try the same wave sampled at the nodes,
 x<sub>j</sub> = e<sup>i(κjh − ωt)</sup>. One mass's equation gives</p>
 <p align="center">ω = (2c/h) sin(κh/2).</p>
