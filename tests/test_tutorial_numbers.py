@@ -851,3 +851,92 @@ def test_variability_trials():
     _, top = amplification_curve(forced, 3, np.array([0.01, 0.02, 0.1]), 12)
     assert top == pytest.approx([1.34, 1.42, 1.28], abs=0.005)
     assert whitehead(12) == pytest.approx(2.23, abs=0.005)
+
+
+def test_diagnostics_trials():
+    from dataclasses import replace
+
+    from vib_tutorial.core.diagnostics import (
+        BearingFault,
+        GearFault,
+        Machine,
+        RunUp,
+        amplitude_spectrum,
+        band_pass,
+        cepstrum,
+        envelope_spectrum,
+        kurtosis,
+        line_amplitude,
+        order_map,
+        order_track,
+        run_up,
+        sidebands,
+    )
+
+    band = (2550.0, 3450.0)
+    m = Machine(speed=1797 / 60)
+    assert m.mesh_hz == pytest.approx(808.65)
+    healthy = record_of(m)
+    assert kurtosis(healthy.x) == pytest.approx(2.40, abs=0.005)
+    _, c = cepstrum(healthy.x, healthy.fs)
+    at = round(healthy.fs / m.speed)
+    assert c[at - 2:at + 3].max() == pytest.approx(0.027, abs=5e-4)
+
+    ecc = replace(m, gear=GearFault.ECCENTRIC)
+    s = amplitude_spectrum(record_of(ecc).x, healthy.fs)
+    _, a = sidebands(s.freqs, s.amplitude, m.mesh_hz, m.speed, 1)
+    assert (a[2], a[0], a[1]) == pytest.approx((0.23, 0.08, 1.0), abs=0.005)
+
+    crack = record_of(replace(m, gear=GearFault.CRACK))
+    s = amplitude_spectrum(crack.x, crack.fs)
+    _, a = sidebands(s.freqs, s.amplitude, m.mesh_hz, m.speed, 6)
+    assert np.delete(a, 6) == pytest.approx(0.042, abs=0.006)
+    _q, c = cepstrum(crack.x, crack.fs)
+    assert 1e3 / m.speed == pytest.approx(33.4, abs=0.05)
+    assert c[at - 2:at + 3].max() == pytest.approx(0.12, abs=0.005)
+
+    noisy = replace(m, noise=1.0)
+    f = noisy.bearing.frequencies(m.speed)
+    assert (f["BPFO"] / m.speed, f["BPFO"], f["BPFI"], 2 * f["BSF"], f["FTF"]) == pytest.approx(
+        (3.585, 107.4, 162.2, 141.2, 11.9), abs=0.05)
+    outer = replace(noisy, bearing_fault=BearingFault.OUTER)
+    r = record_of(outer)
+    s = amplitude_spectrum(r.x, r.fs)
+    d = outer.defect_hz()
+    assert line_amplitude(s.freqs, s.amplitude, d) == pytest.approx(0.049, abs=5e-4)
+    assert np.median(s.amplitude[(s.freqs > 50) & (s.freqs < 700)]) == pytest.approx(0.043, abs=5e-4)
+    assert (kurtosis(r.x), kurtosis(band_pass(r.x, r.fs, band))) == pytest.approx((3.1, 5.6), abs=0.05)
+    e = envelope_spectrum(r.x, r.fs, band)
+    assert [line_amplitude(e.freqs, e.amplitude, h * d) for h in (1, 2, 3)] == pytest.approx(
+        [0.45, 0.34, 0.23], abs=0.005)
+    assert np.median(e.amplitude[(e.freqs > 20) & (e.freqs < 500)]) < 0.045
+    for fault, (centre, lower, upper) in ((BearingFault.INNER, (0.31, 0.16, 0.13)),
+                                          (BearingFault.BALL, (0.29, 0.14, 0.135))):
+        mm = replace(noisy, bearing_fault=fault)
+        r = record_of(mm)
+        e = envelope_spectrum(r.x, r.fs, band)
+        d, fm = mm.defect_hz(), mm.modulation_hz()
+        assert [line_amplitude(e.freqs, e.amplitude, v) for v in (d, d - fm, d + fm)] == pytest.approx(
+            [centre, lower, upper], abs=0.005)
+
+    slow, fast = RunUp(), RunUp(duration=4.0)
+    fine = np.linspace(slow.start, slow.end, 2000)
+    steady = slow.steady(1, fine)
+    assert (steady.max(), 60 * fine[steady.argmax()]) == pytest.approx((211, 2406), abs=1)
+    om = order_map(run_up(slow))
+    one, two = order_track(om, 1), order_track(om, 2)
+    assert (one.max(), 60 * om.speed[one.argmax()]) == pytest.approx((209, 2445), abs=1)
+    assert 60 * om.speed[two.argmax()] == pytest.approx(1220, abs=5)
+    assert (two.max(), slow.steady(2, fine).max()) == pytest.approx((28.5, 33.3), abs=0.05)
+    om = order_map(run_up(fast))
+    one = order_track(om, 1)
+    assert (one.max(), 60 * om.speed[one.argmax()]) == pytest.approx((179, 2531), abs=1)
+    assert 1 - one.max() / steady.max() == pytest.approx(0.15, abs=0.005)
+    sweep = 2 * slow.zeta * slow.mode / ((fast.end - fast.start) / fast.duration)
+    assert (sweep, sweep * slow.mode) == pytest.approx((0.16, 6.4), abs=0.005)
+
+
+def record_of(machine):
+    from vib_tutorial.core.diagnostics import record
+
+    return record(machine)

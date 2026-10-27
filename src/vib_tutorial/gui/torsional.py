@@ -132,7 +132,7 @@ both ends, so its first mode is the whole train turning (0 Hz), and the rest twi
 <p>Two discs on one shaft have one mode, f = √(k (J₁ + J₂) / J₁J₂) / 2π, with a node (a point that doesn't
 swing) nearer the heavier disc.</p>
 
-<h3>Gears</h3>
+<h3><a name="gears"></a>Gears</h3>
 <p>A gear pair turns the far shaft at z<sub>in</sub>/z<sub>out</sub> times the near one's speed. Each gear keeps
 its own inertia, and the teeth are a spring k<sub>m</sub> along the line of action: its stretch is
 r<sub>in</sub>θ<sub>in</sub> − r<sub>out</sub>θ<sub>out</sub>, with r the base radii. Referred to the motor's
@@ -145,7 +145,7 @@ move, but that mode is gone (the <i>Mode shapes</i> tab compares). It matters be
 no gear is perfect, and the <b>transmission error</b>, the far gear's lag behind where perfect teeth would put
 it, repeats at every tooth, at z × the shaft's speed (the tooth-pass frequency).</p>
 
-<h3>The interference diagram</h3>
+<h3><a name="interference"></a>The interference diagram</h3>
 <p>Nothing in the train depends on its speed, so its natural frequencies are flat lines. What changes with
 speed is the excitation: an engine fires at fixed orders of its speed (a four-stroke engine's at half-orders,
 a six-cylinder's majors at 3× and 6×), a reciprocating compressor at 1× and 2× its own, a misaligned coupling

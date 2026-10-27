@@ -93,6 +93,8 @@ COURSE = (
         ("active_control_page", "Active control",
          "velocity feedback, collocation, spillover and actuator lag, against a tuned mass damper"),
         ("rotor_page", "Jeffcott rotor", "a spinning shaft: critical speeds, balancing, bearings, stability, rub"),
+        ("diagnostics_page", "Machinery diagnostics",
+         "order tracking under a run-up, gear-mesh sidebands, bearing defects by the envelope, and the cepstrum"),
     )),
 )
 
@@ -140,6 +142,7 @@ PAGE_TITLES = {
     "self_excited_page": "Self-excited vibration page",
     "active_control_page": "Active control page",
     "rotor_page": "Jeffcott rotor page",
+    "diagnostics_page": "Machinery diagnostics page",
 }
 
 
