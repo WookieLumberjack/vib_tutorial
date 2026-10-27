@@ -38,24 +38,33 @@ uv run pytest         # run the tests
 |---|---|
 | **Left** | System parameters (m, k, c for each element and friction F<sub>f</sub> for each mass, 1 to 8 masses), the excitation (a force on a mass, or motion of the ground), and simulation controls (run/pause, speed, plot window, auto-scale) |
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
-| **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Background* (theory notes written for students) |
+| **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Theory* (notes written for students, with a map of the course) |
+| **Top** | The pages, in five groups, and the *Theory*, *About* and *Theme* controls |
 
-Eight more pages work on the same chain, in order from analysis to simplification to test:
-**FRF matrix** shows every term of the receptance matrix and how the modes build it up,
-**Modal coupling** joins two halves of the chain one mode each, to show when their modes split,
-**Substructuring (CMS)** reduces the chain by component mode synthesis (Craig–Bampton, Rubin or
-MacNeal), **Virtual modal test** measures the FRF from simulated force and response signals,
-as in a lab, **Operational modal analysis** finds the modes from the responses to unmeasured
-ambient forces alone, **Random vibration** shakes it with a random force or base and
-predicts the response's spectrum and RMS, **Complex modes** shows when its damping makes the
-modes complex and what the usual approximation then misses, and **Model updating** correlates a
-model with errors in it against a modal test of the chain, and updates it to find them, and **Shock
-spectrum** puts a pulse on a bank of single oscillators. The **Jeffcott rotor** page leaves the chain for a
-spinning shaft: a disc on a flexible shaft in flexible bearings, and the **Duffing & Mathieu**
-page for a single mass on a nonlinear spring, driven through its jump or pumped into parametric
-resonance. The **Torsional vibration** page twists a drive train of discs, shafts and gear meshes,
-and starts it with a motor, and the **Continuous systems** page refines the chain into a string, a
-bar or a beam to show which of its modes to trust (all below).
+The pages are grouped in the order they are meant to be read, each using only ideas from the pages
+before it (Ctrl+1 to Ctrl+5 jump to a group):
+
+1. **Foundations.** *Simulation & modal analysis* (the chain above), **FRF matrix** (every term of the
+   receptance matrix and how the modes build it up), **Complex modes** (when the damping makes the modes
+   complex, and what the usual approximation then misses) and **Continuous systems** (the chain refined
+   into a string, a bar or a beam, to show which of its modes to trust).
+2. **Responses.** **Random vibration** (a random force or base: the response's spectrum, RMS and peaks)
+   and **Shock spectrum** (a pulse on a bank of single oscillators, and on the chain).
+3. **Building models.** **Modal coupling** (two halves of the chain joined one mode each, to show when
+   their modes split) and **Substructuring (CMS)** (the chain reduced by component mode synthesis:
+   Craig–Bampton, Rubin or MacNeal).
+4. **Testing.** **Virtual modal test** (the FRF measured from simulated force and response signals, as in
+   a lab), **Operational modal analysis** (the modes from the responses to unmeasured ambient forces
+   alone) and **Model updating** (a model with errors in it correlated against a modal test of the chain,
+   and updated to find them).
+5. **Beyond the chain.** **Torsional vibration** (a drive train of discs, shafts and gear meshes, and its
+   start-up), **Duffing & Mathieu** (a single mass on a nonlinear spring, driven through its jump or pumped
+   into parametric resonance) and the **Jeffcott rotor** (a disc on a flexible shaft in flexible bearings).
+
+Every page has a *Theory* tab (the *Theory* button or F1 opens it) that starts with what to read first,
+links to the sections it builds on, and ends with *Things to try* and *What to take away*. Most pages'
+*Things to try* are one click: pick one from the box at the top left and the page sets itself up. All of
+them are described below.
 
 ### Themes
 
@@ -171,7 +180,7 @@ chain without its last mass*).
   mode, with a damper on the roof sized from mode 1's *modal mass* there
   (1/φ<sub>roof</sub>², φ mass-normalized).
 
-Edit the absorber's k and c to see what mistuning does. The *Background* tab derives the
+Edit the absorber's k and c to see what mistuning does. The *Theory* tab derives the
 antiresonance, the fixed points and Den Hartog's tuning.
 
 ![Tuned mass damper: driven at the old resonance, the primary m1 moves under a third as much as the absorber; its FRF has two low peaks where it had one tall one (dashed)](docs/images/tuned_mass_damper.png)
@@ -389,7 +398,7 @@ Everything on the page follows the selector:
 - **Theory**: what a basis is (with a 2-mass worked example) and why Craig–Bampton chooses
   its shapes, original vs substructured formulation side by side, Hurty vs Craig–Bampton,
   Guyan reduction as the zero-mode case, why free-interface modes need residual flexibility,
-  MacNeal vs Rubin, the three methods side by side, back expansion (data recovery), a "Try it"
+  MacNeal vs Rubin, the three methods side by side, back expansion (data recovery), one-click "Things to try"
   walkthrough, and a notation
   table.
 - **Presets**: *Guyan (0 modes)* (*Fewest modes* for the free-interface methods) and *All
@@ -1184,7 +1193,7 @@ the string carries 0.67, shedding ripples behind.
 
 ## The math, briefly
 
-The *Background* tab in the app explains this in more depth; this is the outline.
+The *Theory* tab in the app explains this in more depth; this is the outline.
 
 **Model.** Newton's second law for each mass gives
 

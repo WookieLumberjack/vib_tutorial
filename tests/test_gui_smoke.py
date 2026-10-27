@@ -2686,8 +2686,8 @@ def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path)
         inputs = [r["detail"] for r in rows if r["kind"] == "input"]
         assert inputs[0].startswith("1 m [kg]: ") and inputs[1:] == ["tab: Beyond the chain", "tab: Jeffcott rotor",
                                                                  "Gravity: on"]
-        assert rows[-1]["kind"] == "view" and rows[-1]["detail"].startswith(
-            "Beyond the chain > Jeffcott rotor > [Custom] > ")
+        views = [r for r in rows if r["kind"] == "view"]  # a frame can land after the last view on a slow box
+        assert views[-1]["detail"].startswith("Beyond the chain > Jeffcott rotor > [Custom] > ")
         # A combo alone in its group is named by its tooltip, not by a label outside the group;
         # scrolling a panel isn't an input.
         assert frame_stats.describe_input(page.supports, "click") == ("What holds the journals",

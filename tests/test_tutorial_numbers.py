@@ -233,7 +233,7 @@ def test_frf_and_coupling_trials():
     from vib_tutorial.gui.coupling_notes import TRIALS as COUPLING
 
     s = ChainSystem.uniform(4)
-    M, _, K = s.matrices()
+    _, _, K = s.matrices()
     phi = np.array([m.shape_mass_normalized for m in modal_analysis(s).modes]).T
     w2 = np.array([m.omega_n**2 for m in modal_analysis(s).modes])
     share = phi[0] ** 2 / w2 / np.linalg.inv(K)[0, 0]  # m1's static compliance, mode by mode
