@@ -44,6 +44,7 @@ from ..core.shock import (
 )
 from .axes import log_axes
 from .layouts import ColumnScroll, FlowLayout, group, plot_height
+from .links import before, takeaways
 from .panels import spin
 from .style import MAX_DOF, colors
 from .theming import add_legend, mute
@@ -160,6 +161,7 @@ TRIALS = (
 )
 
 NOTES_HTML = """
+<!--BEFORE-->
 <h3>The shock response spectrum</h3>
 <p>A shock is a short, strong acceleration of a structure's base: a drop, a collision, a stage separation.
 Its time history alone says little about what it does. What matters is what it does to the things mounted on
@@ -168,8 +170,7 @@ spring and damper, natural frequency f, damping ζ. The <b>shock response spectr
 absolute acceleration of such an oscillator on that base, against f, all at one Q = 1/2ζ (10 by custom).
 A component whose natural frequency is f sees that peak; its spring carries that peak times its mass.</p>
 <p>In the coordinate z relative to the base, z'' + 2ζω z' + ω² z = −a(t), and the oscillator's absolute
-acceleration is −2ζω z' − ω² z. Each is stepped here by the same exact update as the chain (the input linear
-between samples), its peaks refined between samples.</p>
+acceleration is −2ζω z' − ω² z.</p>
 
 <h3>Three regions</h3>
 <ul>
@@ -194,7 +195,7 @@ is nearly its positive one, which is why tests use it.</p>
 steady sine, whose resonant response is Q times larger. The residual decays with ζ, but its first peak, which
 the spectrum counts, hardly does.</p>
 
-<h3>The chain's peak from the spectrum</h3>
+<h3><a name="chain"></a>The chain's peak from the spectrum</h3>
 <p>The SRS was meant for more than single oscillators. On the shaken base each of the chain's modes is an
 oscillator at its own frequency and damping, driven by Γ<sub>r</sub> = φ<sub>r</sub>ᵀM1 times the base's
 acceleration, so the chain's absolute acceleration at mass j is Σ φ<sub>jr</sub>Γ<sub>r</sub> times each
@@ -230,7 +231,26 @@ pyrotechnic shock is a burst of high-frequency ringing with almost no net veloci
 falls steeply below its frequencies. An accelerometer's <b>zero shift</b>, a small offset after the shock,
 integrates into a large false Δv and lifts the low end: a measured spectrum is checked for it by its slope
 there.</p>
+
+<h3><a name="computing"></a>How this page computes it</h3>
+<p>Each oscillator is stepped by the same exact update as the chain (the input linear between samples), and
+its peaks are refined between samples. The residual's largest value lies within one damped period of the
+pulse's end, so that is all the free decay that is followed.</p>
+<!--TAKEAWAYS-->
 """
+NOTES_HTML = NOTES_HTML.replace("<!--BEFORE-->", before(
+    ("sim_page", "sweeps-and-ground-motion", "Sweeps and ground motion"),
+    ("random_page", "miles", "Miles' equation"),
+)).replace("<!--TAKEAWAYS-->", takeaways(
+    "The SRS is the peak response of a bank of single oscillators on the shaken base, at one Q: it rates a "
+    "shock by what it does, not by its time history.",
+    "Stiff oscillators follow the pulse, soft ones feel only its velocity change, and those near f T ≈ 1 "
+    "amplify it, barely more with less damping.",
+    "On a chain each mode is one of the bank's oscillators, scaled by φΓ; the modes' peaks come nearly "
+    "together, so ABS or NRL, not SRSS, bound the response.",
+    "Tests specify an SRS; a time history that meets it is synthesized from damped sines or wavelets.",
+))
+
 
 
 def _plot(left: str, left_units: str | None, bottom: str, bottom_units: str | None, log: bool = False

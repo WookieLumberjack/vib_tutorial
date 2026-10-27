@@ -49,6 +49,7 @@ from ..core.torsional_startup import (
 from . import frame_stats, settle_plots
 from .axes import log_axes
 from .layouts import ColumnScroll, FlowLayout, group, plot_height
+from .links import before, takeaways
 from .panels import spin
 from .style import colors
 from .theming import add_legend, mute
@@ -59,7 +60,7 @@ SHAPES_SHOWN = 6  # modes drawn on the shape plot
 MARGIN = 10.0  # % either side of the running speed a critical should stay out of (API 617's 10 %)
 FRAME_MS = 16
 FRAME_BUDGET = 0.008  # s of computing per frame: past it the start-up plays slower than asked
-PLAYBACK = (1.0, 0.5, 0.25, 0.1, 0.05)  # × real time
+PLAYBACK = (0.05, 0.1, 0.25, 0.5, 1.0)  # × real time
 MOTORS = (None, MotorKind.INDUCTION, MotorKind.SYNCHRONOUS)  # the motor combo's items
 
 TIPS = {
@@ -119,6 +120,7 @@ RESPONSE_TIP = (
     "speed. Each peaks where its order meets a mode the link twists in.</p>")
 
 NOTES_HTML = """
+<!--BEFORE-->
 <h3>Torsional vibration</h3>
 <p>A drive train turns as a whole, but its discs also twist back and forth against each other on the shafts
 between them. Each disc i has an angle θ<sub>i</sub> on top of the steady turning, and</p>
@@ -179,9 +181,24 @@ so it sweeps down through every mode below 2f on the way up: each is a resonance
 2 s f = f<sub>n</sub>. Near synchronism the field is switched on and pulls the rotor into step. A fast start
 passes the resonances before they build up; a slow one, against a heavy load, lets them grow: that is why such
 drives get a torsional analysis of the start, and couplings sized for its peaks.</p>
-<p>A link's peak is set against what it carries running steadily: the load and the dampers beyond it, by power
-over its speed.</p>
+<p>The tab compares each link's peak torque with the torque it carries in steady running: the power drawn by
+the load and the dampers beyond it, divided by the link's speed.</p>
+<!--TAKEAWAYS-->
 """
+NOTES_HTML = NOTES_HTML.replace("<!--BEFORE-->", before(
+    ("sim_page", "equations-of-motion", "Equations of motion"),
+    ("sim_page", "undamped-normal-modes-real", "Undamped normal modes"),
+    ("frf_page", "receptance-matrix", "The FRF (receptance) matrix"),
+)).replace("<!--TAKEAWAYS-->", takeaways(
+    "A drive train in torsion is the chain again, with inertias and shaft stiffnesses, free at both ends so "
+    "its first mode is rigid turning.",
+    "Gears refer to one shaft by the square of the speed ratio; a stiff mesh has its own mode, excited at "
+    "tooth-pass.",
+    "Criticals are where an excitation order's line crosses a natural frequency; keep them out of a band "
+    "round the running speed.",
+    "A start-up sweeps the excitations through the modes below running speed: a slow start lets them build up.",
+))
+
 
 
 def fmt_torque(t: float) -> str:
@@ -384,8 +401,11 @@ class TorsionalPage(QtWidgets.QWidget):
 
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
-        lv.addWidget(self.preset)
-        lv.addWidget(self.preset_note)
+        presets = QtWidgets.QGroupBox("Things to try")
+        preset_layout = QtWidgets.QVBoxLayout(presets)
+        preset_layout.addWidget(self.preset)
+        preset_layout.addWidget(self.preset_note)
+        lv.addWidget(presets)
         for box in (train_box, excite, speeds, start_box):
             lv.addWidget(box)
         lv.addStretch(1)

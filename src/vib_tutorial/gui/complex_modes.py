@@ -208,7 +208,7 @@ go overdamped, or a damper lock a joint. The <i>FRF</i> tab compares the recepta
 releases the chain in an undamped mode's shape: exactly that mode, if the damping is proportional; otherwise
 the damping hands some of the motion to the other modes, close ones most.</p>
 
-<h3>Sweeping a damper</h3>
+<h3><a name="sweep"></a>Sweeping a damper</h3>
 <p>The <i>Sweep</i> tab follows each mode's exact pole as one damper goes from almost nothing to very stiff,
 the rest of the chain as it is: the <b>root locus</b>. With a light damper every mode's damping grows in
 proportion to it, as the approximation says. But a damper only works while its ends move apart: as it

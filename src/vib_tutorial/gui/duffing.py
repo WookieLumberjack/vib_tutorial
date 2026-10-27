@@ -35,6 +35,7 @@ from ..core.duffing import (
 )
 from . import frame_stats, settle_plots
 from .layouts import ColumnScroll, FlowLayout, plot_height
+from .links import before, takeaways
 from .panels import spin
 from .style import colors
 from .theming import add_legend, mute
@@ -98,6 +99,7 @@ PHASE_TIP = (
     "frequency is held: a sweep's would be a different section each cycle.</p>")
 
 NOTES_HTML = """
+<!--BEFORE-->
 <h3>The Duffing oscillator</h3>
 <p>A mass on a spring whose force is not proportional to its stretch:</p>
 <p align="center">m x″ + c x′ + k x + k<sub>3</sub> x³ = F cos φ, &nbsp; φ′ = Ω</p>
@@ -106,7 +108,7 @@ swing is a fast one. With k<sub>3</sub> &lt; 0 it <i>softens</i>: its force peak
 back to zero at the escape amplitude √(k / −k<sub>3</sub>), the potential's hilltop. Past that the spring pushes outward, and a mass carried over the potential's hilltop runs
 away.</p>
 
-<h3>Harmonic balance</h3>
+<h3><a name="harmonic-balance"></a>Harmonic balance</h3>
 <p>Guess that the mass moves at the drive's frequency, x = a cos(φ − θ), and keep only the first harmonic of
 each force. Since cos³ = ¾ cos + ¼ cos 3φ, the spring acts on the first harmonic as one of stiffness</p>
 <p align="center">κ(a) = k + ¾ k<sub>3</sub> a²,</p>
@@ -162,14 +164,29 @@ rest and rest stays stable down to the tongue's upper edge, where it turns unsta
 branch; sweep up and the swing grows near the lower edge (a little past it: at the edge itself the growth is
 nil) and rides the branch far past the upper edge, where rest is stable too. Hysteresis, as in the forced jump.</p>
 
-<h3>The simulation</h3>
+<h3><a name="computing"></a>How this page computes it</h3>
 <p>The linear part, m x″ + c x′ + k x, is stepped exactly, as the chain's simulator steps it (a first-order hold
 on the input). The cubic's and the pump's forces go in as an input that changes linearly over each step, its end
 value found by Newton from where the step ends. The step resolves the drive and the spring's stiffness at the largest
 amplitude in reach. The measured amplitudes are the displacement's first and half harmonics over each drive cycle and the one
 before (over a pair, a swing at Ω/2 doesn't leak into the first harmonic). The chart's multipliers come from a
 Runge–Kutta step of every cell at once.</p>
+<!--TAKEAWAYS-->
 """
+NOTES_HTML = NOTES_HTML.replace("<!--BEFORE-->", before(
+    ("sim_page", "start-with-one-mass", "Start with one mass"),
+    ("sim_page", "friction", "Friction"),
+)).replace("<!--TAKEAWAYS-->", takeaways(
+    "A nonlinear spring's resonance leans along its backbone, the frequency of a free swing at each "
+    "amplitude: right for a hardening spring, left for a softening one.",
+    "Where the curve folds over there are three steady states, the middle one unstable: sweeps jump at the "
+    "folds, and the two directions disagree.",
+    "Harmonic balance (one harmonic) predicts the curve well, but misses super- and subharmonic resonances "
+    "and chaos.",
+    "A spring pumped near twice its natural frequency is unstable at rest; its swing grows at half the pump's"
+    " frequency until the nonlinearity detunes it.",
+))
+
 
 
 def fmt_length(a: float) -> str:
@@ -344,8 +361,11 @@ class DuffingPage(QtWidgets.QWidget):
 
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
-        lv.addWidget(self.preset)
-        lv.addWidget(self.preset_note)
+        presets = QtWidgets.QGroupBox("Things to try")
+        preset_layout = QtWidgets.QVBoxLayout(presets)
+        preset_layout.addWidget(self.preset)
+        preset_layout.addWidget(self.preset_note)
+        lv.addWidget(presets)
         for box in (osc, drive, branch, play):
             lv.addWidget(box)
         lv.addStretch(1)
