@@ -924,6 +924,43 @@ def shock_synthesis():
     save(w, "shock_synthesis")
 
 
+def lesson(attr, trial, name, tab=None):
+    """A One mass or Signals page with one of its trials loaded (its readouts printed for the caption)."""
+    w = window()
+    page = getattr(w, attr)
+    w.pages.setCurrentWidget(page)
+    page.load_trial(trial)
+    if tab is not None:
+        page.tabs.setCurrentIndex(tab)
+    settle()
+    from PySide6 import QtWidgets
+
+    for label in page.findChildren(QtWidgets.QLabel):
+        if label.isVisible() and len(label.text()) > 40:
+            print(" ", label.text())
+    save(w, name)
+
+
+def single_oscillator():
+    lesson("sdof_page", 3, "single_oscillator")  # resonance from rest
+
+
+def transient_response():
+    lesson("transient_page", 3, "transient_response")  # the convolution
+
+
+def damping_models():
+    lesson("damping_page", 0, "damping_models")  # four loops, one energy
+
+
+def vibration_isolation():
+    lesson("isolation_page", 3, "vibration_isolation")  # running up through resonance
+
+
+def signals_spectra():
+    lesson("signals_page", 2, "signals_spectra")  # a Hann window finds the small tone
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
@@ -932,7 +969,8 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          jeffcott_bow, jeffcott_balancing, jeffcott_two_plane, jeffcott_stability, jeffcott_oil_whirl, jeffcott_magnetic, jeffcott_rub, jeffcott_newkirk, jeffcott_overhung, jeffcott_waterfall,
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked,
          duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup, continuum_string, continuum_beam,
-         continuum_waves]
+         continuum_waves, single_oscillator, transient_response, damping_models, vibration_isolation,
+         signals_spectra]
 
 
 def main(names: list[str]) -> None:

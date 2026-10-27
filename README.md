@@ -39,25 +39,31 @@ uv run pytest         # run the tests
 | **Left** | System parameters (m, k, c for each element and friction F<sub>f</sub> for each mass, 1 to 8 masses), the excitation (a force on a mass, or motion of the ground), and simulation controls (run/pause, speed, plot window, auto-scale) |
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
 | **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Theory* (notes written for students, with a map of the course) |
-| **Top** | The pages, in five groups, and the *Theory*, *About* and *Theme* controls |
+| **Top** | The pages, in six groups, and the *Theory*, *About* and *Theme* controls |
 
 The pages are grouped in the order they are meant to be read, each using only ideas from the pages
-before it (Ctrl+1 to Ctrl+5 jump to a group):
+before it (Ctrl+1 to Ctrl+6 jump to a group; the window opens on the Simulation page):
 
-1. **Foundations.** *Simulation & modal analysis* (the chain above), **FRF matrix** (every term of the
+1. **One mass.** **Single oscillator** (free decay, damping, resonance, half-power bandwidth, beats and
+   poles, on one mass), **Transient response** (an impulse, a step or a pulse: the impulse response,
+   Duhamel's integral, and how long a pulse has to be), **Damping models** (viscous, hysteretic, friction
+   and viscoelastic damping matched to one another: their loops, losses and decays) and **Vibration
+   isolation** (a machine on mounts: transmissibility, static deflection, damping, two stages, start-up).
+2. **Foundations.** *Simulation & modal analysis* (the chain above), **FRF matrix** (every term of the
    receptance matrix and how the modes build it up), **Complex modes** (when the damping makes the modes
    complex, and what the usual approximation then misses) and **Continuous systems** (the chain refined
    into a string, a bar or a beam, to show which of its modes to trust).
-2. **Responses.** **Random vibration** (a random force or base: the response's spectrum, RMS and peaks)
+3. **Responses.** **Random vibration** (a random force or base: the response's spectrum, RMS and peaks)
    and **Shock spectrum** (a pulse on a bank of single oscillators, and on the chain).
-3. **Building models.** **Modal coupling** (two halves of the chain joined one mode each, to show when
+4. **Building models.** **Modal coupling** (two halves of the chain joined one mode each, to show when
    their modes split) and **Substructuring (CMS)** (the chain reduced by component mode synthesis:
    Craig–Bampton, Rubin or MacNeal).
-4. **Testing.** **Virtual modal test** (the FRF measured from simulated force and response signals, as in
+5. **Testing.** **Signals & spectra** (sampling, aliasing, leakage, windows,
+   averaging, and the transducers that make the signals), **Virtual modal test** (the FRF measured from simulated force and response signals, as in
    a lab), **Operational modal analysis** (the modes from the responses to unmeasured ambient forces
    alone) and **Model updating** (a model with errors in it correlated against a modal test of the chain,
    and updated to find them).
-5. **Beyond the chain.** **Torsional vibration** (a drive train of discs, shafts and gear meshes, and its
+6. **Beyond the chain.** **Torsional vibration** (a drive train of discs, shafts and gear meshes, and its
    start-up), **Duffing & Mathieu** (a single mass on a nonlinear spring, driven through its jump or pumped
    into parametric resonance) and the **Jeffcott rotor** (a disc on a flexible shaft in flexible bearings).
 
@@ -75,6 +81,54 @@ the masses, modes and substructures, chosen so every curve, label and table entr
 legible on its background. The choice is remembered.
 
 ![Dark theme: a harmonic force tuned to mode 2, plotted in modal coordinates, with non-proportional damping](docs/images/dark_theme.png)
+
+## The One mass pages
+
+The first group works on a single mass on a spring and a damper, each page with its own small model,
+worked out in closed form or by the same exact first-order-hold step as the chain, as soon as a control
+changes.
+
+### Single oscillator
+
+m ẍ + c ẋ + k x = f, from every side. The free vibration from any start, with its envelope, its peaks
+and the log decrement measured from them (or ζ = 0.1, 1 and 2 side by side); a harmonic force or a
+rotating unbalance switched on from rest, beside its steady state; and four views of the receptance:
+amplification and lag with the half-power band marked, the Nyquist circle, the phase plane, and the
+poles in the s-plane, where a click puts them and the page works out k and c. Nine trials include
+critical damping, beats, the undamped resonance's straight-line growth and the unbalance's 180° turn.
+
+![Single oscillator page, resonance from rest: 1 N at f<sub>n</sub> = 3.18 Hz on m = 1 kg, k = 400 N/m, ζ = 0.05; the free decay's peaks give δ = 0.3146 (each 1.37 times the next), the forced swing grows over a few time constants to the steady 25 mm, ten times the static 2.5 mm, lagging 90°; the half-power points are 3.012 and 3.331 Hz](docs/images/single_oscillator.png)
+
+### Transient response
+
+An impulse, a step, a ramp, a rectangular or a half-sine pulse on the oscillator. The response is the
+convolution of the force with the impulse response h(t), and the page draws the integral itself at any
+instant (the force, h flipped and slid, and their product, whose area is the response there). Its tabs
+set h(t) beside its Fourier transform, the receptance; measure a step's overshoot and settling time; and
+plot each pulse's peak response against its length over the natural period, the shock spectrum's
+single-oscillator form.
+
+![Transient response page, a 0.2 s rectangular pulse of 1 N: at t = 0.3 s the area under F(τ) h(t − τ) is −2.58 mm, the exact response there; the peak, 4.64 mm, is 1.85 times static at T/T<sub>n</sub> = 0.637, on the pulse spectrum's rectangle curve](docs/images/transient_response.png)
+
+### Damping models
+
+Viscous, hysteretic (structural), Coulomb friction and viscoelastic (Zener) damping, each matched to the
+same oscillator so it loses the same energy per cycle at f<sub>n</sub>. The hysteresis loops (damping
+force alone, or with the spring as a test machine draws them), the energy per cycle, storage stiffness
+and loss factor against frequency, the forced response (friction's by its describing function, which
+can't bound a resonance) and the free decays (friction's a straight line that stops off centre).
+
+![Damping models page: the four models matched to ζ = 0.05 at f<sub>n</sub> = 3.18 Hz; cycled through ±10 mm there each loop encloses 12.6 mJ, three ellipses and friction's ±0.31 N rectangle; the Zener element relaxes from 444 to 364 N/m with its loss peak of 0.1 at f<sub>n</sub>](docs/images/damping_models.png)
+
+### Vibration isolation
+
+A machine with a rotating unbalance on mounts sized by their static deflection (f<sub>n</sub> =
+15.76/√δ<sub>mm</sub> Hz). The transmissibility against frequency over f<sub>n</sub> (crossing 1 at √2
+whatever the damping), the force on the floor against speed, a run-up through the mounts' resonance
+stepped exactly, and a design chart of the sag each isolation needs. Mounts can be a spring and damper, a
+relaxation mount (the damper on a spring) or two stages, and an inertia block can be added.
+
+![Vibration isolation page: a 100 kg machine with a 0.01 kg·m unbalance on mounts that sag 5 mm (f<sub>n</sub> = 7.05 Hz, 423 rpm), run up to 1500 rpm in 2 s; through resonance the floor force peaks at 111 N, and running, 22.6 N of the unbalance's 247 N reaches the floor, 90.8 % isolation](docs/images/vibration_isolation.png)
 
 ## What you can do
 
@@ -440,6 +494,18 @@ model's $x_b(t)$, so it keeps every interior mode and its only error is the erro
 ![Back expansion: driven at mode 4 with 2 modes kept per substructure, the coupled recovery of the force in k2 is off by nearly 40%; the enhanced recovery brings it to about 12%](docs/images/substructuring_recovery.png)
 
 ![Compare methods: the same cut reduced three ways; Craig–Bampton and Rubin converge to the exact mode 3, MacNeal does not](docs/images/substructuring_compare.png)
+
+### Signals & spectra
+
+Before the measuring pages, the signal processing they use. An analog signal (two tones, a chirp or a
+struck mode, plus noise) is sampled, with or without an anti-alias filter, cut into blocks, windowed and
+averaged, as a peak amplitude spectrum or a PSD, with each tone's true amplitude marked where it should
+show. Its tabs compare the windows' spectra (rectangular, Hann, flat top: main lobe, sidelobes,
+scalloping loss, noise bandwidth), draw a spectrogram, and show the transducers as base-excited
+oscillators: an accelerometer below its resonance, a seismometer above it, and a sensor's mass lowering
+the mode it measures.
+
+![Signals & spectra page: a tone of 1 m/s² at 50.5 Hz, half-way between lines, and one of 0.001 m/s² at 70 Hz, through a Hann window: the big tone reads 0.849 (−1.42 dB, the scalloping loss) and its skirts fall fast enough that the small one reads 0.0010; beside it the three windows' spectra about a line](docs/images/signals_spectra.png)
 
 ### Virtual modal test
 
