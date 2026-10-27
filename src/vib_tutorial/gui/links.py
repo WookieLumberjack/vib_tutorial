@@ -34,6 +34,16 @@ def takeaways(*points: str) -> str:
 # about), ...)). Each page uses only ideas from the pages before it. The main window's tabs and the
 # Simulation page's course map are both made from this.
 COURSE = (
+    ("One mass", (
+        ("sdof_page", "Single oscillator",
+         "one mass on a spring and a damper: free decay, damping, resonance, half-power, beats, poles"),
+        ("transient_page", "Transient response",
+         "an impulse, a step or a pulse: the impulse response, convolution, and how long a pulse has to be"),
+        ("damping_page", "Damping models",
+         "viscous, hysteretic, friction and viscoelastic damping: their loops, losses and decays"),
+        ("isolation_page", "Vibration isolation",
+         "a machine on mounts: transmissibility, static deflection, damping, two stages, start-up"),
+    )),
     ("Foundations", (
         ("sim_page", "Simulation && modal analysis",
          "one mass, then a chain of them: modes, damping, energy, forcing, absorbers, friction"),
@@ -51,6 +61,8 @@ COURSE = (
         ("cms_page", "Substructuring (CMS)", "a chain reduced to a few modes per part, and back"),
     )),
     ("Testing", (
+        ("signals_page", "Signals && spectra",
+         "sampling, aliasing, leakage, windows and averaging, and the transducers that make the signals"),
         ("test_page", "Virtual modal test", "measuring the FRF from force and response signals, and fitting modes"),
         ("oma_page", "Operational modal analysis", "the modes from the responses alone, the forces unknown"),
         ("updating_page", "Model updating", "comparing a model with a test, and correcting it"),
@@ -76,6 +88,10 @@ def course_map() -> str:
 
 # Titles as the links name them (the tab titles without Qt's && escape).
 PAGE_TITLES = {
+    "sdof_page": "Single oscillator page",
+    "transient_page": "Transient response page",
+    "damping_page": "Damping models page",
+    "isolation_page": "Vibration isolation page",
     "sim_page": "Simulation page",
     "frf_page": "FRF matrix page",
     "complex_page": "Complex modes page",
@@ -84,6 +100,7 @@ PAGE_TITLES = {
     "shock_page": "Shock spectrum page",
     "coupling_page": "Modal coupling page",
     "cms_page": "Substructuring page",
+    "signals_page": "Signals & spectra page",
     "test_page": "Virtual modal test page",
     "oma_page": "Operational modal analysis page",
     "updating_page": "Model updating page",

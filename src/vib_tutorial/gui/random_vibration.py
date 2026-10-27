@@ -118,7 +118,7 @@ TRIALS = (
 
 NOTES_HTML = """
 <!--BEFORE-->
-<h3>Random vibration</h3>
+<h3><a name="psd"></a>Random vibration</h3>
 <p>Wind, a road, a rocket's engines: many inputs are random, never the same twice, but their statistics are
 steady. A stationary random signal is described by its <b>power spectral density</b> (PSD) G(f), its mean square
 per hertz: the RMS² is the area under it. A flat PSD across a band is band-limited white noise. A random
@@ -165,7 +165,7 @@ than ν₀T, and Davenport overestimates the largest peak, most over short times
 through the band's width δ = √(1 − m₁²/m₀m₂). The <i>Statistics</i> tab compares both with the record's own
 largest values, stretch by stretch.</p>
 
-<h3>Estimating it from a record</h3>
+<h3><a name="welch"></a>Estimating it from a record</h3>
 <p><b>Welch's method</b> cuts the record into blocks, windows each (Hann), Fourier transforms them and averages
 |Y|². Two errors trade against each other:</p>
 <ul>
