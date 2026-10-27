@@ -80,6 +80,8 @@ COURSE = (
         ("duffing_page", "Duffing && Mathieu", "a nonlinear spring: jumps, chaos, and parametric resonance"),
         ("self_excited_page", "Self-excited vibration",
          "negative damping and limit cycles: van der Pol, galloping, vortex-induced vibration and flutter"),
+        ("active_control_page", "Active control",
+         "velocity feedback, collocation, spillover and actuator lag, against a tuned mass damper"),
         ("rotor_page", "Jeffcott rotor", "a spinning shaft: critical speeds, balancing, bearings, stability, rub"),
     )),
 )
@@ -121,6 +123,7 @@ PAGE_TITLES = {
     "torsional_page": "Torsional vibration page",
     "duffing_page": "Duffing & Mathieu page",
     "self_excited_page": "Self-excited vibration page",
+    "active_control_page": "Active control page",
     "rotor_page": "Jeffcott rotor page",
 }
 

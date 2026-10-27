@@ -10,6 +10,7 @@ from vib_tutorial.gui.links import COURSE, PAGE_TITLES
 
 def notes() -> dict[str, str]:
     from vib_tutorial.gui import (
+        active_control,
         background,
         cms_notes,
         complex_modes,
@@ -56,6 +57,7 @@ def notes() -> dict[str, str]:
         "torsional_page": torsional.NOTES_HTML,
         "duffing_page": duffing.NOTES_HTML,
         "rotor_page": rotor_notes.THEORY_HTML,
+        "active_control_page": active_control.NOTES_HTML,
         "self_excited_page": self_excited.NOTES_HTML,
         "fatigue_page": fatigue.NOTES_HTML,
         "integration_page": integration.NOTES_HTML,
