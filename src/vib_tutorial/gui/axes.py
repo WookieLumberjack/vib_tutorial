@@ -78,3 +78,4 @@ class LogAxis(pg.AxisItem):
 def log_axes() -> dict[str, LogAxis]:
     """Left and bottom axes for a plot with a log axis: pass as axisItems to addPlot or PlotWidget."""
     return {"left": LogAxis("left"), "bottom": LogAxis("bottom")}
+

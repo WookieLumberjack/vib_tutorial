@@ -950,7 +950,7 @@ def test_modal_test_page(app):
     while not p.acq.done:
         p._measure_some()
     assert p.progress.text().startswith("12 / 12") and not p.window.isEnabled()
-    assert "Points in it" in p.check.toHtml()
+    assert "Points\nin it" in p.check.toPlainText()  # the header, over two lines
     # Samples as dots, the fitted sine drawn smoothly through them.
     sig = p.signals
     assert sig.f_curve.opts["symbol"] == "o" and sig.f_curve.opts["pen"] is None
@@ -3791,4 +3791,32 @@ def test_single_undamped_mass_draws_its_frf(app):
     w.tabs.setCurrentWidget(w.frf_tab)
     app.processEvents()
     assert len(w.modal.modes) == 1
+    w.close()
+
+
+def test_grid_is_opaque_and_under_the_data(app):
+    """A grid's translucent lines cost ~35 ms a frame on a plot that rescales; gui.plot_patches draws them
+    opaque in the colour they'd have had over the background, and behind the ViewBox."""
+    import pyqtgraph as pg
+
+    from vib_tutorial import gui
+    from vib_tutorial.gui import plot_patches
+    from vib_tutorial.gui.style import colors
+
+    gui.make_app("Light")
+    w = pg.PlotWidget()
+    w.resize(400, 300)
+    w.plot([0, 1, 2], [0, 1, 0])
+    w.showGrid(x=True, y=True, alpha=0.15)
+    w.show()
+    app.processEvents()
+    axis = w.getAxis("left")
+    assert axis.zValue() == plot_patches.GRID_Z < w.getViewBox().zValue()
+    from PySide6 import QtGui
+
+    _, ticks, _ = axis.generateDrawSpecs(QtGui.QPainter())
+    assert ticks and all(pen.color().alpha() == 255 for pen, _, _ in ticks)
+    assert {pen.color().name() for pen, _, _ in ticks} != {colors.foreground}  # blended toward the background
+    w.showGrid(x=False, y=False)
+    assert axis.zValue() == plot_patches.AXIS_Z
     w.close()

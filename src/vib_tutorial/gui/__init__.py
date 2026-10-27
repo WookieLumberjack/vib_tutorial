@@ -17,9 +17,10 @@ def make_app(theme: str | None = None):
     import pyqtgraph as pg
     from PySide6 import QtWidgets
 
-    from . import theming
+    from . import plot_patches, theming
 
     pg.setConfigOptions(antialias=True)
+    plot_patches.install()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Vibration Tutorial")
     theming.apply(theme or theming.saved_name())

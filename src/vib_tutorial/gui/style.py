@@ -39,7 +39,8 @@ class Theme:
     cell_border: str = "#cccccc"
     diagonal_tint: str = "#f1f3f8"
     band_shade: tuple[int, int, int, int] = (0, 0, 0, 18)  # above the anti-alias passband
-    # --- data. One color per mass, used consistently in the animation, time plots and FRF.
+    # --- data. One color per mass, used consistently in the animation, time plots and FRF. The first
+    # four stay apart for red-green colour-blind eyes too (no green beside a red).
     mass: tuple[str, ...] = ()
     # Mode shapes use a separate palette so they are not confused with masses.
     mode: tuple[str, ...] = ()
@@ -77,8 +78,8 @@ LIGHT = Theme(
     name="Light",
     dark=False,
     fair="#a35f00",
-    mass=("#1f77b4", "#ec7000", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#d35db1", "#0e9fae"),
-    mode=("#264653", "#2a9d8f", "#b08900", "#e76f51", "#6a4c93", "#1982c4", "#62a01a", "#ff595e"),
+    mass=("#1f6fd1", "#d46a00", "#0f9a6e", "#a7479d", "#d62728", "#8c564b", "#6b7a00", "#0e9fae"),
+    mode=("#3f51b5", "#2a9d8f", "#b08900", "#e76f51", "#6a4c93", "#1982c4", "#62a01a", "#ff595e"),
     sub=("#3a6ea5", "#d17a00", "#4f8f3a", "#8a4fa8"),
     roots=("#888888", "#b0b0b0", "#606060"),
     energy={"kinetic": "#1982c4", "potential": "#2a9d8f", "stored": "#7b889e", "added": "#6a4c93",
@@ -109,7 +110,7 @@ DARK = Theme(
     cell_border="#43474e",
     diagonal_tint="#262b33",
     band_shade=(255, 255, 255, 16),
-    mass=("#4c9fea", "#ff9a3c", "#4cc46a", "#ff6161", "#b996e6", "#d0a07c", "#f27fca", "#35d0e0"),
+    mass=("#4c9fea", "#ff9a3c", "#2fbf8a", "#f589c8", "#ff6161", "#d0a07c", "#b996e6", "#35d0e0"),
     mode=("#b9a4ff", "#3ccab8", "#e3b82c", "#f58f70", "#e07be0", "#4fb3f5", "#9ed84a", "#ff7c82"),
     sub=("#6fa6e6", "#f2a33a", "#7ccb66", "#c792ea"),
     roots=("#9a9a9a", "#6f6f6f", "#c4c4c4"),
@@ -153,7 +154,7 @@ SOLARIZED = Theme(
     cell_border="#d8d0bb",
     diagonal_tint="#f3ead2",
     band_shade=(88, 110, 117, 22),
-    mass=("#268bd2", "#cb4b16", "#6c7d00", "#dc322f", "#6c71c4", "#9a7400", "#d33682", "#1f8a82"),
+    mass=("#268bd2", "#cb4b16", "#1a8a5a", "#a0307e", "#dc322f", "#9a7400", "#6c71c4", "#1f8a82"),
     mode=("#6c71c4", "#1f8a82", "#8a6d00", "#bd3613", "#a0307e", "#1d6fa5", "#5f7000", "#b0185a"),
     sub=("#1d6fa5", "#cb4b16", "#5f7000", "#6c71c4"),
     roots=("#93a1a1", "#b4bcb6", "#657b83"),
@@ -196,7 +197,7 @@ NORD = Theme(
     cell_border="#4c566a",
     diagonal_tint="#353c4a",
     band_shade=(236, 239, 244, 18),
-    mass=("#81a1c1", "#d08770", "#a3be8c", "#e06c75", "#b48ead", "#ebcb8b", "#e39ec1", "#88c0d0"),
+    mass=("#81a1c1", "#d08770", "#859900", "#ebcb8b", "#e06c75", "#a3be8c", "#b48ead", "#88c0d0"),
     mode=("#b48ead", "#8fbcbb", "#dfb65f", "#e5957a", "#8f9cff", "#6fc3e6", "#b4d38f", "#f08c93"),
     sub=("#81a1c1", "#d08770", "#a3be8c", "#b48ead"),
     roots=("#8e99ae", "#6b758a", "#b8c0cf"),

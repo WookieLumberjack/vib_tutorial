@@ -24,7 +24,8 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["XDG_CONFIG_HOME"] = tempfile.mkdtemp(prefix="vib-screenshots-")  # before Qt reads settings
 
-from PySide6 import QtCore
+from PIL import Image
+from PySide6 import QtCore, QtGui
 from PySide6.QtTest import QTest
 
 from vib_tutorial import gui
@@ -33,6 +34,7 @@ from vib_tutorial.core.rotor import RotorSystem
 from vib_tutorial.gui.main_window import MainWindow
 
 OUT = Path(__file__).resolve().parent.parent / "docs" / "images"
+COLOURS = 256  # a grab of the flat UI keeps its look in a palette this size, at about a third of the bytes
 app = gui.make_app("Light")
 
 
@@ -66,9 +68,17 @@ def settle(ms=300):
     QTest.qWait(ms)
 
 
+def write_png(grab: QtGui.QPixmap, path: Path) -> None:
+    """Save a grab as a COLOURS-colour PNG (the 55 images were 16 MB in full colour, 5.6 MB this way)."""
+    image = grab.toImage().convertToFormat(QtGui.QImage.Format.Format_RGB888)
+    rgb = Image.frombuffer("RGB", (image.width(), image.height()), bytes(image.constBits()), "raw", "RGB",
+                           image.bytesPerLine(), 1)
+    rgb.quantize(COLOURS).save(path, optimize=True)
+
+
 def save(w, name):
     settle()
-    w.grab().save(str(OUT / f"{name}.png"))
+    write_png(w.grab(), OUT / f"{name}.png")
     print("saved", name)
     done(w)
 
@@ -257,7 +267,7 @@ def frequency_response():
     w.tabs.setCurrentWidget(w.frf_tab)
     tune(w.force_panel, 2)
     settle(500)
-    w.frf_plot.grab().save(str(OUT / "frequency_response.png"))
+    write_png(w.frf_plot.grab(), OUT / "frequency_response.png")
     print("saved frequency_response")
     done(w)
 
