@@ -45,27 +45,36 @@ The pages are grouped in the order they are meant to be read, each using only id
 before it (Ctrl+1 to Ctrl+6 jump to a group; the window opens on the Simulation page):
 
 1. **One mass.** **Single oscillator** (free decay, damping, resonance, half-power bandwidth, beats and
-   poles, on one mass), **Transient response** (an impulse, a step or a pulse: the impulse response,
-   Duhamel's integral, and how long a pulse has to be), **Damping models** (viscous, hysteretic, friction
+   poles, on one mass), **Pendulums** (gravity as the spring, and large swings), **Transient response**
+   (an impulse, a step or a pulse: the impulse response, Duhamel's integral, and how long a pulse has to
+   be), **Periodic forcing** (a repeating force as a Fourier series), **Damping models** (viscous, hysteretic, friction
    and viscoelastic damping matched to one another: their loops, losses and decays) and **Vibration
    isolation** (a machine on mounts: transmissibility, static deflection, damping, two stages, start-up).
-2. **Foundations.** *Simulation & modal analysis* (the chain above), **FRF matrix** (every term of the
-   receptance matrix and how the modes build it up), **Complex modes** (when the damping makes the modes
-   complex, and what the usual approximation then misses) and **Continuous systems** (the chain refined
-   into a string, a bar or a beam, to show which of its modes to trust).
-3. **Responses.** **Random vibration** (a random force or base: the response's spectrum, RMS and peaks)
-   and **Shock spectrum** (a pulse on a bank of single oscillators, and on the chain).
+2. **Foundations.** *Simulation & modal analysis* (the chain above), **Energy methods** (Rayleigh,
+   Dunkerley, Rayleigh–Ritz and Holzer), **FRF matrix** (every term of the receptance matrix and how the
+   modes build it up), **Complex modes** (when the damping makes the modes complex, and what the usual
+   approximation then misses), **Continuous systems** (the chain refined into a string, a bar or a beam,
+   to show which of its modes to trust), **Beams & plates** (thick beams and plates) and **Numerical
+   integration** (what the usual time-stepping schemes do to a vibration).
+3. **Responses.** **Random vibration** (a random force or base: the response's spectrum, RMS and peaks),
+   **Fatigue** (rainflow, Miner and the spectral estimates), **Quarter-car** (a suspension on a rough
+   road), **Shock spectrum** (a pulse on a bank of single oscillators, and on the chain) and **Seismic
+   response** (the chain as a building under a design spectrum).
 4. **Building models.** **Modal coupling** (two halves of the chain joined one mode each, to show when
    their modes split) and **Substructuring (CMS)** (the chain reduced by component mode synthesis:
    Craig–Bampton, Rubin or MacNeal).
 5. **Testing.** **Signals & spectra** (sampling, aliasing, leakage, windows,
    averaging, and the transducers that make the signals), **Virtual modal test** (the FRF measured from simulated force and response signals, as in
    a lab), **Operational modal analysis** (the modes from the responses to unmeasured ambient forces
-   alone) and **Model updating** (a model with errors in it correlated against a modal test of the chain,
-   and updated to find them).
+   alone), **Model updating** (a model with errors in it correlated against a modal test of the chain,
+   and updated to find them) and **Variability & localization** (scatter in the chain by Monte Carlo,
+   and a mistuned ring of blades).
 6. **Beyond the chain.** **Torsional vibration** (a drive train of discs, shafts and gear meshes, and its
    start-up), **Duffing & Mathieu** (a single mass on a nonlinear spring, driven through its jump or pumped
-   into parametric resonance) and the **Jeffcott rotor** (a disc on a flexible shaft in flexible bearings).
+   into parametric resonance), **Self-excited vibration** (van der Pol, galloping, vortex shedding and
+   flutter), **Active control** (feedback on the chain against a tuned mass damper), the **Jeffcott rotor**
+   (a disc on a flexible shaft in flexible bearings) and **Machinery diagnostics** (orders, sidebands,
+   envelopes and the cepstrum).
 
 Every page has a *Theory* tab (the *Theory* button or F1 opens it) that starts with what to read first,
 links to the sections it builds on, and ends with *Things to try* and *What to take away*. Most pages'
@@ -99,6 +108,17 @@ critical damping, beats, the undamped resonance's straight-line growth and the u
 
 ![Single oscillator page, resonance from rest: 1 N at f<sub>n</sub> = 3.18 Hz on m = 1 kg, k = 400 N/m, ζ = 0.05; the free decay's peaks give δ = 0.3146 (each 1.37 times the next), the forced swing grows over a few time constants to the steady 25 mm, ten times the static 2.5 mm, lagging 90°; the half-power points are 3.012 and 3.331 Hz](docs/images/single_oscillator.png)
 
+### Pendulums
+
+Gravity as the spring. A simple pendulum, a rod swinging about any pivot (with its centre of percussion
+and the pivot that swings fastest), a disc on a torsion wire, and an inverted pendulum held up by a
+spring, each linearized into the single oscillator's formula with J for m and the moment's stiffness for
+k. Kept whole, sin θ softens the hanging pendulum: the exact period by quadrature beside Duffing's
+estimate, the phase plane's orbits out to the separatrix, and an inverted pendulum that leans over and
+buckles once gravity's negative stiffness beats the spring.
+
+![Pendulums page, large swings: a 1 m pendulum (T₀ = 2.006 s) let go from 90° swings with a period of 2.368 s, 18 % longer (Duffing's estimate +20.2 %), and the linearized swing drifts ahead of it](docs/images/pendulums.png)
+
 ### Transient response
 
 An impulse, a step, a ramp, a rectangular or a half-sine pulse on the oscillator. The response is the
@@ -109,6 +129,15 @@ plot each pulse's peak response against its length over the natural period, the 
 single-oscillator form.
 
 ![Transient response page, a 0.2 s rectangular pulse of 1 N: at t = 0.3 s the area under F(τ) h(t − τ) is −2.58 mm, the exact response there; the peak, 4.64 mm, is 1.85 times static at T/T<sub>n</sub> = 0.637, on the pulse spectrum's rectangle curve](docs/images/transient_response.png)
+
+### Periodic forcing
+
+A force that repeats (a square, sawtooth or triangle wave, a rectified sine, a pulse or impulse train) as
+its Fourier series, each harmonic through H(kω₀), against the exact steady state (one period stepped
+from the state that repeats). The harmonics' bars, the Gibbs overshoot, how fast smooth and sharp waves
+converge, and resonance through a harmonic: a slow drive whose third harmonic sits on f<sub>n</sub>.
+
+![Periodic forcing page: a square wave at f<sub>n</sub>/3 = 1.06 Hz on the 3.18 Hz oscillator; its third harmonic swings the mass 10.6 mm, 89.7 % of the response's power, three times the fundamental's 3.58 mm, and seven harmonics come within 0.67 % of the exact steady state](docs/images/periodic_forcing.png)
 
 ### Damping models
 
@@ -656,6 +685,24 @@ says from its spectrum. Over a minute Davenport expects its largest peak at 3.11
 mode 1, a narrow band whose peaks come in clumps, and Vanmarcke's 2.84σ is closer to the record's
 2.79σ.
 
+### Fatigue
+
+A random stress of one or two resonant peaks: a record synthesized from its PSD and counted by rainflow,
+Basquin's S–N curve and Miner's sum, against the spectral estimates from its moments, the narrow-band
+(Rayleigh) formula and Dirlik's. Damage grows as the b-th power of the stress, and a short record's
+estimate scatters.
+
+![Fatigue page: a stress of two modes (σ = 22.4 MPa, α₂ = 0.46); over 600 s rainflow counts 9057 cycles and a life of 8.29 days, the narrow-band formula 5.09 days (1.63 times the damage) and Dirlik 9.02 days](docs/images/fatigue.png)
+
+### Quarter-car
+
+A suspension on an ISO 8608 road: the road's PSD in space becomes a PSD in time at the car's speed, and
+the body's acceleration (comfort), the tyre's dynamic load (grip) and the suspension's travel follow as
+|H|² G<sub>z</sub>. The conflict diagram over springs and dampers, each output against the damper, and a
+drive over a synthesized road stepped exactly, as the check.
+
+![Quarter-car page: a quarter of a family car at 72 km/h on a class C road; body bounce at 1.24 Hz and wheel hop at 11.8 Hz, 1.48 m/s² RMS at the body, 10.7 mm of travel, the tyre's load swinging 24 % of its static 3.33 kN; on the trade-off, comfort is best at 819 N·s/m and grip at 2394](docs/images/quarter_car.png)
+
 ### Complex modes
 
 The **Complex modes** page looks at what the damping does to the chain's modes. With proportional
@@ -745,6 +792,16 @@ error passed into the model. Update the masses as well and the fit gets better w
 every factor comes out 2 to 4 % high, because a model that is uniformly stiffer and heavier has exactly the
 same modes.
 
+### Variability & localization
+
+Scatter in what is built. The chain with every mass, spring and damper scattered (lognormal) by Monte
+Carlo: the frequencies' histograms against the first-order estimate from each mode's energies, and the
+band the receptance falls in. Then a bladed disc, a ring of identical blades weakly coupled: tuned, its
+modes are waves round the ring; mistuned by about the coupling, they localize on a few blades, and an
+engine-order force drives the worst blade harder than any tuned one, up to Whitehead's bound.
+
+![Variability & localization page, a mistuned bladed disc: twelve blades coupled by 2 % springs, driven at engine order 3; this 1 % pattern's worst blade peaks 1.06 times the tuned ring, and over 12 patterns per level the worst reaches 1.42 at 2 % mistuning, under Whitehead's bound of 2.23](docs/images/variability.png)
+
 ### Shock spectrum
 
 The **Shock spectrum** page puts a short pulse on the base of a bank of single-degree-of-freedom
@@ -801,6 +858,15 @@ peaks come early and nearly together: the SRSS, which assumes they come at unrel
 short at m4, while NRL lands within 1 %.
 
 ![Shock spectrum page: 28 wavelets synthesized to a target of 10 g above a 5 Hz knee, rising 6 dB an octave below it. The Q = 10 spectrum stays within 1.9 dB of the target across the band, though the record itself peaks at only 5.19 g, and it ends at rest. On the Tripartite tab the target's rising slope is a constant pseudo-velocity and its plateau a constant acceleration](docs/images/shock_synthesis.png)
+
+### Seismic response
+
+The chain as a shear building on the ground: a design spectrum in the European code's shape, each
+mode's participation and effective mass, peak floor displacements, drifts and storey shears from the
+spectrum, combined by ABS, SRSS, NRL or CQC, against seven records synthesized to match the spectrum and
+stepped exactly. A roof tank tuned to mode 1 shows why close modes need CQC.
+
+![Seismic response page: a roof tank tuned to mode 1 of the five-storey building splits it into modes at 0.96 and 1.06 Hz; SRSS gives a base shear of 165 kN, 21 % below the mean of seven matched records (209 kN), and the tank's swing 54 % high](docs/images/seismic_response.png)
 
 ### Jeffcott rotor
 
@@ -1098,6 +1164,17 @@ third of it, which the asymmetric shaft has none of. The *Cracked shaft* preset'
 37.6 µm at 2X at 783 rpm and 18.6 µm at 3X at 522 rpm, and its 1X at the critical is 164 µm
 against 54 µm uncracked. Held open, the crack is an asymmetric shaft: no 3X, and twice the 2X.
 
+### Machinery diagnostics
+
+A gearbox's casing acceleration, synthesized: the shaft's 1X and 2X, the pinion's mesh, a gear fault
+(an eccentric pinion or a cracked tooth) and a rolling bearing's defect (outer race, inner race or ball)
+ringing a casing resonance. A run-up's spectrum against frequency and against order (resampled at
+equal angles), each order tracked against its steady state; the sidebands round the mesh; envelope
+analysis, which finds the bearing's strikes the plain spectrum hides; and the cepstrum, which gathers
+a family of sidebands into one peak.
+
+![Machinery diagnostics page: an outer race defect in a noisy machine; the plain spectrum reads 0.049 m/s² at BPFO = 107.4 Hz, on a floor of 0.043, but the band round the 3 kHz resonance has a kurtosis of 5.65 and its envelope spectrum reads 0.45, 0.34 and 0.23 m/s² at BPFO and its harmonics](docs/images/machinery_diagnostics.png)
+
 ### Duffing & Mathieu
 
 The **Duffing & Mathieu** page drives one mass on a spring with a cubic term,
@@ -1150,6 +1227,24 @@ start it. A hardening spring's swing detunes itself out of the tongue and settle
 jump of its own: sweeping down from rest, nothing happens until rest turns unstable at the
 tongue's upper edge, and then the swing leaps up to a branch that the sweep back up rides far past
 the tongue.
+
+### Self-excited vibration
+
+Motion that feeds itself, four ways: van der Pol's oscillator (negative damping that grows to a limit
+cycle, and relaxation oscillations), galloping of a square section in a wind (Den Hartog's criterion and
+the hysteresis between its branches), vortex-induced vibration with a wake oscillator (lock-in), and
+two-mode flutter of a wing section, its root locus crossing into instability as the airspeed rises.
+
+![Self-excited vibration page, flutter: a wing section with plunge at 3 Hz and pitch at 6 Hz; as the airspeed rises their frequencies close in and the pitch-like mode's damping crosses zero at 19.1 m/s, half the 39 m/s divergence speed](docs/images/self_excited.png)
+
+### Active control
+
+Velocity feedback on the Simulation page's chain: the closed loop's poles exactly, against the light
+feedback estimate; collocated control that damps every mode until too much gain pins the mass,
+non-collocated control that spills over into a mode it destabilizes, an actuator's lag, a comparison
+with a tuned mass damper of the same mass ratio, and skyhook isolation against a passive damper.
+
+![Active control page, spillover: velocity from m1 fed back to m4 at g = 20 N·s/m damps mode 1 but drives mode 2 unstable (ζ = −0.10); non-collocated, the loop is unstable from g = 6.1 N·s/m](docs/images/active_control.png)
 
 ### Torsional vibration
 
@@ -1256,6 +1351,35 @@ Halfway along this string the mass per length is four times as much: twice the i
 speed. A third of the pulse comes back upside down and two thirds go on, squeezed to half the length.
 On 100 elements the squeezed pulse is only five elements wide, and the mesh carries 0.49 of it where
 the string carries 0.67, shedding ripples behind.
+
+### Energy methods
+
+Frequencies from the energies, on the Simulation page's chain: Rayleigh's quotient (from the static
+deflection, a straight line, or a pass of inverse iteration), always above f₁ by a margin second order in
+the shape's error; Dunkerley's sum, below it; Rayleigh–Ritz with r shapes, every estimate above its mode
+and falling as r grows; and Holzer's table, stepping from the ground to the free end at a trial
+frequency until the force left over is zero.
+
+![Energy methods page, Rayleigh–Ritz on the uniform chain: Rayleigh's quotient from the static deflection gives f₁ = 1.112 Hz (+0.55 %), Dunkerley 1.007 Hz (−8.95 %) from below, and two Ritz shapes give f₁ exact to four figures and f₂ = 3.298 Hz, 3.6 % above 3.183](docs/images/energy_methods.png)
+
+### Beams & plates
+
+Beyond the Continuous systems page's slender beam: a simply supported beam by Euler–Bernoulli, Rayleigh
+(rotary inertia), shear alone and Timoshenko (both, with its thickness-shear branch), and their wave
+speeds; a simply supported rectangular plate's and a clamped circular plate's modes and nodal lines
+(a square plate's twin modes mixed into Chladni's figures); and the modes per hertz, ∝ √f for a beam and
+constant for a plate.
+
+![Beams & plates page: a 400 mm square steel plate 3 mm thick, simply supported; its (1, 3) and (3, 1) modes share 461 Hz, and their sum has the curved nodal line of a Chladni figure](docs/images/beams_plates.png)
+
+### Numerical integration
+
+What the usual time-stepping schemes do to a vibration: central difference, Newmark (average and linear
+acceleration), HHT-α, Runge–Kutta 4 and explicit Euler, against the exact first-order-hold update the app
+uses. A run at any step per period beside the exact motion, each scheme's spectral radius, period error
+and numerical damping against ωΔt, and a stiff second mode that breaks the explicit schemes.
+
+![Numerical integration page at 3 steps a period (ωΔt = 2.09): central difference, past its limit ωΔt ≤ 2, blows up by 2.5 s, while Newmark's average acceleration stays bounded with its period 30 % long](docs/images/numerical_integration.png)
 
 ## The math, briefly
 
@@ -1461,6 +1585,32 @@ $F_f$ times the distance slid, so the energy balance still closes.
 - `core/continuum_waves.py`: a pulse on the continuum (a digital waveguide carrying d'Alembert's
   waves, with the ends, a dashpot and a step scattering them in closed form, or a beam's exact
   modes) and on the mesh (stepped by its exact matrix exponential), and the wave presets.
+- `core/pendulum.py`: pendulums (simple, a rod, a torsion disc, inverted): the exact period by
+  quadrature, Duffing's estimate, the swing by `solve_ivp`, the phase plane's orbits, and a rod's
+  best pivot.
+- `core/periodic.py`: periodic forces as Fourier series in closed form, each harmonic's response, and
+  the exact periodic steady state from one FOH-stepped period.
+- `core/energy_methods.py`: Rayleigh's quotient, inverse iteration, Dunkerley's sum, Rayleigh–Ritz and
+  Holzer's table on the chain.
+- `core/beams_plates.py`: a simply supported beam by Euler–Bernoulli, Rayleigh, shear and Timoshenko
+  theory, wave speeds, rectangular and circular plates' modes and shapes, and mode counts.
+- `core/integration.py`: central difference, Newmark, HHT-α, RK4, explicit Euler and the exact update
+  on one or two masses, and each scheme's amplification matrix (spectral radius, period error,
+  numerical damping).
+- `core/fatigue.py`: a stress PSD of one or two peaks, its spectral moments, rainflow counting (ASTM
+  E1049), Basquin and Miner, and the narrow-band and Dirlik estimates.
+- `core/quarter_car.py`: a quarter-car on an ISO 8608 road: the transfer functions, the outputs' PSDs
+  and RMS, the comfort–grip trade-off, and a drive stepped exactly.
+- `core/seismic.py`: a design spectrum, the building's modal masses and peaks, ABS/SRSS/NRL/CQC, and
+  synthesized records stepped mode by mode.
+- `core/variability.py`: Monte Carlo on the chain with lognormal scatter and the first-order estimate,
+  and a mistuned bladed ring's modes, localization and forced response.
+- `core/self_excited.py`: van der Pol, galloping, a wake oscillator and two-mode flutter: their
+  stability, limit cycles by averaging, and time responses.
+- `core/active_control.py`: velocity feedback on the chain (the closed loop with lags), the modal
+  estimate, tracked damping, a tuned mass damper to compare, and skyhook isolation.
+- `core/diagnostics.py`: a gearbox's synthesized vibration (mesh, gear and bearing faults), a run-up
+  with order tracking by angular resampling, envelope analysis and the cepstrum.
 - `gui/`: the PySide6 and pyqtgraph interface. It runs on a ~60 fps timer that advances
   the simulator by wall-clock time × speed. `gui/style.py` holds the colour themes; every
   widget reads its colours from the current one (`colors.mass[i]`, `colors.force`) and

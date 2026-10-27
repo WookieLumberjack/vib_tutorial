@@ -85,9 +85,9 @@ TRIALS = (
     ControlTrial(
         "Non-collocated: spillover",
         "Sensor on m1, actuator on m4, g = 20 N·s/m. In mode 1 the two move together, so mode 1 is damped; in "
-        "mode 2 they move against each other, so the feedback pushes with the motion and mode 2's damping goes "
-        "negative (estimate −0.17, exact −0.10): the chain is unstable from g = 6.1 N·s/m. Control designed for "
-        "one mode spills over into the others.",
+        "mode 2 they move against each other, so the feedback pushes with the motion: the estimate takes 0.17 "
+        "off mode 2's ζ of 0.05, and exactly its ζ is −0.10. The chain is unstable from g = 6.1 N·s/m. Control "
+        "designed for one mode spills over into the others.",
         sensor=1, actuator=4, gain=20.0, tab=TAB_LOCUS),
     ControlTrial(
         "Actuator lag",
