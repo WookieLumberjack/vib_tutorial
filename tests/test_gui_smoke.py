@@ -100,7 +100,7 @@ def test_secondary_pages_build_when_opened(app):
     titles = [w.pages.tabText(i) for i in range(w.pages.count())]
     w.params.dof.setValue(5)  # a page built later gets the current system
 
-    w.pages.groups.setCurrentIndex(2)  # as a click on the group's tab does: its first page shows
+    w.pages.groups.setCurrentIndex(3)  # as a click on the group's tab does: its first page shows
     page = w.pages.currentWidget()
     assert isinstance(page, ModalCouplingPage) and page is w.coupling_page
     assert list(w._built) == ["coupling_page"]
@@ -123,7 +123,8 @@ def test_theory_button_f1_and_links_between_pages(app):
     w = MainWindow()
     w.show()
     browser = w.show_theory()
-    assert browser.isVisibleTo(w) and "Before this page" not in browser.toHtml()  # the first page's
+    # the window opens on the Simulation page, which follows the One mass pages
+    assert browser.isVisibleTo(w) and "Before this page" in browser.toHtml()
     shortcuts = {s.key().toString(): s for s in w.findChildren(QtGui.QShortcut)}
     w.pages.setCurrentWidget(w.frf_page)
     shortcuts["F1"].activated.emit()
@@ -131,7 +132,7 @@ def test_theory_button_f1_and_links_between_pages(app):
     w.go_to("coupling_page", "effective-mass")  # as a page: link does
     assert w.pages.currentWidget() is w.coupling_page
     assert w.coupling_page.tabs.currentWidget() is w.coupling_page.theory
-    shortcuts["Ctrl+5"].activated.emit()
+    shortcuts["Ctrl+6"].activated.emit()
     assert w.pages.group_title(w.pages.currentIndex()) == "Beyond the chain"
     w.close()
 
@@ -3749,4 +3750,45 @@ def test_shock_page(app):
     assert w.sim.system.n == 6 and p.mass.count() == 6 and p.readout.text().count(" Hz ") >= 6
     w.set_theme("Dark")
     w.set_theme("Light")
+    w.close()
+
+
+@pytest.mark.parametrize("name", ["sdof_page", "transient_page", "damping_page", "isolation_page", "signals_page"])
+def test_lesson_pages_trials_and_tabs(app, name):
+    """Every one-click trial of the One mass and Signals pages loads, and every tab draws, in either theme."""
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w._timer.stop()
+    w.show()
+    page = getattr(w, name)
+    w.pages.setCurrentWidget(page)
+    module = sys.modules[type(page).__module__]
+    for i in range(len(module.TRIALS)):
+        page.load_trial(i)
+        app.processEvents()
+        assert page.trials.note.text() == module.TRIALS[i].note
+    for i in range(page.tabs.count()):
+        page.tabs.setCurrentIndex(i)
+        app.processEvents()
+    w.set_theme("Dark")
+    app.processEvents()
+    w.set_theme("Light")
+    w.close()
+
+
+def test_single_undamped_mass_draws_its_frf(app):
+    """One mass and no damper (from a chain of several): the FRF must not be asked for at its natural frequency,
+    where it is infinite, nor drawn with the previous chain's modes."""
+    from vib_tutorial.core import ChainSystem
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w._timer.stop()
+    system = ChainSystem.uniform(1)
+    system.damping[0] = 0.0
+    w.params.set_system(system)
+    w.tabs.setCurrentWidget(w.frf_tab)
+    app.processEvents()
+    assert len(w.modal.modes) == 1
     w.close()

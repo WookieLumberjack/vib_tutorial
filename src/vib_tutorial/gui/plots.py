@@ -551,9 +551,15 @@ def frequency_grid(result: ModalResult, points: int) -> np.ndarray:
     lo = 0.2 * freqs_n.min() if freqs_n.size else 0.1
     hi = 2.5 * freqs_n.max() if freqs_n.size else 10.0
     f = np.geomspace(lo, hi, points)
-    # Include the damped peaks so lightly damped resonances are not clipped.
-    peaks = [m.damped.fd_hz for m in result.modes if m.damped is not None and lo < m.damped.fd_hz < hi]
-    return np.unique(np.concatenate([f, peaks, freqs_n]))
+    # Include the damped peaks so lightly damped resonances are not clipped. An undamped mode's peak is
+    # infinite and H singular on it, so it gets two points either side instead (a single undamped mass's
+    # k − ω²m is exactly 0 there).
+    peaks = [m.damped.fd_hz for m in result.modes
+             if m.damped is not None and m.damped.zeta > 0 and lo < m.damped.fd_hz < hi]
+    on = [m.fn_hz for m in result.modes if m.fn_hz in freqs_n and m.zeta_modal > 0]
+    near = [m.fn_hz * (1 + s) for m in result.modes if m.fn_hz in freqs_n and not m.zeta_modal > 0
+            for s in (-1e-6, 1e-6)]
+    return np.unique(np.concatenate([f, peaks, on, near]))
 
 
 FRICTION_POINTS = 600  # describing-function curves: friction rounds the peaks, so fewer points do

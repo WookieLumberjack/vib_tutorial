@@ -1408,7 +1408,8 @@ measuring one <b>row</b> of H. By reciprocity, H<sub>jk</sub> = H<sub>kj</sub> (
 page), a row holds the same mode shapes as a column, so either gives every mode, as long as
 the fixed point is not at a node of one of them.</li>
 <li><b>The sensor is part of the structure.</b> A real accelerometer adds its mass at the
-point it measures, lowering the frequencies of a light structure. Here the sensors weigh
+point it measures, lowering the frequencies of a light structure (<a href="page:signals_page#mass-loading">Mass
+loading</a>). Here the sensors weigh
 nothing, so this error is absent; in practice it is checked by moving or doubling the sensor
 mass.</li>
 </ul>
@@ -1520,6 +1521,8 @@ THEORY_HTML = THEORY_HTML.replace("<!--BEFORE-->", before(
     ("sim_page", "start-with-one-mass", "Start with one mass"),
     ("frf_page", "three-forms", "Three forms of the same FRF"),
     ("frf_page", "sum-of-modes", "Every term is a sum of modes"),
+    ("signals_page", "leakage", "Leakage"),
+    ("signals_page", "windows", "Windows"),
 )).replace("<!--EXTRACTION-->", EXTRACTION_THEORY_HTML).replace(
     "<!--TRIALS-->", "<ul>" + "".join(f"<li><b>{t.name}.</b> {t.note}</li>" for t in TRIALS) + "</ul>"
 ).replace("<!--TAKEAWAYS-->", takeaways(

@@ -162,7 +162,7 @@ TRIALS = (
 
 NOTES_HTML = """
 <!--BEFORE-->
-<h3>The shock response spectrum</h3>
+<h3><a name="srs"></a>The shock response spectrum</h3>
 <p>A shock is a short, strong acceleration of a structure's base: a drop, a collision, a stage separation.
 Its time history alone says little about what it does. What matters is what it does to the things mounted on
 the structure, and they are, to a first approximation, single-degree-of-freedom oscillators: a mass on a

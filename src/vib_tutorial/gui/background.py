@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6 import QtWidgets
 
-from .links import course_map
+from .links import before, course_map
 from .sim_trials import TRIALS
 
 COUPLING_TIP = (
@@ -19,15 +19,18 @@ COUPLING_TIP = (
 )
 
 BACKGROUND_HTML = """
+<!--BEFORE-->
 <p><i>Contents:</i> <a href="#course-map">The pages, in order</a> · <a href="#start-with-one-mass">Start with one mass</a> · <a href="#equations-of-motion">Equations of motion</a> · <a href="#undamped-normal-modes-real">Undamped normal modes</a> · <a href="#rayleigh-quotient">Estimating a frequency</a> · <a href="#proportional-damping">Proportional damping</a> · <a href="#watching-the-modal-coordinates">Modal coordinates</a> · <a href="#energy">Energy</a> · <a href="#sweeps-and-ground-motion">Sweeps and ground motion</a> · <a href="#vibration-absorbers-and-tuned-mass-dampers">Absorbers and tuned mass dampers</a> · <a href="#friction">Friction</a> · <a href="#non-proportional-damping-and-coupling">Non-proportional damping</a> · <a href="#exact-damped-modes-are-complex">Exact damped modes are complex</a> · <a href="#try-it">Things to try</a> · <a href="#takeaways">What to take away</a> · <a href="#notation">Notation</a></p>
 <h3><a name="course-map"></a>The pages, in order</h3>
 <p>The pages are meant to be read in order, left to right, group by group: each one uses only ideas from
-the pages before it, and its Theory tab (F1) starts by saying which. This page comes first.</p>
+the pages before it, and its Theory tab (F1) starts by saying which. The <i>One mass</i> pages come first: a single
+oscillator, then this page builds a chain of them.</p>
 <!--COURSE-->
 <h3><a name="start-with-one-mass"></a>Start with one mass</h3>
 <p>Everything on these pages is built from the single-degree-of-freedom (SDOF) oscillator:
-one mass m on a spring k and a damper c, <b>m ẍ + c ẋ + k x = f(t)</b>. Set <i>Number of
-masses</i> to 1 to see it on its own (with the defaults m = 1 kg, k = 400 N/m,
+one mass m on a spring k and a damper c, <b>m ẍ + c ẋ + k x = f(t)</b>. The
+<a href="page:sdof_page#equation">Single oscillator page</a> works through it; this is a summary. Set
+<i>Number of masses</i> to 1 to see it here on its own (with the defaults m = 1 kg, k = 400 N/m,
 c = 2 N·s/m, the numbers in brackets below).</p>
 <ul>
 <li><b>Natural frequency</b> ω<sub>n</sub> = √(k/m), f<sub>n</sub> = ω<sub>n</sub>/2π
@@ -344,7 +347,10 @@ friction is a damper that weakens as the motion grows.</li>
 <tr><td>α, β</td><td>Rayleigh damping coefficients, C = αM + βK</td><td>1/s, s</td></tr>
 </table>
 """
-BACKGROUND_HTML = BACKGROUND_HTML.replace("<!--COURSE-->", course_map()).replace(
+BACKGROUND_HTML = BACKGROUND_HTML.replace("<!--BEFORE-->", before(
+    ("sdof_page", "forced-response", "Forced response"),
+    ("damping_page", "viscous", "Viscous damping"),
+)).replace("<!--COURSE-->", course_map()).replace(
     "<!--TRIALS-->", "<ul>" + "".join(f"<li><b>{t.name}.</b> {t.note}</li>" for t in TRIALS) + "</ul>")
 
 

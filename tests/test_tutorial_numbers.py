@@ -249,3 +249,130 @@ def test_frf_and_coupling_trials():
     np.testing.assert_allclose(errors["A light half, tuned: splitting"], [0.2, 0.3], atol=0.05)
     np.testing.assert_allclose(errors["The wrong mass for A"], [2.9, -2.2], atol=0.06)
     assert errors["A mode left out (8 masses)"][0] == pytest.approx(-14, abs=0.5)
+
+
+# --------------------------------------------------------------------- the One mass and Signals pages' trials
+def test_single_oscillator_trials():
+    import math
+
+    from vib_tutorial.core.sdof import Oscillator, receptance
+
+    osc = Oscillator()
+    assert osc.natural_hz == pytest.approx(3.18, abs=0.005) and osc.zeta == pytest.approx(0.05)
+    assert math.exp(osc.log_decrement) == pytest.approx(1.37, abs=0.005)
+    assert osc.log_decrement == pytest.approx(0.315, abs=0.0005) and osc.time_constant == pytest.approx(1.0)
+    slow = Oscillator(1, 400, 80).poles()
+    assert sorted(slow.real) == pytest.approx([-74.6, -5.4], abs=0.05)
+    two = Oscillator(1, 400, 80).poles().real.max()  # ζ = 2
+    assert -two / osc.omega_n == pytest.approx(0.27, abs=0.005) and -1 / two == pytest.approx(0.19, abs=0.005)
+    assert 1 / 20 == pytest.approx(0.05)  # critical: a double root at −ω_n
+    assert (1 / 400) / (2 * 0.05) == pytest.approx(0.025)  # 25 mm at resonance, Q = 10
+    lo, hi = osc.half_power_hz()
+    assert (lo, hi) == pytest.approx((3.01, 3.33), abs=0.005)
+    beat = osc.natural_hz - 3.0
+    assert beat == pytest.approx(0.18, abs=0.005) and 1 / beat == pytest.approx(5.5, abs=0.05)
+    undamped = Oscillator(1, 400, 0)
+    assert abs(receptance(undamped, np.array([3.0]))[0]) == pytest.approx(0.022, abs=0.0005)
+    assert 1 / (2 * undamped.omega_n) == pytest.approx(0.025)  # F/2mω_n, m/s
+    assert (1e-4 / 1) / (2 * 0.05) == pytest.approx(1e-3)
+    assert 1 / (2 * osc.omega_n) == pytest.approx(0.025)  # the Nyquist circle's diameter 1/cω_n, m/N
+
+
+def test_transient_trials():
+    from vib_tutorial.core.sdof import Oscillator
+    from vib_tutorial.core.transient import PulseKind, peak_ratio, step_metrics
+
+    osc = Oscillator()
+    m = step_metrics(osc)
+    assert m.overshoot == pytest.approx(0.85, abs=0.005) and 2.5 * (1 + m.overshoot) == pytest.approx(4.64, abs=0.005)
+    assert m.peak_time == pytest.approx(0.157, abs=0.0005) and m.settling == pytest.approx(3.8, abs=0.05)
+    assert step_metrics(Oscillator(1, 400, 40)).settling == pytest.approx(0.29, abs=0.005)
+    assert 2 * np.sin(np.pi / 20) == pytest.approx(0.31, abs=0.005)
+    r = 0.26 / osc.period
+    assert peak_ratio(0.0, PulseKind.HALF_SINE, np.array([r]))[0] == pytest.approx(1.77, abs=0.005)
+    assert peak_ratio(0.05, PulseKind.HALF_SINE, np.array([r]))[0] == pytest.approx(1.65, abs=0.005)
+    r = 0.864 / osc.period
+    assert r == pytest.approx(2.75, abs=0.005)
+    assert peak_ratio(0.0, PulseKind.RAMP, np.array([r]))[0] - 1 == pytest.approx(0.08, abs=0.005)
+    assert peak_ratio(0.05, PulseKind.RAMP, np.array([r]))[0] - 1 == pytest.approx(0.06, abs=0.005)
+
+
+def test_damping_models_trials():
+    from vib_tutorial.core.damping_models import Matched, Model, coulomb_stop
+
+    m = Matched()
+    wn = m.omega_n
+    assert m.energy_per_cycle(Model.VISCOUS, np.array([wn]))[0] == pytest.approx(0.0126, abs=5e-5)
+    assert m.friction == pytest.approx(0.31, abs=0.005)
+    assert m.energy_per_cycle(Model.VISCOUS, np.array([2 * wn]))[0] == pytest.approx(0.0251, abs=5e-5)
+    assert m.energy_per_cycle(Model.ZENER, np.array([2 * wn]))[0] == pytest.approx(0.0107, abs=5e-5)
+    assert 4 * m.friction / np.pi == pytest.approx(0.4, abs=0.005)
+    assert 4 * m.friction / m.stiffness == pytest.approx(0.0031, abs=5e-5)
+    half_cycles, where = coulomb_stop(m.stiffness, m.friction, 0.01)
+    assert half_cycles == 6 and abs(where) == pytest.approx(0.00058, abs=5e-6)
+    k0, k1, _ = m.zener()
+    assert (k0, k0 + k1) == pytest.approx((364, 444), abs=0.5)
+
+
+def test_isolation_trials():
+    from vib_tutorial.core.isolation import Isolator, Mount, deflection_for
+
+    soft = Isolator()
+    X, floor, T = soft.at_speed()
+    assert soft.natural_hz == pytest.approx(7.05, abs=0.005)
+    assert float(soft.force_at(25.0)) == pytest.approx(247, abs=0.5) and floor == pytest.approx(23, abs=0.5)
+    assert T == pytest.approx(0.09, abs=0.005) and 20 * np.log10(T) == pytest.approx(-21, abs=0.5)
+    assert X == pytest.approx(109e-6, abs=0.5e-6)
+    assert deflection_for(25.0, 0.9) == pytest.approx(4.37e-3, abs=5e-6)
+    stiff = Isolator(deflection=3e-4)
+    assert stiff.natural_hz == pytest.approx(28.8, abs=0.05) and stiff.at_speed()[2] == pytest.approx(3.9, abs=0.05)
+    assert Isolator(zeta=0.3).at_speed()[2] == pytest.approx(0.20, abs=0.005)
+    assert (soft.natural_hz / soft.speed_hz) ** 2 == pytest.approx(1 / 12, abs=0.005)
+    f = np.linspace(1, 30, 20001)
+    relax = Isolator(zeta=0.3, mount=Mount.RELAXATION, rpm=3000)
+    plain = Isolator(zeta=0.3, rpm=3000)
+    assert relax.transmissibility(f).max() == pytest.approx(2.1, abs=0.05)
+    assert plain.transmissibility(f).max() == pytest.approx(2.0, abs=0.05)
+    assert (relax.at_speed()[2], plain.at_speed()[2]) == pytest.approx((0.070, 0.088), abs=0.0005)
+    fast = (Isolator(zeta=0.3, mount=Mount.RELAXATION, rpm=6000), Isolator(zeta=0.3, rpm=6000))
+    assert [i.at_speed()[2] for i in fast] == pytest.approx([0.019, 0.043], abs=0.0005)
+    assert Isolator(mount=Mount.TWO_STAGE).at_speed()[2] == pytest.approx(0.038, abs=0.0005)
+    assert Isolator(mount=Mount.TWO_STAGE, rpm=3000).at_speed()[2] == pytest.approx(0.002, abs=0.0005)
+    assert Isolator(rpm=3000).at_speed()[2] == pytest.approx(0.025, abs=0.0005)
+    assert Isolator(block=300).at_speed()[0] == pytest.approx(27e-6, abs=0.5e-6)
+
+
+def test_signals_trials():
+    from vib_tutorial.core.signals import Kind, Source, Window, mass_loaded, nearest_line_reading, sample
+    from vib_tutorial.core.signals import spectrum as averaged
+    from vib_tutorial.core.signals import usable_band, window_props
+
+    def reading(source, f, window, block=1024, averages=1, filtered=True):
+        n = block + (averages - 1) * block // 2
+        _, x = sample(source, 1024.0, n, filtered)
+        return nearest_line_reading(averaged(x, 1024.0, block, window, 0.5), f)[1]
+
+    assert reading(Source(f1=50.0, a2=0.0), 50.0, Window.RECTANGULAR) == pytest.approx(1.0, abs=5e-4)
+    pair = Source(f1=50.5, f2=70.0, a2=0.001)
+    assert reading(pair, 50.5, Window.RECTANGULAR) == pytest.approx(0.64, abs=0.005)
+    assert reading(pair, 70.0, Window.RECTANGULAR) == pytest.approx(0.015, abs=0.0005)
+    assert reading(pair, 50.5, Window.HANN) == pytest.approx(0.85, abs=0.005)
+    assert reading(pair, 70.0, Window.HANN) == pytest.approx(0.0010, abs=0.00005)
+    assert reading(pair, 50.5, Window.FLAT_TOP) == pytest.approx(0.999, abs=0.0005)
+    flat = window_props(Window.FLAT_TOP)
+    assert flat.main_lobe == 5 and flat.enbw == pytest.approx(3.8, abs=0.05)
+    alias = Source(f1=900.0, a2=0.0)
+    assert reading(alias, 124.0, Window.HANN, filtered=False) == pytest.approx(1.0, abs=5e-4)
+    assert reading(alias, 124.0, Window.HANN) == pytest.approx(0.0015, abs=0.00005)
+    assert 1024 / 2.56 == 400
+    assert 0.5 ** 2 / 512 == pytest.approx(4.9e-4, abs=5e-6)
+    hann = window_props(Window.HANN)
+    for block, level in ((4096, 0.019), (256, 0.077)):
+        assert 2 * 0.5 * np.sqrt(hann.enbw / block) == pytest.approx(level, abs=0.0005)
+    assert 0.05 / 0.019 == pytest.approx(2.6, abs=0.05)
+    ringing = Source(Kind.RINGING, f1=50.0, zeta=0.01)
+    assert 2 * ringing.zeta * ringing.f1 == pytest.approx(1.0) and 1024 / 4096 == 0.25
+    assert usable_band(0.01) == pytest.approx(0.22, abs=0.005) and 0.218 * 30000 == pytest.approx(6.5e3, abs=60)
+    assert usable_band(0.7, accelerometer=False) == pytest.approx(1.7, abs=0.05)
+    assert usable_band(0.7, accelerometer=False) * 4.5 == pytest.approx(7.6, abs=0.05)
+    assert mass_loaded(200.0, 0.5, 0.03) / 200 - 1 == pytest.approx(-0.029, abs=0.0005)
