@@ -522,3 +522,41 @@ def test_integration_trials():
     assert errs[Scheme.FOH] == pytest.approx(0.013, abs=0.0005)
     assert [errs[s] for s in (Scheme.RK4, Scheme.CENTRAL, Scheme.AVERAGE)] == pytest.approx([0.03, 0.41, 0.61],
                                                                                            abs=0.005)
+
+
+def test_fatigue_trials():
+    from vib_tutorial.core.fatigue import (
+        Curve,
+        Stress,
+        dirlik_damage,
+        life_text,
+        narrow_band_damage,
+        rates,
+        record,
+    )
+
+    c, c5 = Curve(), Curve(b=5.0)
+    one = Stress()
+    r = record(one, 600.0)
+    assert rates(one).alpha2 == pytest.approx(0.95, abs=0.005)
+    for est in (narrow_band_damage(one, c), dirlik_damage(one, c)):
+        assert abs(est / r.damage_rate(c) - 1) < 0.015
+    assert life_text(r.damage_rate(c)) == "25.1 days"
+    two = Stress(sigma2=10.0)
+    r2 = record(two, 600.0)
+    assert rates(two).alpha2 == pytest.approx(0.46, abs=0.005) and rates(two).nu0 == pytest.approx(6.9, abs=0.05)
+    assert narrow_band_damage(two, c) / r2.damage_rate(c) == pytest.approx(1.6, abs=0.05)
+    assert dirlik_damage(two, c) / r2.damage_rate(c) == pytest.approx(0.92, abs=0.005)
+    assert narrow_band_damage(two, c5) / r2.damage_rate(c5) == pytest.approx(1.6, abs=0.05)
+    assert dirlik_damage(two, c5) / r2.damage_rate(c5) == pytest.approx(0.82, abs=0.005)
+    average = np.mean([record(two, 600.0, k).damage_rate(c5) for k in range(1, 21)])
+    assert dirlik_damage(two, c5) / average == pytest.approx(0.85, abs=0.005)
+    assert life_text(record(Stress(sigma1=40.0), 600.0).damage_rate(c)) == "3.13 days"
+    assert 1.1 ** 3 == pytest.approx(1.33, abs=0.005)
+    wide = Stress(zeta1=0.3)
+    rw = record(wide, 600.0)
+    assert rates(wide).alpha2 == pytest.approx(0.64, abs=0.005)
+    assert narrow_band_damage(wide, c) / rw.damage_rate(c) == pytest.approx(1.15, abs=0.005)
+    assert abs(dirlik_damage(wide, c) / rw.damage_rate(c) - 1) < 0.02
+    short = [record(two, 20.0, k).damage_rate(c5) / r2.damage_rate(c5) for k in range(1, 11)]
+    assert (min(short), max(short)) == pytest.approx((0.67, 1.53), abs=0.005)

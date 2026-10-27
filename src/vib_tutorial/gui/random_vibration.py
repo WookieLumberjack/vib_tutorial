@@ -149,7 +149,7 @@ The <i>Miles</i> tab lists them. It is good where the response is resonant and t
 misses what isn't resonant: a forced mass's acceleration far above the modes is the force over the mass (the
 <b>mass line</b>), modes outside the band, and a band edge that cuts across a peak.</p>
 
-<h3>How often, how high</h3>
+<h3><a name="statistics"></a>How often, how high</h3>
 <p>A linear system's response to a Gaussian input is Gaussian: 68.3 % of the time within ±1σ, 95.4 % within
 ±2σ, 99.73 % within ±3σ, its skewness 0 and kurtosis 3. How often it does things comes from the PSD's
 <b>spectral moments</b> m<sub>k</sub> = ∫ f<sup>k</sup> G df. <b>Rice</b>: it crosses zero upwards

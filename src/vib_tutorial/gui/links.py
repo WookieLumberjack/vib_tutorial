@@ -60,6 +60,8 @@ COURSE = (
     )),
     ("Responses", (
         ("random_page", "Random vibration", "a random force or base: the response's spectrum, RMS and peaks"),
+        ("fatigue_page", "Fatigue",
+         "a random stress counted by rainflow: S–N curves, Miner's rule, narrow-band and Dirlik estimates"),
         ("shock_page", "Shock spectrum", "a short pulse on a bank of oscillators, and on the chain"),
     )),
     ("Building models", (
@@ -106,6 +108,7 @@ PAGE_TITLES = {
     "continuum_page": "Continuous systems page",
     "integration_page": "Numerical integration page",
     "random_page": "Random vibration page",
+    "fatigue_page": "Fatigue page",
     "shock_page": "Shock spectrum page",
     "coupling_page": "Modal coupling page",
     "cms_page": "Substructuring page",
