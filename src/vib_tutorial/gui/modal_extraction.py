@@ -351,7 +351,7 @@ class ResultsView(QtWidgets.QWidget):
 
 
 EXTRACTION_THEORY_HTML = """
-<h3>Modal parameter extraction</h3>
+<h3><a name="extraction"></a>Modal parameter extraction</h3>
 <p>The measured FRF column is only data. <b>Modal parameter extraction</b> (curve fitting) finds
 the modal model behind it: for each mode a pole λ<sub>r</sub> (natural frequency and damping)
 and residues R<sub>jr</sub> (the mode shape), with</p>
@@ -374,19 +374,8 @@ plotted in a <b>stabilization diagram</b>. Physical modes form vertical columns 
 noise and leakage poles scatter. The residues of the chosen poles then follow from a linear
 least-squares fit (LSFD).</li>
 </ul>
-<p>The <b>Modal parameters</b> tab compares the result with the exact modes: frequency and
+<p>The <b>Modes</b> tab compares the result with the exact modes: frequency and
 damping errors, and the <b>MAC</b> (modal assurance criterion)
 |ψ<sub>a</sub><sup>H</sup>ψ<sub>b</sub>|² / (|ψ<sub>a</sub>|²|ψ<sub>b</sub>|²) between shapes,
 which is 1 for the same shape and 0 for orthogonal ones.</p>
-<h3>Things to try</h3>
-<ul>
-<li>Peak picking with a short block: the frequency snaps to a line and ζ comes out too
-high. Lengthen the block, or switch to the circle fit or LSCF.</li>
-<li>Add noise and watch the stabilization diagram: the weak, well-damped high modes lose
-their columns first. More averages bring them back.</li>
-<li>Use the exponential window and untick <i>Remove the exponential window's damping</i>:
-every ζ is too high by 1/(τ<sub>w</sub>ω<sub>n</sub>).</li>
-<li>Put the force at m3 of the default chain (a node of mode 2, as in <i>Where to look</i>
-above): mode 2 is missing from every FRF, so no method can find it.</li>
-</ul>
 """

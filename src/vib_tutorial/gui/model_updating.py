@@ -31,6 +31,7 @@ from ..core.model_updating import (
     update,
 )
 from .layouts import ColumnScroll, FlowLayout, group, plot_height
+from .links import before, takeaways
 from .modal_extraction import MacPlot, colored
 from .panels import spin
 from .style import MAX_DOF, colors
@@ -82,7 +83,8 @@ DEFAULT_UPDATE = {"kinds": (Kind.SPRING,), "shapes": True, "damping": False, "we
 TRIALS = (
     ("One spring 30 % too stiff", {"k": {2: 1.3}},
      "The model's k3 is 1.3 times the structure's. Its frequencies are all too high, by 2.2, 4.1, 0.6 and 6.6 % "
-     "(the hammer test finds the first three): mode 3's least, since k3 stretches little in it. The shapes "
+     "(the hammer test finds the first three; the table compares the model with that test, whose own errors "
+     "shift these a little, so mode 3 reads +0.3 % there): mode 3's least, since k3 stretches little in it. The shapes "
      "barely change (MACs of 0.99 and up), so they are little help in finding it."),
     ("One mass 20 % too heavy", {"m": {1: 1.2}},
      "The model's m2 is 1.2 times the structure's: its frequencies are too low, by 1.8, 3.2, 0.5 and 3.5 %. A "
@@ -123,6 +125,7 @@ TRIALS = (
 )
 
 NOTES_HTML = """
+<!--BEFORE-->
 <h3>Correlation</h3>
 <p>A model of a structure (finite elements, or here a chain of masses and springs) is never quite right: a
 joint stiffer than drawn, a mass left out. A modal test measures the real thing, and <b>correlation</b>
@@ -187,7 +190,21 @@ by keeping the model near where it started, at the price of the fit. Too much, a
 errors. A measured mass, or fewer parameters chosen with engineering judgment (the joints, not every
 element), are better than a large λ. And the test's own errors go into the model: the updated parameters are
 only as good as the modes they were fitted to.</p>
+<!--TAKEAWAYS-->
 """
+NOTES_HTML = NOTES_HTML.replace("<!--BEFORE-->", before(
+    ("test_page", "extraction", "Modal parameter extraction"),
+    ("frf_page", "sum-of-modes", "Every term is a sum of modes"),
+)).replace("<!--TAKEAWAYS-->", takeaways(
+    "Correlation pairs test and model modes by shape (MAC), then compares their frequencies.",
+    "Shapes barely see a single stiffness or mass error; the pattern of frequency errors over the modes says "
+    "where it is.",
+    "A mode's frequency is sensitive to a spring by its share of the strain energy, to a mass by its share of"
+    " the kinetic energy.",
+    "Updating fits the parameters to the test by Gauss–Newton; directions the data can't see (all masses and "
+    "springs together) need regularization or engineering judgment.",
+))
+
 
 
 def _plot(left: str, bottom: str) -> pg.PlotWidget:
@@ -440,7 +457,7 @@ class ModelUpdatingPage(QtWidgets.QWidget):
         self.update_tab, self.sens_tab = update_scroll, sens_tab
         self.tabs.addTab(update_scroll, "Updating")
         self.tabs.addTab(sens_tab, "Sensitivity")
-        self.tabs.addTab(self.notes, "Notes")
+        self.tabs.addTab(self.notes, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)

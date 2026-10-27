@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import enum
 import math
+from dataclasses import dataclass
 
 import numpy as np
 import pyqtgraph as pg
@@ -18,6 +19,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..core import ChainSystem, ModalResult, ModalTerm, frf_matrix, modal_analysis, modal_frf_terms
 from .layouts import ColumnScroll
+from .links import before, takeaways
 from .plots import frequency_grid
 from .style import MAX_DOF, colors
 from .theming import add_legend, mute
@@ -342,10 +344,79 @@ class FrfDetail(QtWidgets.QWidget):
         self.top.setXRange(math.log10(f[0]), math.log10(f[-1]), padding=0)
 
 
+@dataclass(frozen=True)
+class FrfTrial:
+    """A chain (the uniform 4-mass one, its dampers changed by `damping`) and what to show of its H."""
+
+    name: str
+    note: str
+    output: int  # mass index of the response
+    inputs: tuple[int, ...]  # mass indices of the forces
+    quantity: Quantity = Quantity.MAGNITUDE
+    unticked: tuple[int, ...] = ()  # modes (1-based) left out of the sum
+    damping: tuple[float, ...] = ()  # c_i, else the default 2 N·s/m each
+    expansion: Expansion = Expansion.EXACT
+
+    def system(self) -> ChainSystem:
+        system = ChainSystem.uniform(4)
+        if self.damping:
+            system.damping[:] = self.damping
+        return system
+
+
+TRIALS = (
+    FrfTrial(
+        "Antiresonances at a driving point (H22)",
+        "Force and response both at m2. Peaks and dips alternate, and the phase falls 180° at each peak and "
+        "climbs back at each dip. Undamped, the dips would be at 1.97 Hz and 5.15 Hz (m3 and m4 vibrating on "
+        "their own with m2 held) and 4.50 Hz (m1 between the ground and m2). With the dampers the one at "
+        "5.15 Hz, squeezed between the peaks at 4.88 and 5.98 Hz, is washed out to a shoulder.",
+        output=1, inputs=(1,)),
+    FrfTrial(
+        "A force at a node (m3 in mode 2)",
+        "Mode 2 has a node at m3 (its shape is 0.58, 0.58, 0, −0.58). Pushing there can't excite it, and "
+        "measuring there can't see it, so H33, and the whole of row 3 and column 3, have no peak at 3.18 Hz. "
+        "Click another cell in row 3: still no mode 2.",
+        output=2, inputs=(2,)),
+    FrfTrial(
+        "End to end (H14): no antiresonances",
+        "Force at m4, response at m1. Between m1 and m4 there is no chain left outside, so there are no "
+        "dips, and the phase keeps falling by 180° at every peak, 720° in all. Compare H22's phase, which "
+        "swings back up at each dip.",
+        output=0, inputs=(3,), quantity=Quantity.PHASE),
+    FrfTrial(
+        "Truncate the high modes (H11)",
+        "Modes 3 and 4 unticked, the real part shown. Near modes 1 and 2 the sum is close, but below them it "
+        "sits low: modes 3 and 4 hold 24% of m1's static compliance (their residual flexibility), and the "
+        "header lists each mode's share. Tick mode 3 back and the offset mostly closes.",
+        output=0, inputs=(0,), quantity=Quantity.REAL, unticked=(3, 4)),
+    FrfTrial(
+        "Leave out mode 1 (H44)",
+        "Only mode 1 unticked. Above 1.1 Hz the missing term is mass-like, −φφᵀ/ω², so the sum is off by "
+        "an amount that grows towards low frequency as 1/ω²: the residual mass. At ω = 0 the error is mode "
+        "1's 89% share of the static compliance.",
+        output=3, inputs=(3,), unticked=(1,)),
+    FrfTrial(
+        "Two forces at once (m3 and m4)",
+        "Unit forces at m3 and m4, in phase, the response at m4: the sum of H43 and H44. At mode 1 (1.11 Hz) "
+        "m3 and m4 move together in the mode, the forces help each other and m4 moves almost twice as far. "
+        "At mode 3 (4.88 Hz) they move in opposite directions, the forces fight, and the sum is smaller than "
+        "either term alone.",
+        output=3, inputs=(2, 3)),
+    FrfTrial(
+        "Non-proportional damping: the classical sum misses",
+        "c1 = 15 N·s/m, the other dampers at 2, with Modal terms → Classical. Even with every mode ticked the "
+        "sum misses the full solution, most where two modes' peaks overlap, because the classical terms "
+        "drop ΦᵀCΦ's coupling. Switch to Exact (complex modes): the sum lies on the full solution again.",
+        output=0, inputs=(0,), damping=(15.0, 2.0, 2.0, 2.0), expansion=Expansion.CLASSICAL),
+)
+
+
 class FrfMatrixPage(QtWidgets.QWidget):
     """Controls on the left, the N x N grid in the centre, the selected term and theory on the right."""
 
     dof_requested = QtCore.Signal(int)  # the user changed N here; the main window owns the system
+    system_requested = QtCore.Signal(object)  # a trial's chain, for the Simulation page
     edit_parameters = QtCore.Signal()  # the user wants the Simulation page's parameter panel
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
@@ -367,6 +438,21 @@ class FrfMatrixPage(QtWidgets.QWidget):
         self._rebuild_grid = False  # the theme changed: build the grid again
 
         # --- controls
+        trials = QtWidgets.QGroupBox("Things to try")
+        tv = QtWidgets.QVBoxLayout(trials)
+        self.trial = QtWidgets.QComboBox()
+        self.trial.addItem("Pick one…")
+        self.trial.addItems([t.name for t in TRIALS])
+        self.trial.setToolTip("<p>Each sets up the chain and the plots to show one idea from the Theory tab. "
+                              "Loading one replaces the Simulation page's chain.</p>")
+        self.trial.currentIndexChanged.connect(self._on_trial)
+        tv.addWidget(self.trial)
+        self.trial_note = QtWidgets.QLabel()
+        self.trial_note.setWordWrap(True)
+        mute(self.trial_note)
+        self.trial_note.setVisible(False)
+        tv.addWidget(self.trial_note)
+
         box = QtWidgets.QGroupBox("FRF matrix H(ω) = (K − ω²M + iωC)⁻¹")
         form = QtWidgets.QFormLayout(box)
         self.dof = QtWidgets.QSpinBox()
@@ -449,11 +535,12 @@ class FrfMatrixPage(QtWidgets.QWidget):
         mute(io_note)
         iv.addWidget(io_note)
 
-        for combo in (self.quantity, self.expansion, self.output_combo):
+        for combo in (self.trial, self.quantity, self.expansion, self.output_combo):
             combo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setMinimumContentsLength(10)
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
+        lv.addWidget(trials)
         lv.addWidget(box)
         lv.addWidget(self.mode_box)
         lv.addWidget(io_box)
@@ -512,6 +599,38 @@ class FrfMatrixPage(QtWidgets.QWidget):
         super().showEvent(event)
         if self._dirty:
             self.refresh()
+
+    def load_trial(self, index: int) -> None:
+        """Load TRIALS[index]: its chain (through the Simulation page), cells, quantity and modes."""
+        trial = TRIALS[index]
+        self.trial_note.setText(trial.note)
+        self.trial_note.setVisible(True)
+        self._unchecked = set()
+        system = trial.system()
+        self.system_requested.emit(system)
+        if self.system is None or self.system.n != system.n or not np.allclose(self.system.damping, system.damping):
+            self.set_system(system)  # nobody passed it back: show it here alone
+        if self._dirty:
+            self.refresh()
+        self._unchecked = {t.label for t in self.terms if t.mode in trial.unticked}
+        for widget, value in ((self.quantity, trial.quantity), (self.expansion, trial.expansion)):
+            widget.setCurrentIndex(widget.findData(value))
+        for t, c in zip(self.terms, self.mode_checks):
+            c.blockSignals(True)
+            c.setChecked(t.label not in self._unchecked)
+            c.blockSignals(False)
+        self.output, self.inputs = trial.output, set(trial.inputs)
+        self._sync_io()
+        self.redraw()
+        self.tabs.setCurrentWidget(self.detail)
+
+    def _on_trial(self, index: int) -> None:
+        if index <= 0:
+            return
+        self.trial.blockSignals(True)
+        self.trial.setCurrentIndex(0)
+        self.trial.blockSignals(False)
+        self.load_trial(index - 1)
 
     def _on_cell(self, j: int, k: int, add: bool) -> None:
         if add and j == self.output:
@@ -749,7 +868,8 @@ class FrfMatrixPage(QtWidgets.QWidget):
         amount = "0% (exact)" if abs(err) < 1e-9 else f"{100 * err:+.3g}%"
         shares = []
         for t, c, value, on in zip(self.terms, self.term_colors, each, sel):
-            share = f"{100 * value / full:.3g}%" if full and np.isfinite(value) else "—"
+            share = "—" if not (full and np.isfinite(value)) else "0%" if abs(value / full) < 1e-9 else (
+                f"{100 * value / full:.3g}%")  # a node's share is round-off
             style = "" if on else f" style='color:{colors.grey}'"
             shares.append(f"<span style='color:{c}'>■</span><span{style}>{t.label} {share}</span>")
         return (
@@ -760,9 +880,8 @@ class FrfMatrixPage(QtWidgets.QWidget):
 
 
 THEORY_HTML = """
-<p><i>Before this page: <b>Start with one mass</b>, <b>Undamped normal modes</b> and
-<b>Proportional damping</b> in the Simulation page's Background tab.</i></p>
-<h3>The FRF (receptance) matrix</h3>
+<!--BEFORE-->
+<h3><a name="receptance-matrix"></a>The FRF (receptance) matrix</h3>
 <p>For a harmonic force f(t) = F e<sup>iωt</sup> the steady response is x(t) = X e<sup>iωt</sup> with
 <b>(K − ω²M + iωC) X = F</b>, so</p>
 <p>&nbsp;&nbsp;<b>X = H(ω) F</b>, &nbsp;&nbsp; H(ω) = (K − ω²M + iωC)<sup>−1</sup></p>
@@ -778,7 +897,7 @@ Pushing at m<sub>k</sub> and measuring at m<sub>j</sub> gives exactly the same F
 other way round (Maxwell–Betti).</li>
 </ul>
 
-<h3>Three forms of the same FRF</h3>
+<h3><a name="three-forms"></a>Three forms of the same FRF</h3>
 <p>H here is the <b>receptance</b> (or compliance, dynamic flexibility): displacement per unit
 force, in m/N. The same information is often given per unit force as velocity or acceleration,
 which for harmonic motion only multiplies H by iω or −ω²:</p>
@@ -794,14 +913,14 @@ accelerance (see the Virtual modal test page). Plotting Im H against Re H (a <i>
 turns each lightly damped resonance into a near-circle; for mobility and viscous damping it is
 exactly a circle, which the circle fit uses. Transfer FRFs (j ≠ k) fall faster above the modes.</p>
 
-<h3>Several forces at once</h3>
+<h3><a name="several-forces"></a>Several forces at once</h3>
 <p>Because the system is linear, the response to several forces is the sum of the responses to
 each: x<sub>j</sub> = Σ<sub>k</sub> H<sub>jk</sub> F<sub>k</sub>, a sum along row j. Tick
 several forces (or Ctrl+click plots in one row) to see the terms and their sum. The terms are
 complex, so where they are out of phase they cancel, and the sum can be <i>smaller</i> than
 either term alone.</p>
 
-<h3>Every term is a sum of modes</h3>
+<h3><a name="sum-of-modes"></a>Every term is a sum of modes</h3>
 <p>With mass-normalized undamped mode shapes φ<sub>r</sub> and proportional damping,</p>
 <p>&nbsp;&nbsp;<b>H<sub>jk</sub>(ω) = Σ<sub>r</sub> φ<sub>jr</sub> φ<sub>kr</sub> /
 (ω<sub>r</sub>² − ω² + 2iζ<sub>r</sub>ω<sub>r</sub>ω)</b></p>
@@ -833,7 +952,7 @@ between the ground and m2). The end-to-end term
 H<sub>1N</sub> has none, so its phase keeps falling by 180° at every resonance.</li>
 </ul>
 
-<h3>Truncation</h3>
+<h3><a name="truncation"></a>Truncation</h3>
 <p>Untick modes to see a <b>truncated modal model</b>, which is what you get from a finite-element
 model with only its lowest modes kept, or from a test that measured only some modes. Near the kept
 modes' peaks the sum is close. Elsewhere, especially at antiresonances and at low frequency, it
@@ -856,7 +975,7 @@ matter so little statically: their share falls as 1/ω<sub>r</sub>². The header
 lists every mode's share and the error of the ticked ones. That error is the residual
 flexibility that a truncated model leaves out.</p>
 
-<h3>Non-proportional damping</h3>
+<h3><a name="non-proportional-damping"></a>Non-proportional damping</h3>
 <p>The formula above keeps only the diagonal of Φ<sup>T</sup>CΦ. With non-proportional damping
 (say, raise only c<sub>1</sub>), the <b>Classical</b> sum misses the full solution even with
 every mode ticked. The <b>Exact</b> expansion uses the complex modes of the state-space form
@@ -864,5 +983,28 @@ instead: each eigenvalue pair contributes</p>
 <p>&nbsp;&nbsp;R<sub>r</sub>/(iω − λ<sub>r</sub>) + R<sub>r</sub>*/(iω − λ<sub>r</sub>*)</p>
 <p>with complex residue matrices R<sub>r</sub> (from the right and left eigenvectors), and their
 sum is exactly H for any damping. A heavily damped mode can split into two real
-(non-oscillatory) roots; each then contributes its own term.</p>
+(non-oscillatory) roots; each then contributes its own term. Where those complex modes come from,
+and how far they are from the real ones, is the next page's subject (Complex modes).</p>
+
+<h3><a name="try-it"></a>Things to try</h3>
+<p>Each of these sets up the chain and the plots (Things to try, top left). Loading one replaces the
+Simulation page's chain.</p>
+<!--TRIALS-->
+<!--TAKEAWAYS-->
 """
+THEORY_HTML = THEORY_HTML.replace("<!--BEFORE-->", before(
+    ("sim_page", "start-with-one-mass", "Start with one mass"),
+    ("sim_page", "undamped-normal-modes-real", "Undamped normal modes"),
+    ("sim_page", "proportional-damping", "Proportional damping"),
+)).replace("<!--TRIALS-->", "<ul>" + "".join(f"<li><b>{t.name}.</b> {t.note}</li>" for t in TRIALS) + "</ul>"
+).replace("<!--TAKEAWAYS-->", takeaways(
+    "H(ω) = (K − ω²M + iωC)<sup>−1</sup>: term H<sub>jk</sub> is the response at m<sub>j</sub> to a unit "
+    "force at m<sub>k</sub>, and H<sub>jk</sub> = H<sub>kj</sub>.",
+    "Every term is a sum of the same N resonances, weighted by the modal constants "
+    "φ<sub>jr</sub>φ<sub>kr</sub>; a node (φ = 0) hides a mode from a whole row and column.",
+    "A driving point's peaks and dips alternate; the dips are the frequencies of the chain outside, held "
+    "at the force and the response.",
+    "A truncated sum misses the high modes as a residual flexibility and the low ones as a residual mass, "
+    "most at the dips and away from the peaks.",
+    "With non-proportional damping only the complex-mode (exact) sum is exact.",
+))

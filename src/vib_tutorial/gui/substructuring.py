@@ -36,7 +36,7 @@ from ..core import (
 from ..core.substructure import METHOD_SHORT, SUBSTRUCTURE_NAMES
 from .animation import MASS_WIDTH, spring_path
 from .axes import log_axes
-from .cms_notes import THEORY_HTML, matrices_html
+from .cms_notes import THEORY_HTML, TRIALS, matrices_html
 from .cms_recovery import BackExpansionView
 from .cms_time import CMSTimeView
 from .layouts import ColumnScroll
@@ -755,6 +755,7 @@ class SubstructuringPage(QtWidgets.QWidget):
 
     dof_requested = QtCore.Signal(int)  # the user changed N here; the main window owns the system
     edit_parameters = QtCore.Signal()  # the user wants the Simulation page's parameter panel
+    system_requested = QtCore.Signal(object)  # a trial's chain, for the Simulation page
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -768,6 +769,22 @@ class SubstructuringPage(QtWidgets.QWidget):
         self._kept_wanted = [1] * len(SUB_NAMES)  # per substructure, remembered across changes; clipped to fit
 
         # --- controls
+        trials = QtWidgets.QGroupBox("Things to try")
+        tv = QtWidgets.QVBoxLayout(trials)
+        self.trial = QtWidgets.QComboBox()
+        self.trial.addItem("Pick one…")
+        self.trial.addItems([t.name for t in TRIALS])
+        self.trial.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.trial.setToolTip("<p>Each loads the 8-mass chain into the Simulation page and sets the cut, the "
+                              "modes kept and the method to show one idea from the Theory tab.</p>")
+        self.trial.currentIndexChanged.connect(self._on_trial)
+        tv.addWidget(self.trial)
+        self.trial_note = QtWidgets.QLabel()
+        self.trial_note.setWordWrap(True)
+        mute(self.trial_note)
+        self.trial_note.setVisible(False)
+        tv.addWidget(self.trial_note)
+
         box = QtWidgets.QGroupBox("Component mode synthesis")
         form = QtWidgets.QFormLayout(box)
         self.dof = QtWidgets.QSpinBox()
@@ -835,6 +852,7 @@ class SubstructuringPage(QtWidgets.QWidget):
         self.summary.setWordWrap(True)
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
+        lv.addWidget(trials)
         lv.addWidget(box)
         lv.addWidget(self.schematic)
         lv.addWidget(self.summary)
@@ -998,6 +1016,44 @@ class SubstructuringPage(QtWidgets.QWidget):
         self._style_cut_buttons()
         if self.system is not None:
             self.refresh()
+
+    def load_trial(self, index: int) -> None:
+        """Load TRIALS[index]: its chain (through the Simulation page), cut, modes kept, method and tab."""
+        trial = TRIALS[index]
+        self.trial_note.setText(trial.note)
+        self.trial_note.setVisible(True)
+        system = trial.system()
+        self.system_requested.emit(system)
+        if self.system is None or self.system.n != system.n or not np.allclose(self.system.stiffness, system.stiffness):
+            self.set_system(system)  # nobody passed it back: show it here alone
+        if self._dirty:
+            self.refresh()
+        self._kept_wanted = [trial.kept[min(s, len(trial.kept) - 1)] for s in range(len(SUB_NAMES))]
+        self.method.blockSignals(True)
+        self.method.setCurrentIndex(self.method.findData(trial.method))
+        self.method.blockSignals(False)
+        self._apply_method()
+        self.set_interfaces(list(trial.interfaces))
+        if trial.mode:
+            self.table.selectRow(trial.mode - 1)
+        view = (self.time, self.recovery)[trial.tab == 2] if trial.force is not None else None
+        self.tabs.setCurrentIndex(trial.tab)
+        if view is not None:
+            view.reset()
+            view.kind.setCurrentIndex(view.kind.findData(trial.force))
+            if trial.tune and self.full is not None:
+                view.freq.setValue(self.full.modes[trial.tune - 1].omega_n / (2 * np.pi))
+            if view is self.recovery:
+                view.select(1, 1)  # m2 and k2
+            view.button.click()
+
+    def _on_trial(self, index: int) -> None:
+        if index <= 0:
+            return
+        self.trial.blockSignals(True)
+        self.trial.setCurrentIndex(0)
+        self.trial.blockSignals(False)
+        self.load_trial(index - 1)
 
     def _on_cut(self, i: int, on: bool) -> None:
         self._style_cut_buttons()

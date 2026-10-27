@@ -36,6 +36,7 @@ from ..core.model import ChainSystem
 from ..core.presets import tuned_mass_damper
 from .axes import log_axes
 from .layouts import ColumnScroll, FlowLayout, group, plot_height
+from .links import before, takeaways
 from .panels import spin
 from .style import MAX_DOF, colors
 from .theming import add_legend, mute
@@ -89,7 +90,7 @@ def _chain(damping: list[float]) -> ChainSystem:
     return ChainSystem(np.ones(4), np.full(4, 400.0), np.array(damping, dtype=float))
 
 
-# Chains to try: (name, chain, note)
+# Things to try: (name, chain, note)
 TRIALS = (
     ("A damper per spring, in proportion", ChainSystem.uniform(4),
      "Four equal masses, springs and dampers: c<sub>i</sub> = k<sub>i</sub>/200, so C = K/200 and the damping is "
@@ -115,14 +116,13 @@ TRIALS = (
 )
 
 NOTES_HTML = """
-<h3>Proportional damping</h3>
+<!--BEFORE-->
+<h3>Proportional damping, again</h3>
 <p>The undamped modes φ<sub>r</sub> diagonalize the mass and stiffness matrices: in modal coordinates the
 chain is N separate oscillators. Damping keeps them separate only if Φ<sup>T</sup>CΦ is diagonal too:
-<b>proportional</b> (or classical) damping. C = αM + βK (Rayleigh damping) is one such C; on this chain, a
-damper per spring in proportion to it (c<sub>i</sub> = βk<sub>i</sub>) gives C = βK. Then each mode keeps its
-real shape: every mass passes through zero at the same instant, and the nodes stand still. Its damping ratio
-is ζ<sub>r</sub> = φ<sub>r</sub><sup>T</sup>Cφ<sub>r</sub>/2ω<sub>r</sub> (φ mass-normalized), its pole
-−ζ<sub>r</sub>ω<sub>r</sub> ± iω<sub>r</sub>√(1 − ζ<sub>r</sub>²).</p>
+<b>proportional</b> (or classical) damping, such as C = βK, a damper per spring in proportion to it. Then each
+mode keeps its real shape, its damping ratio is ζ<sub>r</sub> = φ<sub>r</sub><sup>T</sup>Cφ<sub>r</sub>/2ω<sub>r</sub>
+(φ mass-normalized), and its pole is −ζ<sub>r</sub>ω<sub>r</sub> ± iω<sub>r</sub>√(1 − ζ<sub>r</sub>²).</p>
 
 <h3>Complex modes</h3>
 <p>A damper on its own (a shock absorber, a joint, a tuned mass damper) is not proportional: Φ<sup>T</sup>CΦ
@@ -135,14 +135,66 @@ damping,</p>
 <p>the imaginary part grows with the coupling and as the other modes come close. Close modes, as a tuned mass
 damper makes, go complex first; a mode far from the others stays nearly real even under a heavy coupling.</p>
 
+<h3><a name="state-space"></a>The state-space form: 2N eigenvalues</h3>
+<p>The exact modes come from the equations written in first order, z = [x, ẋ]: ż = Az with
+A = [ 0 &nbsp;I ; −M<sup>−1</sup>K &nbsp;−M<sup>−1</sup>C ]. That doubles the size of the eigenproblem, so
+there are <b>2N eigenvalues</b> and 2N eigenvectors. <i>Method → State-space</i> on the
+<a href="page:sim_page#exact-damped-modes-are-complex">Simulation page</a>'s Modal analysis tab lists them.</p>
+<ul>
+<li><b>Conjugate pairs.</b> A is real, so complex eigenvalues come in pairs
+λ = σ + iω<sub>d</sub> and λ* = σ − iω<sub>d</sub>, with conjugate shapes ψ and ψ*.
+Neither one alone is a real motion; together they are:
+x(t) = ψe<sup>λt</sup> + ψ*e<sup>λ*t</sup> = 2 Re(ψ e<sup>λt</sup>). In the Simulation page's
+complex-plane plot the arrows of λ turn anticlockwise and those of λ* clockwise; their
+real parts, the displacements, are identical. Each oscillatory mode of the classical
+table corresponds to one pair.</li>
+<li><b>Real eigenvalues.</b> A heavily damped (overdamped) mode gives two real
+eigenvalues instead of a pair: pure exponential decays with time constant
+τ = −1/λ and no oscillation. A chain with no spring to the ground (k<sub>1</sub> = 0)
+has λ = 0: rigid-body motion, a position it keeps. With the damper c<sub>1</sub> still
+there, a second real root goes with it, close to −c<sub>1</sub>/(m<sub>1</sub> + … + m<sub>N</sub>)
+(−0.50 s<sup>−1</sup> for the default chain): a push slides the whole chain to a new position
+as its velocity dies away through c<sub>1</sub>. With
+c<sub>1</sub> = 0 too, λ = 0 is a repeated root with only one eigenvector (defective): the
+chain can drift at constant velocity, which no pair of exponentials describes.</li>
+<li><b>The eigenvector includes velocities.</b> The state eigenvector is
+[ψ ; λψ]. To start the chain in exactly one mode you must set the displacements
+<i>and</i> the velocities: x(0) = Re(ψ), ẋ(0) = Re(λψ). That is what <i>Release
+selected mode</i> does in this method. It is why a complex mode can be released cleanly
+with non-proportional damping, while the classical release (real shape, at rest) excites
+other modes too.</li>
+<li><b>Orthogonality.</b> A is not symmetric, so the ψ are not orthogonal in the
+usual sense. Decoupling the equations needs the <i>left</i> eigenvectors of A as well
+(or the symmetric "Duncan" form of the state equations). This is why the classical
+method, with its simple Φ<sup>T</sup>MΦ = I, is preferred whenever damping is light
+or nearly proportional.</li>
+</ul>
+<p><b>Is this an artifact of the solver?</b> No, it is physics. Both calculations are exact for the problem
+they solve: the undamped modes from the symmetric eigenproblem Kφ = ω²Mφ (real by construction), the damped
+ones from the general eigenproblem of A (complex when the damping is non-proportional). When the damping is
+proportional the two agree to machine precision. The only approximation is the classical ζ, which describes
+the damped chain with the <i>undamped</i> shapes; the time simulation always uses the full M, C and K.</p>
+<p><a name="state-space-coordinates"></a><b>Modal coordinates in state space.</b> With the eigenvectors
+[ψ; λψ] as the columns of Y, the state's modal coordinates are η = Y<sup>−1</sup>z. They need velocities as
+well as displacements. The coordinates of λ and λ* are conjugates, so each pair is one curve, 2 Re(η), in the
+Simulation page's modal plot. They are independent for <i>any</i> damping: each is a pure decaying
+oscillation (or decay) unless a force drives it. (The energy panel still splits the energy with the
+classical modes: the complex ones are not orthogonal through M and K, so their energies have cross
+terms.)</p>
+
 <h3>How complex</h3>
 <ul>
-<li><b>MPC</b>, the modal phase collinearity: (s<sub>xx</sub> − s<sub>yy</sub>)² + 4s<sub>xy</sub>² over
-(s<sub>xx</sub> + s<sub>yy</sub>)², the s the sums of products of ψ's real and imaginary parts. 1 when the
-entries lie on a line through the origin, 0 when they spread evenly round it.</li>
+<li><b>MPC</b>, the modal phase collinearity:</li>
+</ul>
+<p align="center">MPC = [(s<sub>xx</sub> − s<sub>yy</sub>)² + 4s<sub>xy</sub>²] / (s<sub>xx</sub> + s<sub>yy</sub>)²,</p>
+<p>where s<sub>xx</sub> = Σ(Re ψ<sub>j</sub>)², s<sub>yy</sub> = Σ(Im ψ<sub>j</sub>)² and
+s<sub>xy</sub> = Σ Re ψ<sub>j</sub> Im ψ<sub>j</sub>. It is 1 when the entries lie on a line through the
+origin, 0 when they spread evenly round it.</p>
+<ul>
 <li><b>MPD</b>, the mean phase deviation: the entries' angles from their best-fit line, weighted by their size.
 0° for a real mode.</li>
-<li><b>MAC</b>(φ, ψ): how much of the exact shape the undamped one explains.</li>
+<li><b>MAC</b>(φ, ψ) = |φ<sup>T</sup>ψ|² / (φ<sup>T</sup>φ ψ<sup>H</sup>ψ): how much of the exact shape the
+undamped one explains, 1 for the same shape.</li>
 </ul>
 <p>Measured modes are always a little complex (noise, a slightly non-linear structure, a sensor out of
 phase), so a small MPD says little; a large one in an analysis says the damping couples the modes.</p>
@@ -156,7 +208,7 @@ go overdamped, or a damper lock a joint. The <i>FRF</i> tab compares the recepta
 releases the chain in an undamped mode's shape: exactly that mode, if the damping is proportional; otherwise
 the damping hands some of the motion to the other modes, close ones most.</p>
 
-<h3>Sweeping a damper</h3>
+<h3><a name="sweep"></a>Sweeping a damper</h3>
 <p>The <i>Sweep</i> tab follows each mode's exact pole as one damper goes from almost nothing to very stiff,
 the rest of the chain as it is: the <b>root locus</b>. With a light damper every mode's damping grows in
 proportion to it, as the approximation says. But a damper only works while its ends move apart: as it
@@ -168,8 +220,10 @@ the default chain, its other dampers taken out, gives mode 1 at most ζ = 0.147,
 ever. The modes are most complex near those peaks, where the damper both works hard and changes the shapes.
 Sweeping a spring instead moves the modes, and how complex they get depends on how close they come.</p>
 
-<h3>Identification</h3>
-<p>A modal test fits a model to measured FRFs. The <i>Identification</i> tab fits one column (a force on one
+<h3><a name="identification"></a>Identification</h3>
+<p>This tab looks ahead to the <a href="page:test_page#extraction">Virtual modal test</a> page, which
+explains how modes are fitted to a measurement; come back to it after that page. A modal test fits a model
+to measured FRFs. The <i>Identification</i> tab fits one column (a force on one
 mass, every response, with a little noise) on the exact poles two ways, by least squares (LSFD): with
 <b>complex modes</b>, residues of any phase, which fit any viscous damping; and with <b>real modes</b>,
 A<sub>r</sub>/(ω<sub>r</sub>² − ω² + 2iζ<sub>r</sub>ω<sub>r</sub>ω) with A<sub>r</sub> real, the model of a
@@ -177,7 +231,28 @@ proportionally damped structure. With proportional damping the two agree. Otherw
 take the modes' phases: it fits the FRF worse and gets the shapes wrong, and its shapes are not the undamped
 ones either. Noise makes even real modes come out a little complex from the complex-mode fit, which is why
 a small MPD in a measurement says little.</p>
+
+<h3>Things to try</h3>
+<p>Pick a chain under <i>Things to try</i> on the left (it loads into the Simulation page too):</p>
+<!--TRIALS-->
+<!--TAKEAWAYS-->
 """
+NOTES_HTML = NOTES_HTML.replace("<!--BEFORE-->", before(
+    ("sim_page", "proportional-damping", "Proportional damping"),
+    ("sim_page", "non-proportional-damping-and-coupling", "Non-proportional damping"),
+    ("sim_page", "exact-damped-modes-are-complex", "Exact damped modes are complex"),
+)).replace("<!--TRIALS-->", "<ul>" + "".join(f"<li><b>{name}.</b> {note}</li>" for name, _, note in TRIALS) + "</ul>"
+           ).replace("<!--TAKEAWAYS-->", takeaways(
+    "Proportional damping keeps the undamped modes: real shapes, nodes that stand still, and ζ = "
+    "φ<sup>T</sup>Cφ/2ω exactly.",
+    "A damper that isn't proportional couples the modes; the exact modes, from the 2N × 2N state matrix, are "
+    "then complex, most of all where modes are close.",
+    "The usual approximation keeps only the diagonal of Φ<sup>T</sup>CΦ: good for light damping and separated "
+    "modes, wrong (even ten times) where a damper changes the shapes.",
+    "A damper has a best size for each mode: past it, it locks its joint and damps less.",
+    "MPC and MPD measure how complex a shape is; a measured mode is always a little complex, so only a large "
+    "value means much.",
+))
 
 
 def _plot(left: str, left_units: str | None, bottom: str, bottom_units: str | None, log: bool = False
@@ -199,7 +274,10 @@ def _cell(text: str) -> QtWidgets.QTableWidgetItem:
 
 
 def _percent(approx: float, exact: float) -> str:
-    return f"{100 * (approx / exact - 1):+.3g} %" if exact and np.isfinite(exact) and np.isfinite(approx) else "–"
+    if not (exact and np.isfinite(exact) and np.isfinite(approx)):
+        return "–"
+    error = 100 * (approx / exact - 1)
+    return "0 %" if abs(error) < 1e-9 else f"{error:+.3g} %"  # not round-off's ±1e-13 %
 
 
 class ComplexModesPage(QtWidgets.QWidget):
@@ -237,7 +315,7 @@ class ComplexModesPage(QtWidgets.QWidget):
         link.linkActivated.connect(lambda _: self.edit_parameters.emit())
         form.addRow(link)
 
-        trials = QtWidgets.QGroupBox("Chains to try")
+        trials = QtWidgets.QGroupBox("Things to try")
         tv = QtWidgets.QVBoxLayout(trials)
         self.trial = QtWidgets.QComboBox()
         self.trial.addItem("Load a chain…")
@@ -442,7 +520,7 @@ class ComplexModesPage(QtWidgets.QWidget):
         self.tabs.addTab(scatter_tab, "Phases")
         self.tabs.addTab(sweep_scroll, "Sweep")
         self.tabs.addTab(ident_tab, "Identification")
-        self.tabs.addTab(self.notes, "Notes")
+        self.tabs.addTab(self.notes, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)
@@ -593,7 +671,8 @@ class ComplexModesPage(QtWidgets.QWidget):
     def redraw(self) -> None:
         r = self.result
         if r.is_proportional:
-            self.coupling.setText("Coupling index <b>0</b>: the damping is <b>proportional</b>, and every mode real.")
+            self.coupling.setText("Coupling index <b>0</b>: the damping is <b>proportional</b>, and every mode real. "
+                                  "Pick a chain under <i>Things to try</i> to see one that isn't.")
         else:
             self.coupling.setText(f"Coupling index <b>{r.coupling:.2f}</b>: the damping is <b>not proportional</b>, "
                                   "and the modes are complex.")

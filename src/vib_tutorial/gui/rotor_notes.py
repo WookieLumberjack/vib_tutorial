@@ -10,6 +10,7 @@ import numpy as np
 
 from ..core.rotor import DOF_NAMES, MODE_LIMIT, RPM, XD, YA, YB, YD, RotorSystem, periodic_steady, whirl_modes
 from .cms_notes import fmt
+from .links import before, takeaways
 from .style import colors
 
 LABELS = ["x<sub>A</sub>", "x<sub>D</sub>", "θ<sub>x</sub>", "x<sub>B</sub>",
@@ -436,16 +437,17 @@ bearings' share of it back on the journals, {bow_journals}.</p>
 
 
 THEORY_HTML = """
+<!--BEFORE-->
 <h2>The Jeffcott rotor</h2>
 <p>A disc on a flexible, massless shaft between two bearings is the simplest model of a rotating
 machine. H. H. Jeffcott's 1919 paper (and A. Föppl's of 1895, hence also the <i>Laval</i> or
 <i>Föppl–Jeffcott</i> rotor) used it to explain why a turbine can run smoothly above the speed at which
 its shaft whirls most violently. Here the bearings stand on flexible supports, springs and dampers in
 the horizontal (x) and vertical (y) directions, and the disc can tilt as well as move sideways.</p>
-<p>The notes come in six parts: the fundamentals; how the response is measured; what drives the rotor
-once per revolution, and balancing; gravity, and shafts whose stiffness turns with them; stability; and
-the numerics. Each section gives the idea, its equation and where that comes from, then the numbers on
-the defaults, and ends with where to find it on the page. The <i>Things to try</i> follow the same six
+<p>The notes come in seven parts: the fundamentals; how the response is measured; what drives the rotor
+once per revolution, and balancing; gravity, and shafts whose stiffness turns with them; stability; rub;
+and the numerics. Each section gives the idea, its equation and where that comes from, then the numbers on
+the defaults, and ends with where to find it on the page. The <i>Things to try</i> follow the first six
 parts, and the notation is listed last.</p>
 
 <h2>1. Fundamentals</h2>
@@ -1475,6 +1477,7 @@ and the thermal bow spiral out together, turning clockwise (more lag), until the
 target to 3200 rpm and Reset: through the critical the bow grows to about 26 µm, and then fades, the disc
 settling at 5.9 µm with the bow at 2.4 µm. Set β to 0 and nothing grows below the critical either.</li>
 </ol>
+<!--TAKEAWAYS-->
 
 <h2>Notation</h2>
 <table border="1" cellspacing="0" cellpadding="4">
@@ -1552,6 +1555,23 @@ settling at 5.9 µm with the bow at 2.4 µm. Set β to 0 and nothing grows below
 <tr><td>x<sub>c</sub>, A<sub>c</sub>, B<sub>c</sub>, F<sub>c</sub></td><td>the controllers' states; their equations, x<sub>c</sub>' = A<sub>c</sub>x<sub>c</sub> + B<sub>c</sub>q; their push on q, F<sub>c</sub>x<sub>c</sub></td><td>—</td></tr>
 </table>
 """
+THEORY_HTML = THEORY_HTML.replace("<!--BEFORE-->", before(
+    ("sim_page", "start-with-one-mass", "Start with one mass"),
+    ("complex_page", "state-space", "The state-space form"),
+    ("complex_page", "sweep", "Sweeping a damper"),
+    ("duffing_page", "harmonic-balance", "Harmonic balance"),
+)).replace("<!--TAKEAWAYS-->", takeaways(
+    "A rotor's unbalance response peaks at the critical speeds, and the heavy spot leads the high spot by "
+    "90° there and by about 180° well above: run above a critical and the disc centres itself.",
+    "Spin splits each mode into a forward and a backward whirl (the gyroscopic effect), so the critical "
+    "speeds are where the 1X line crosses the Campbell diagram's forward branches.",
+    "Balancing measures the 1X vector with and without a trial weight; the influence coefficients then give "
+    "the weight that cancels it, plane by plane.",
+    "Gravity only moves the equilibrium on a round shaft, but on an asymmetric or cracked one it drives 2X, "
+    "with a peak at half a critical.",
+    "Cross-coupled stiffness (oil films, seals, internal damping) feeds the forward whirl and sets an "
+    "onset speed above which the rotor is unstable, whatever its balance.",
+))
 
 
 def _crack_note(s: RotorSystem) -> str:

@@ -198,3 +198,54 @@ def test_frf_matrix_antiresonances_of_h22():
 def test_modal_coupling_absorber_damping_is_shared():
     r = modal_analysis(preset("absorber").system)
     assert [m.zeta_modal for m in r.modes] == pytest.approx([0.012, 0.012], abs=0.0015)
+
+
+def test_background_friction_trial_loses_5_mm_a_cycle_and_sticks_after_four():
+    from vib_tutorial.gui.sim_trials import TRIALS
+
+    note = next(t.note for t in TRIALS if t.name.startswith("Friction"))
+    sim = Simulator(ChainSystem([1.0], [400.0], [0.01], [0.5]))
+    sim.set_displacement(np.array([0.02]))
+    out = []
+    while sim.t < 2.0 - 1e-12:
+        out.append(sim.advance(2.0 - sim.t)[:3])
+    t, x, v = (np.concatenate(a)[:, 0] if a[0].ndim > 1 else np.concatenate(a) for a in zip(*out))
+    turns = np.flatnonzero(v[:-1] * v[1:] < 0) + 1
+    lost = 0.02 - np.abs(x[turns[1::2]])  # after each whole cycle
+    np.testing.assert_allclose(np.diff(np.concatenate([[0.0], lost]))[:3], 0.005, atol=2e-4)
+    still = t[np.flatnonzero(v != 0)[-1]]
+    assert still == pytest.approx(1.3, abs=0.05) and abs(x[-1]) < 1.25e-3
+    assert "= 5 mm" in note and "four cycles (1.3 s)" in note
+
+
+def test_background_rayleigh_quotient_and_effective_masses():
+    s = ChainSystem.uniform(4)
+    M, _, K = s.matrices()
+    v = np.array([1.0, 2.0, 3.0, 4.0])
+    assert np.sqrt(v @ K @ v / (v @ M @ v)) / (2 * np.pi) == pytest.approx(1.162, abs=5e-4)
+    assert modal_analysis(s).modes[0].omega_n / (2 * np.pi) == pytest.approx(1.105, abs=5e-4)
+    gamma2 = [(m.shape_mass_normalized @ M @ np.ones(4)) ** 2 for m in modal_analysis(s).modes]
+    np.testing.assert_allclose(gamma2, [3.57, 0.33, 0.08, 0.01], atol=0.006)
+
+
+def test_frf_and_coupling_trials():
+    from vib_tutorial.core.modal_coupling import coupled_model as model
+    from vib_tutorial.gui.coupling_notes import TRIALS as COUPLING
+
+    s = ChainSystem.uniform(4)
+    _, _, K = s.matrices()
+    phi = np.array([m.shape_mass_normalized for m in modal_analysis(s).modes]).T
+    w2 = np.array([m.omega_n**2 for m in modal_analysis(s).modes])
+    share = phi[0] ** 2 / w2 / np.linalg.inv(K)[0, 0]  # m1's static compliance, mode by mode
+    assert share[2:].sum() == pytest.approx(0.24, abs=0.005)
+    assert (phi[3, 0] ** 2 / w2[0]) / np.linalg.inv(K)[3, 3] == pytest.approx(0.89, abs=0.005)
+    assert abs(phi[2, 1]) < 1e-12  # m3 is a node of mode 2
+    errors = {}
+    for t in COUPLING:
+        system = t.system()
+        comparisons = compare_coupled(model(system, t.split, t.mode_a, t.mode_b, t.a_mass, True), modal_analysis(system))
+        errors[t.name] = [100 * c.error for c in comparisons]
+    np.testing.assert_allclose(errors["Two equal halves: pushed far apart"][1], 4.9, atol=0.05)
+    np.testing.assert_allclose(errors["A light half, tuned: splitting"], [0.2, 0.3], atol=0.05)
+    np.testing.assert_allclose(errors["The wrong mass for A"], [2.9, -2.2], atol=0.06)
+    assert errors["A mode left out (8 masses)"][0] == pytest.approx(-14, abs=0.5)

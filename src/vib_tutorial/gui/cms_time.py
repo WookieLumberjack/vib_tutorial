@@ -73,7 +73,7 @@ class CMSRunView(QtWidgets.QWidget):
         self.reset_button.setToolTip("Both models back to rest, force off")
         self.speed = QtWidgets.QComboBox()
         for s in SPEEDS:
-            self.speed.addItem(f"{s:g}×", s)
+            self.speed.addItem(f"{s:g}× real time", s)
         self.speed.setCurrentIndex(SPEEDS.index(1.0))
         self.speed.setToolTip("Simulation speed (× real time)")
         self.window = spin(0.1, 60.0, 5.0, 1, " s")

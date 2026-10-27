@@ -2,17 +2,154 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from ..core import (
+    ChainSystem,
     CMSModel,
+    ForceKind,
     ModalResult,
     Substructure,
     compare_modes,
     substructure_damping,
 )
 from ..core.modal import TWO_PI
+from .links import before, takeaways
 from .style import colors
+
+
+@dataclass(frozen=True)
+class CmsTrial:
+    """An 8-mass chain for the Simulation page, and how this page cuts and reduces it."""
+
+    name: str
+    note: str
+    interfaces: tuple[int, ...] = ()  # 0-based interface masses
+    kept: tuple[int, ...] = (1,)  # modes kept per substructure, the last repeated
+    method: str = "craig-bampton"
+    tab: int = 0  # Modes & FRF, Time response, Back expansion, Compare methods, Basis, Matrices
+    force: ForceKind | None = None  # applied on the tab's tip force (Time response or Back expansion)
+    tune: int = 0  # harmonic force at this mode (1-based) of the full chain
+    floating: bool = False  # k1 = k2 = 0
+    mode: int = 0  # the comparison table's row to select (1-based), 0 to leave it
+
+    def system(self) -> ChainSystem:
+        system = ChainSystem.uniform(8)
+        if self.floating:
+            system.stiffness[:2] = 0.0
+        return system
+
+
+STEP, HARMONIC = ForceKind.STEP, ForceKind.HARMONIC
+TRIALS = (
+    CmsTrial(
+        "One substructure: Guyan",
+        "No cut and no modes kept: only x<sub>8</sub> is left, one DOF and one frequency, 0.630 Hz against "
+        "the true 0.587 Hz (+7.3%). The Basis tab shows why: the one constraint mode is a straight line "
+        "from the ground to the tip, so this is Rayleigh's quotient with a linear shape.",
+        kept=(0,), tab=4),
+    CmsTrial(
+        "One substructure: one mode kept",
+        "The first mode with the tip held (1.24 Hz) joins the basis. Mode 1 falls to 0.33% and mode 2 is "
+        "7.4% high. Keep 2 and mode 3 is 4.4% high; keep all 7 (All modes) and every error is zero.",
+        kept=(1,)),
+    CmsTrial(
+        "Guyan, in time",
+        "A step force at the tip on the Guyan model. It can only move in its one straight-line shape, so it "
+        "rings at the wrong frequency and drifts in and out of phase with the full chain: the error swings "
+        "between a small fraction and most of the tip motion. Raise the modes kept and watch the two "
+        "chains lock together.",
+        kept=(0,), tab=1, force=STEP),
+    CmsTrial(
+        "One substructure: Rubin",
+        "Rubin with 1 mode. The free-interface modes of the only substructure are the chain's own modes, so "
+        "mode 1 is exact, but mode 2 is 16% high: the residual flexibility gets the statics right, not the "
+        "next mode.",
+        kept=(1,), method="rubin"),
+    CmsTrial(
+        "Cut at m4, one mode each",
+        "4 DOFs (q<sub>A1</sub>, q<sub>B1</sub>, x<sub>4</sub>, x<sub>8</sub>) instead of 8. Mode 1 is "
+        "within 0.03%, mode 4 is 7% high with MAC 0.84, and modes 5 to 8 aren't in the model at all. "
+        "Under <i>Substructures on their own</i>, A and B are identical three-mass pieces with a clamped "
+        "mode at 2.44 Hz each; coupled, they split into modes 3 (2.84 Hz) and 4 (3.84 Hz), each carrying "
+        "about half its energy.",
+        interfaces=(3,)),
+    CmsTrial(
+        "Cut at m4: Guyan",
+        "Only the two boundary DOFs are left: mode 1 is still within 2%, mode 2 is 11% high. The reduced "
+        "FRF matches at low frequency and drifts above mode 1. Click <i>All modes (exact)</i>: every error "
+        "drops to zero, although the matrices look nothing like M and K.",
+        interfaces=(3,), kept=(0,)),
+    CmsTrial(
+        "Cut at m4, two modes each",
+        "6 DOFs. Every frequency stays above the true one. The kept fixed-interface modes reach 4.5 Hz "
+        "(Matrices tab, step 3), and modes 1 to 3 (up to 2.8 Hz) are within 0.03%; mode 6 is still 2.7% "
+        "high.",
+        interfaces=(3,), kept=(2,), tab=5),
+    CmsTrial(
+        "The interface at m7: the rule of thumb",
+        "B is just the last spring, with no interior, so all the reduction happens in A. Here A keeps 3 "
+        "modes (up to 3.97 Hz) and modes 1 to 4 are within 0.2%. Set A's modes kept to 1: 3 DOFs, and mode "
+        "3 is 50% too high (MAC 0.27).",
+        interfaces=(6,), kept=(3, 1)),
+    CmsTrial(
+        "Driving at mode 4",
+        "Cut at m4, 1 mode each, a harmonic force at the full chain's mode 4 (3.84 Hz). The Craig–Bampton "
+        "model resonates at 4.11 Hz instead, so its tip moves 30% less and lags behind: the error is about "
+        "half the motion. Keep 2 modes in each and it drops to 9%; keep 3 and the two chains move as one. "
+        "(Tuned to mode 1, they stay within 1%.)",
+        interfaces=(3,), tab=1, force=HARMONIC, tune=4),
+    CmsTrial(
+        "Three substructures",
+        "Cut at m3 and m6, 1 mode in each of A, B and C: 6 DOFs, as with one cut at m4 and 2 modes each, "
+        "but 3 of them are interfaces and the tip, and mode 4 is 2.3% high (one cut, 2 modes each: within "
+        "0.71%). Click <i>Guyan</i>: 3 physical DOFs, and mode 3 is 16% high.",
+        interfaces=(2, 5)),
+    CmsTrial(
+        "Free interface: Rubin",
+        "Cut at m4, 1 mode each, Rubin. B's one kept mode is now its rigid-body mode (B1 at 0 Hz, carrying "
+        "83% of coupled mode 1's kinetic energy). Mode 1 is within 0.003% (Craig–Bampton: 0.02%) and mode 2 "
+        "within 0.9%, but mode 4 is 10% high against Craig–Bampton's 7%. In the Basis tab the boundary "
+        "columns are residual attachment modes, which already bend like the higher modes.",
+        interfaces=(3,), method="rubin"),
+    CmsTrial(
+        "Free interface: MacNeal",
+        "Still 4 coordinates, but the boundary DOFs are massless, so there are only 2 modes: mode 1 is 0.6% "
+        "high and mode 2 22%. Click <i>All modes</i>: 6 modes now, still not exact (mode 6 is 66% high), "
+        "because the mass of B's discarded modes is gone. Drive it at mode 1 (Time response): the 0.6% "
+        "matters on a mode this lightly damped, and the tip error grows to about half the motion.",
+        interfaces=(3,), method="macneal"),
+    CmsTrial(
+        "Three methods compared",
+        "Mode 3's error against the model's size, for each method. Every curve falls as modes are added; "
+        "Craig–Bampton and Rubin reach the exact answer with all modes (drawn at the floor), MacNeal stays "
+        "0.8% high, and for mode 3 Craig–Bampton and Rubin take turns in the lead. Select mode 1: Rubin is "
+        "ahead at every size.",
+        interfaces=(3,), tab=3, mode=3),
+    CmsTrial(
+        "Parts that float",
+        "k<sub>1</sub> = k<sub>2</sub> = 0, so m1 and m2 aren't held by anything but the interface. "
+        "Craig–Bampton fails (m1 and m2 float when the boundary is held: switch to it and see), but the "
+        "free-interface methods simply find more rigid-body modes in A.",
+        interfaces=(3,), method="rubin", floating=True),
+    CmsTrial(
+        "Back expansion after a step",
+        "Cut at m4, 1 mode each, a step force; m2 and spring k2 plotted. The hollow masses are recovered, the "
+        "solid ones come straight from the coupled solve. Once the ringing dies away every recovery agrees "
+        "with the truth (the constraint modes are exact static shapes). While it rings, x2 is about 2% off "
+        "from the coupled solution and 4% from the boundary alone: the gap is the q part. With Guyan the two "
+        "recoveries are the same, both about 28% off.",
+        interfaces=(3,), tab=2, force=STEP),
+    CmsTrial(
+        "Recovering a force",
+        "2 modes each, driven at mode 4. x<sub>b</sub> is within about 9%, the coupled recovery of x2 within "
+        "15%, but its force in k2 is off by nearly 40%: a force is a difference of displacements, which "
+        "brings out the truncated higher modes. The enhanced recovery puts them back (about 12%). Keep 3 "
+        "(all) modes and every recovery but the boundary-only one is exact.",
+        interfaces=(3,), kept=(2,), tab=2, force=HARMONIC, tune=4),
+)
 
 
 def legend_html() -> str:
@@ -29,8 +166,7 @@ def legend_html() -> str:
     )
 
 THEORY_HTML = """
-<p><i>Before this page: <b>Undamped normal modes</b> in the Simulation page's Background tab,
-and the Modal coupling page's Theory tab, which reduces a split chain to a few modes by hand.</i></p>
+<!--BEFORE-->
 <p><i>Symbols are defined in the <a href="#notation">Notation</a> table at the end.</i></p>
 <h3>Why substructure?</h3>
 <p>Real structures are built from components: an engine on a frame, a wing on a fuselage,
@@ -54,22 +190,7 @@ substructure keeps its own number of modes.</p>
 from <a href="#free">Free-interface methods</a> on). The <i>Compare methods</i> tab runs all
 three on the same cut.</p>
 
-<h3>Boundary (master) and interior DOFs</h3>
-<ul>
-<li><b>Boundary DOFs x<sub>b</sub></b> are kept as physical displacements. Here they are
-the interface masses, each shared by the substructures either side of it, and the last mass
-of the chain, where the force is applied.</li>
-<li><b>Interior DOFs x<sub>i</sub></b> are every other mass. Each belongs to exactly one
-substructure and is replaced by a few modal coordinates q.</li>
-</ul>
-<p><b>Why is the force limited to the last mass?</b> A force on a boundary DOF enters the
-reduced model unchanged (f̂ = T<sup>T</sup>f = [0; f<sub>b</sub>]) and the response there
-is read directly, so any difference from the full model is caused by the reduction and
-not by how the load was projected. A force on an interior DOF is allowed in Craig–Bampton,
-but it only reaches the model through the kept modes and the constraint modes. In practice,
-the DOFs that are loaded, measured or connected to other components are made masters.</p>
-
-<h3>What is a basis? (the key idea)</h3>
+<h3><a name="basis"></a>What is a basis? (the key idea)</h3>
 <p>Every method on this page, and modal analysis itself, rests on one idea: <b>describing the
 motion with a different set of shapes</b>. It is worth getting this clear before looking at
 any Craig–Bampton matrix.</p>
@@ -137,7 +258,7 @@ on whether the true motion lies (nearly) inside that set of shapes. The MAC in t
 table measures exactly that for each mode. Adding shapes can only enlarge the set, which is why
 the frequencies converge from above.</p>
 
-<h4>The Craig–Bampton basis, and why it is chosen this way</h4>
+<h4><a name="craig-bampton"></a>The Craig–Bampton basis, and why it is chosen this way</h4>
 <p>Inside a component, any motion can be split into two parts:</p>
 <ul>
 <li><b>Motion forced by the boundary.</b> If the boundary moves slowly, the interior simply
@@ -163,11 +284,26 @@ of the interior drives the component's modes. M̂<sub>qb</sub> is that inertial 
 is how the components talk to each other dynamically. (For C, see <i>Damping</i> under <i>Properties worth knowing</i>.)</li>
 </ul>
 <p>The <i>Basis</i> tab plots every column of the current T as a shape along the chain. For the
-8-mass chain of the <i>Try it</i> steps, cut at m4 with one mode each, there are four: A's first clamped mode (over
+8-mass chain of <i>Things to try</i>, cut at m4 with one mode each, there are four: A's first clamped mode (over
 m1–m3, zero elsewhere), B's first clamped mode (over m5–m7), a "tent" for x<sub>4</sub> (rising
 linearly from the ground to m4, falling to m8, the static shape of both components when the
 interface moves) and a ramp for x<sub>8</sub> (zero up to m4, rising to the tip). Every motion
 the reduced model can make is a combination of those four shapes.</p>
+
+<h3><a name="boundary"></a>Boundary (master) and interior DOFs</h3>
+<ul>
+<li><b>Boundary DOFs x<sub>b</sub></b> are kept as physical displacements. Here they are
+the interface masses, each shared by the substructures either side of it, and the last mass
+of the chain, where the force is applied.</li>
+<li><b>Interior DOFs x<sub>i</sub></b> are every other mass. Each belongs to exactly one
+substructure and is replaced by a few modal coordinates q.</li>
+</ul>
+<p><b>Why is the force limited to the last mass?</b> A force on a boundary DOF enters the
+reduced model unchanged (f̂ = T<sup>T</sup>f = [0; f<sub>b</sub>]) and the response there
+is read directly, so any difference from the full model is caused by the reduction and
+not by how the load was projected. A force on an interior DOF is allowed in Craig–Bampton,
+but it only reaches the model through the kept modes and the constraint modes. In practice,
+the DOFs that are loaded, measured or connected to other components are made masters.</p>
 
 <h3>Original vs substructured formulation</h3>
 <table border="1" cellspacing="0" cellpadding="4">
@@ -391,7 +527,7 @@ against 7%.</p>
 recovery together in one exact update, and compares all three recoveries of one interior mass and
 one spring with the truth.</p>
 
-<h3>Properties worth knowing</h3>
+<h3><a name="properties"></a>Properties worth knowing</h3>
 <ul>
 <li><b>No modes kept = Guyan reduction.</b> Only the constraint modes remain, so the model
 is exact statically (at 0 Hz) and good for low modes when little mass is "hidden" in the
@@ -437,110 +573,12 @@ interface is one DOF; on a 3D finite-element model it can be thousands, which is
 interface reduction methods exist.</li>
 </ul>
 
-<h3>Try it</h3>
-<p><b>One substructure</b> (no cut, as the page starts):</p>
-<ol>
-<li>Set <i>Number of masses</i> to 8 and click <i>Guyan (0 modes)</i>. Only x<sub>8</sub> is
-left: one DOF, one frequency, 0.630 Hz against the true 0.587 Hz (+7.3%). The <i>Basis</i> tab
-shows why: the one constraint mode is a straight line from the ground to the tip, so this is
-Rayleigh's method with a linear shape, ω² = (k/8) / Σ(i/8)²m.</li>
-<li>Keep 1 mode: A's first mode with the tip held (1.24 Hz) joins the basis. Mode 1 falls to
-0.33% and mode 2 is 7.4% high. Keep 2 and mode 3 is 4.4% high; keep all 7 and every error is
-zero.</li>
-<li>Back to Guyan, open <i>Time response</i> and apply the step force. The reduced chain can
-only move in its one straight-line shape, so it rings at the wrong frequency and drifts in
-and out of phase with the full chain: the error swings between a small fraction and most of the
-tip motion. Add modes and watch the two chains lock together.</li>
-<li>Choose <i>Rubin</i> and keep 1 mode. The free-interface modes of the only substructure are
-the chain's own modes, so mode 1 is exact, but mode 2 is 16% high: the residual flexibility
-gets the statics right, not the next mode. Back to <i>Craig–Bampton</i>.</li>
-</ol>
-<p><b>Two substructures:</b></p>
-<ol>
-<li>Click m4 to cut the chain there, and keep 1 mode in each
-substructure. The reduced model has 4 DOF (q<sub>A1</sub>, q<sub>B1</sub>, x<sub>4</sub>,
-x<sub>8</sub>) instead of 8. Mode 1 is within 0.03%, mode 4 is 7% high with MAC 0.84, and
-modes 5 to 8 are not in the reduced model at all.</li>
-<li>Scroll down to <i>Substructures on their own</i>. With the interface at m4, A and B are
-identical three-mass pieces, so each has a clamped mode at 2.44 Hz. Coupled, the two split
-into modes 3 (2.84 Hz) and 4 (3.84 Hz), each carrying about half its energy: two equal
-oscillators joined together always split this way. Move the interface to m7: A's three lowest
-modes each become mostly one coupled mode (shares of 74–84%), while the higher ones mix more.</li>
-<li>Open the <i>Basis</i> tab and change the modes kept: each kept mode adds one shape (one
-column of T), and the constraint-mode shapes stay the same. Every result on this page is a
-combination of the shapes shown there.</li>
-<li>Click <i>Guyan (0 modes)</i>. Only the two boundary DOFs are left: mode 1 is still
-within 2%, mode 2 is 11% high. On the <i>Modes &amp; FRF</i> tab the reduced FRF matches at
-low frequency and drifts above mode 1.</li>
-<li>Click <i>All modes (exact)</i>. Every error drops to zero, although the matrices look
-nothing like the original M and K: same system, different coordinates.</li>
-<li>Keep 2 modes in each substructure (6 DOFs). Every CB frequency stays above the true
-one. The kept fixed-interface modes reach 4.5 Hz (Matrices tab, step 3), and modes 1 to 3
-(up to 2.8 Hz) are now within 0.03%; mode 6 is still 2.7% high.</li>
-<li>Move the interface to m7 (click m7 on, then m4 off). B shrinks to the last spring and has no interior, so all
-the reduction happens in A. With 1 mode kept in A the model has 3 DOFs and mode 3 is 50%
-too high (MAC 0.27). Keep 3 modes in A (up to 3.97 Hz) and modes 1 to 4 fall within
-0.2%: the rule of thumb in action.</li>
-<li>Back to the interface at m4 and 1 mode each. Open <i>Time response</i> and apply the step
-force. The two chains end in the same static shape, and the difference is only the ringing,
-about 1% of the tip motion. Choose <i>Harmonic</i> and <i>Tune to → Mode 1 true</i>: the
-two stay together (under 1%). Tune to <i>Mode 4 true</i> (3.84 Hz): the Craig–Bampton model
-resonates at 4.11 Hz instead, so its tip moves 30% less and lags behind; the error is about
-half the motion. Keep 2 modes in each substructure and it drops to 9%; keep 3 and the two
-chains move as one.</li>
-<li><b>Three substructures.</b> Still with 8 masses: one cut at m4 and 2 modes each gives 6 DOFs, and modes 1 to 4 are within
-0.71%. Now cut at m3 and m6 instead (click m4 off, m3 and m6 on) and keep 1 mode in each of A, B
-and C: also 6 DOFs, but 3 of them are interfaces and the tip, and mode 4 is 2.3% high. Click
-<i>Guyan</i>: 3 physical DOFs, and mode 3 is 16% high.</li>
-</ol>
-<p><b>Free interface</b> (back to 8 masses, the interface at m4, 1 mode each):</p>
-<ol>
-<li>Choose <i>Rubin</i>. The model is the same size (4 DOFs), but B's one kept mode is now its
-rigid-body mode. Mode 1 is within 0.003% (Craig–Bampton: 0.02%) and mode 2 within 0.9%, but mode
-4 is 10% high against Craig–Bampton's 7%. Open <i>Substructures on their own</i>: B1 is at 0 Hz and
-carries 83% of coupled mode 1's kinetic energy.</li>
-<li>Open the <i>Basis</i> tab. The boundary columns are no longer the straight-line "tent" and
-ramp: they are residual attachment modes, the static deflection of the discarded modes, which
-already bend like the higher modes.</li>
-<li>Choose <i>MacNeal</i>. Still 4 coordinates, but the boundary DOFs are massless, so there are
-only 2 modes: mode 1 is 0.6% high and mode 2 22%. Click <i>All modes</i>: 6 modes now, still not
-exact (mode 6 is 66% high), because the mass of B's discarded modes is gone.</li>
-<li>Open <i>Compare methods</i> and select mode 3 in the table on the left. Every curve falls as
-modes are added. Craig–Bampton and Rubin reach the exact answer with all modes (drawn at the
-floor); MacNeal is still 0.8% high. For mode 3 Craig–Bampton and Rubin take turns in the lead; select
-mode 1 and Rubin is ahead at every size.</li>
-<li>On <i>Time response</i>, drive at <i>Mode 1 true</i> with MacNeal. Its mode 1 is only 0.6%
-high, but mode 1 is so lightly damped (ζ = 0.009) that the 0.6% shift matters: as the
-resonance builds up the two responses drift out of phase, and the tip error grows to about half
-the motion. Rubin, with the residual mass, is within 0.2%.</li>
-<li>Set k<sub>1</sub> = k<sub>2</sub> = 0 on the Simulation page, with the interface at m4.
-Craig–Bampton fails (m1 and m2 float when the boundary is held), but the free-interface methods
-simply find more rigid-body modes in A.</li>
-</ol>
-
-<p><b>Back expansion</b> (8 masses, the interface at m4, Craig–Bampton, 1 mode each; on the
-<i>Back expansion</i> tab choose m2 and spring k2; the percentages are RMS errors over the plot
-window and move a little as it runs):</p>
-<ol>
-<li>Apply the step force. The lower chain's hollow masses are recovered, the solid ones come
-straight from the coupled solve. Once the ringing has died away all three recoveries agree with the
-truth: the constraint modes are exact static shapes. While it rings, x2 is about 2% off from the
-coupled solution and 4% from the boundary alone: the gap is the q part (the dash-dot curve).</li>
-<li>Click <i>Guyan (0 modes)</i>. With no q, the coupled recovery <i>is</i> the boundary-only
-one (the two error curves lie on top of each other), and both are about 28% off.</li>
-<li>Back to 1 mode each; <i>Harmonic</i>, <i>Tune to → Mode 1 true</i>. Every recovery except the
-boundary-only one is within 1%: at mode 1 the interior moves nearly in its static shape plus the
-first fixed-interface mode, and that is exactly what 1 mode keeps.</li>
-<li><i>Tune to → Mode 4 true</i>. Now the boundary motion itself is 50–60% wrong (the reduced model
-resonates at the wrong frequency), and no recovery can do better than the boundary it starts
-from.</li>
-<li>Keep 2 modes in each. x<sub>b</sub> is within about 9%, the coupled recovery of x2 within
-15%, but its force in k2 is off by nearly 40%: a force is a difference of displacements, which
-brings out the truncated higher modes. The enhanced recovery puts them back and brings the force
-error down to about 12%. Keep 3 (all) modes and every recovery but the boundary-only one is
-exact.</li>
-</ol>
-
+<h3><a name="try-it"></a>Things to try</h3>
+<p>Each of these loads the uniform 8-mass chain into the Simulation page and sets the cut, the modes
+kept and the method (Things to try, top left). The percentages on the time tabs are RMS errors over
+the plot window and move a little as it runs.</p>
+<!--TRIALS-->
+<!--TAKEAWAYS-->
 <h3><a name="notation"></a>Notation</h3>
 <table border="1" cellspacing="0" cellpadding="4">
 <tr><th>Symbol</th><th>Meaning</th><th>Units</th></tr>
@@ -583,6 +621,21 @@ exact.</li>
 <tr><td>OTM, LTM</td><td>output and loads transformation matrices: interior displacements and spring forces as a matrix times r</td><td>m/m, N/m</td></tr>
 </table>
 """
+THEORY_HTML = THEORY_HTML.replace("<!--BEFORE-->", before(
+    ("sim_page", "undamped-normal-modes-real", "Undamped normal modes"),
+    ("sim_page", "rayleigh-quotient", "Estimating a frequency from a guessed shape"),
+    ("coupling_page", "rayleigh-ritz", "Why this works: it is a Rayleigh–Ritz model"),
+)).replace("<!--TRIALS-->", "<ul>" + "".join(f"<li><b>{t.name}.</b> {t.note}</li>" for t in TRIALS) + "</ul>"
+).replace("<!--TAKEAWAYS-->", takeaways(
+    "Reducing a model is describing its motion with fewer shapes: x = Tq, M̂ = TᵀMT, K̂ = TᵀKT.",
+    "Craig–Bampton keeps each part's modes with its boundary held plus one static constraint mode per "
+    "boundary DOF; it is Rayleigh–Ritz, so every frequency is an upper bound that falls as modes are added.",
+    "Keep fixed-interface modes up to about 1.5–2 times the highest frequency you care about.",
+    "Free-interface methods (Rubin, MacNeal) use the modes a test would measure, corrected by the "
+    "residual flexibility of the ones left out.",
+    "A model good to a fraction of a percent in frequency can still be far off at a resonance, and a "
+    "recovered force is worse than a recovered displacement.",
+))
 
 
 def fmt(v: float, scale: float) -> str:

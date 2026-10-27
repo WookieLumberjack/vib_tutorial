@@ -1261,7 +1261,7 @@ class RotorPage(QtWidgets.QWidget):
 
     # ------------------------------------------------------------- panels
     def _preset_box(self) -> QtWidgets.QGroupBox:
-        box = QtWidgets.QGroupBox("Preset")
+        box = QtWidgets.QGroupBox("Things to try")
         v = QtWidgets.QVBoxLayout(box)
         self.presets = rotor_presets()
         self.preset = QtWidgets.QComboBox()

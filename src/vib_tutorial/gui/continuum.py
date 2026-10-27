@@ -48,6 +48,7 @@ from ..core.continuum_waves import (
 from . import frame_stats, settle_plots
 from .axes import log_axes
 from .layouts import ColumnScroll, FlowLayout, group, plot_height
+from .links import before, takeaways
 from .panels import spin
 from .style import colors
 from .theming import add_legend, mute
@@ -120,10 +121,12 @@ SHAPE_TIP = (
     "shape functions between them (straight for a string or bar, cubic for a beam), largest +1.</p>")
 
 NOTES_HTML = """
+<!--BEFORE-->
 <h3>From a chain to a continuum</h3>
 <p>Cut a string, a bar or a beam into N equal elements of length h and it becomes a chain of masses and
-springs, with N or so modes where the continuum has infinitely many. How good are they? A string of beads, or
-the bar as the chain of the first page (k = EA/h, m = ρAh), says it best through its waves.</p>
+springs, with N or so modes where the continuum has infinitely many. How good are they? A string becomes a
+string of beads and a bar becomes the first page's chain (k = EA/h, m = ρAh), and the clearest way to compare
+them with the continuum is through the waves each can carry.</p>
 
 <h3>The continuum's waves</h3>
 <p>A string under tension T (mass μ per length) and a bar (EA, ρA) obey one equation, the wave equation:</p>
@@ -184,12 +187,21 @@ why the mesh's high modes, the short waves, are the ones not to trust.</p>
 <p>A beam's bending waves are dispersive on the continuum too, ω = aκ²: a bump released on it spreads
 into ripples, the short ones running ahead at twice the speed of waves twice as long.</p>
 
-<h3>What to take away</h3>
-<p>A mesh is a low-pass filter on the continuum: the modes it gets right are those with many elements to a
-wavelength. Ten elements a wavelength (κh ≈ 0.63) keeps a string's lumped error under 2 %; the rule of thumb is
-6 to 10. Its top modes are artefacts of the mesh, and so is anything it does fast: a pulse on it trails ripples
-the continuum doesn't have.</p>
+<!--TAKEAWAYS-->
 """
+NOTES_HTML = NOTES_HTML.replace("<!--BEFORE-->", before(
+    ("sim_page", "undamped-normal-modes-real", "Undamped normal modes"),
+    ("sim_page", "rayleigh-quotient", "Estimating a frequency from a guessed shape"),
+)).replace("<!--TAKEAWAYS-->", takeaways(
+    "A mesh is a low-pass filter on the continuum: it carries the long waves correctly, its short ones too "
+    "slowly (lumped) or too fast (consistent), and nothing shorter than two elements.",
+    "Its low modes are good and its top modes are artefacts of the mesh: ten elements a wavelength (κh ≈ 0.63) "
+    "keeps a string's lumped error under 2 %, and the rule of thumb is 6 to 10.",
+    "A consistent mass makes the mesh Rayleigh–Ritz (upper bounds); mixing lumped and consistent cancels the "
+    "leading error.",
+    "Waves reflect at every change of impedance; a matched dashpot absorbs them.",
+))
+
 
 
 def _plot(left: str, left_units: str | None, bottom: str, bottom_units: str | None,
@@ -331,8 +343,11 @@ class ContinuumPage(QtWidgets.QWidget):
 
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
-        lv.addWidget(self.preset)
-        lv.addWidget(self.preset_note)
+        presets = QtWidgets.QGroupBox("Things to try")
+        preset_layout = QtWidgets.QVBoxLayout(presets)
+        preset_layout.addWidget(self.preset)
+        preset_layout.addWidget(self.preset_note)
+        lv.addWidget(presets)
         lv.addWidget(medium)
         lv.addWidget(mesh)
         lv.addWidget(waves)
@@ -449,7 +464,7 @@ class ContinuumPage(QtWidgets.QWidget):
         self.shape_tab = shape_tab
         self.tabs.addTab(shape_tab, "Mode shape")
         self.tabs.addTab(self.table, "Frequencies")
-        self.tabs.addTab(self.notes, "Notes")
+        self.tabs.addTab(self.notes, "Theory")
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_scroll)

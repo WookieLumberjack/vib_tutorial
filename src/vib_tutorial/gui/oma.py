@@ -46,6 +46,7 @@ from ..core.oma import (
     ssi_modes,
 )
 from .layouts import ColumnScroll, FlowLayout, group, plot_height
+from .links import before, takeaways
 from .modal_extraction import ResultsView, StabilizationPlot, colored
 from .modal_test import suggested_fs
 from .panels import spin
@@ -132,6 +133,7 @@ TRIALS = (
 )
 
 NOTES_HTML = """
+<!--BEFORE-->
 <h3>Operational modal analysis</h3>
 <p>A modal test measures the force and the response, and their ratio, the FRF, is the structure's own. A bridge
 or a running machine can't be hammered: it is shaken by traffic, wind or its own working, forces nobody
@@ -143,7 +145,7 @@ structure.</p>
 <p>and near a lightly damped mode r its term dominates: G<sub>yy</sub> ≈ d<sub>r</sub> φ<sub>r</sub>φ<sub>r</sub><sup>H</sup>,
 a matrix of rank one whose column space is the mode shape.</p>
 
-<h3>Frequency domain decomposition</h3>
+<h3><a name="fdd"></a>Frequency domain decomposition</h3>
 <p>FDD estimates G<sub>yy</sub> at each line by Welch's method (the responses cut into blocks, windowed,
 Fourier transformed, Y Y<sup>H</sup> averaged) and takes its singular value decomposition,
 G<sub>yy</sub> = U S U<sup>H</sup>. The first singular value s₁ peaks at every mode, and the first singular vector
@@ -185,7 +187,21 @@ rule of thumb is a thousand to two thousand periods of the slowest mode.</li>
 <li>Damping is the hardest: the Hann window's leakage widens the peaks of a short block (too much damping),
 and a bell cut short by the MAC threshold rings on (too little).</li>
 </ul>
+<!--TAKEAWAYS-->
 """
+NOTES_HTML = NOTES_HTML.replace("<!--BEFORE-->", before(
+    ("test_page", "estimators", "Averaging and estimators"),
+    ("test_page", "extraction", "Modal parameter extraction"),
+    ("random_page", "miles", "Miles' equation"),
+)).replace("<!--TAKEAWAYS-->", takeaways(
+    "With broadband random forces, the responses' spectra take their shape from the structure, so the modes "
+    "can be found from the responses alone.",
+    "FDD: the cross-spectral matrix's first singular value peaks at each mode, and its singular vector is the"
+    " shape; EFDD adds the damping from the bell's decay.",
+    "SSI-cov fits a state-space model to the responses' correlations, with a stabilization diagram as LSCF has.",
+    "Output-only shapes can't be scaled, a machine's sine looks like a mode, and the records must be long.",
+))
+
 
 
 def _plot(left: str, left_units: str | None, bottom: str, bottom_units: str | None) -> pg.PlotWidget:
@@ -406,7 +422,7 @@ class OmaPage(QtWidgets.QWidget):
         self.tabs = QtWidgets.QTabWidget()
         self.efdd_tab = efdd_tab
         self.methods_tab = methods_tab
-        self.tabs.addTab(self.results, "Modal parameters")
+        self.tabs.addTab(self.results, "Modes")
         self.tabs.addTab(efdd_tab, "EFDD")
         self.tabs.addTab(self.stab_plot, "Stabilization")
         self.tabs.addTab(methods_tab, "Methods")
