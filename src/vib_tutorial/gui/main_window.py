@@ -133,6 +133,9 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "active_control_page":
         from .active_control import ActiveControlPage
         return ActiveControlPage
+    if name == "pendulum_page":
+        from .pendulum import PendulumPage
+        return PendulumPage
     from .modal_test import ModalTestPage
     return ModalTestPage
 MODE_ANIMATION_HZ = 0.5  # visual rate for the animated mode-shape plot
@@ -558,6 +561,7 @@ class MainWindow(QtWidgets.QMainWindow):
     complex_page = property(lambda self: self._page("complex_page"))
     updating_page = property(lambda self: self._page("updating_page"))
     shock_page = property(lambda self: self._page("shock_page"))
+    pendulum_page = property(lambda self: self._page("pendulum_page"))
     active_control_page = property(lambda self: self._page("active_control_page"))
     self_excited_page = property(lambda self: self._page("self_excited_page"))
     fatigue_page = property(lambda self: self._page("fatigue_page"))

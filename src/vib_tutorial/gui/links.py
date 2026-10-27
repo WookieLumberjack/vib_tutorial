@@ -37,6 +37,8 @@ COURSE = (
     ("One mass", (
         ("sdof_page", "Single oscillator",
          "one mass on a spring and a damper: free decay, damping, resonance, half-power, beats, poles"),
+        ("pendulum_page", "Pendulums",
+         "gravity as the spring, large swings that soften, and the rotational form of every one-mass formula"),
         ("transient_page", "Transient response",
          "an impulse, a step or a pulse: the impulse response, convolution, and how long a pulse has to be"),
         ("periodic_page", "Periodic forcing",
@@ -101,6 +103,7 @@ def course_map() -> str:
 # Titles as the links name them (the tab titles without Qt's && escape).
 PAGE_TITLES = {
     "sdof_page": "Single oscillator page",
+    "pendulum_page": "Pendulums page",
     "transient_page": "Transient response page",
     "periodic_page": "Periodic forcing page",
     "damping_page": "Damping models page",

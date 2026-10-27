@@ -3755,7 +3755,7 @@ def test_shock_page(app):
 
 @pytest.mark.parametrize("name", ["sdof_page", "transient_page", "periodic_page", "damping_page", "isolation_page",
                                   "energy_page", "integration_page", "fatigue_page",
-                                  "self_excited_page", "active_control_page",
+                                  "pendulum_page", "self_excited_page", "active_control_page",
                                   "signals_page"])
 def test_lesson_pages_trials_and_tabs(app, name):
     """Every one-click trial of the One mass and Signals pages loads, and every tab draws, in either theme."""

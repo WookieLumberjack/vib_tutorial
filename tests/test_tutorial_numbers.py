@@ -604,3 +604,37 @@ def test_self_excited_trials():
     assert fr[0] == pytest.approx([2.93, 6.71], abs=0.1) and fr[1] == pytest.approx([3.4, 5.0], abs=0.05)
     assert Flutter(x_cg=-0.2).flutter_speed() == pytest.approx(f.divergence_speed(), abs=0.05)
     assert Flutter(x_cg=0.0).flutter_speed() == pytest.approx(17.7, abs=0.05)
+
+
+def test_pendulum_trials():
+    import math
+
+    from vib_tutorial.core.pendulum import Kind, Pendulum, conjugate_pivot, duffing_period, period, rod_period, swing
+
+    p = Pendulum()
+    assert (p.natural_hz, p.period0) == pytest.approx((0.498, 2.006), abs=5e-4)
+    assert Pendulum(mass=7.0).period0 == pytest.approx(p.period0)
+    assert period(p, math.radians(90)) == pytest.approx(2.368, abs=5e-4)
+    assert period(p, math.radians(90)) / p.period0 - 1 == pytest.approx(0.18, abs=0.005)
+    # Duffing's estimate (either form) within 1 % up to about 75°
+    for a, inside in ((70, True), (80, False)):
+        T = period(p, math.radians(a))
+        for guess in (duffing_period(p, math.radians(a)), p.period0 * (1 + math.radians(a) ** 2 / 16)):
+            assert (abs(guess / T - 1) < 0.01) == inside
+    assert period(p, math.radians(170)) / p.period0 == pytest.approx(2.44, abs=0.005)
+    rod = Pendulum(Kind.ROD)
+    assert (rod.inertia, rod.equivalent_length, rod.period0) == pytest.approx((1 / 3, 0.667, 1.638), abs=5e-4)
+    assert rod_period(1.0, 1 / math.sqrt(12)) == pytest.approx(1.524, abs=5e-4)
+    assert conjugate_pivot(1.0, 0.5) == pytest.approx(0.167, abs=5e-4)
+    assert rod_period(1.0, conjugate_pivot(1.0, 0.5)) == pytest.approx(rod.period0)
+    disc = Pendulum(Kind.TORSION, length=0.1, spring=0.5)
+    assert disc.natural_hz == pytest.approx(1.59, abs=0.005)
+    assert period(disc, math.radians(170)) == pytest.approx(disc.period0, rel=1e-9)
+    inv = Pendulum(Kind.INVERTED, spring=15.0)
+    assert (inv.stiffness, inv.natural_hz) == pytest.approx((5.19, 0.363), abs=5e-4)
+    assert 1 - period(inv, math.radians(60)) / inv.period0 == pytest.approx(0.10, abs=0.005)
+    lean = Pendulum(Kind.INVERTED, spring=9.0, zeta=0.1)
+    assert math.degrees(lean.leaning()) == pytest.approx(40.8, abs=0.05)
+    t, th, _ = swing(lean, math.radians(1.0), 70.0)
+    assert math.degrees(th[-1]) == pytest.approx(40.8, abs=0.1)
+    assert Pendulum(gravity=1.62).period0 == pytest.approx(4.94, abs=0.005)
