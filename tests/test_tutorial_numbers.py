@@ -376,3 +376,33 @@ def test_signals_trials():
     assert usable_band(0.7, accelerometer=False) == pytest.approx(1.7, abs=0.05)
     assert usable_band(0.7, accelerometer=False) * 4.5 == pytest.approx(7.6, abs=0.05)
     assert mass_loaded(200.0, 0.5, 0.03) / 200 - 1 == pytest.approx(-0.029, abs=0.0005)
+
+
+def test_periodic_trials():
+    import math
+
+    from vib_tutorial.core.periodic import Forcing, Wave, periodic_steady, response_coefficients, series, series_error
+    from vib_tutorial.core.sdof import Oscillator
+
+    osc = Oscillator()
+    t = np.linspace(0.0, 1.0, 20001)
+    sq = Forcing(Wave.SQUARE)
+    assert np.max(series(sq.coefficients(5), 1.0, t)) - 1 == pytest.approx(0.19, abs=0.005)
+    fine = np.linspace(0.0, 0.01, 20001)
+    assert np.max(series(sq.coefficients(401), 1.0, fine)) - 1 == pytest.approx(0.18, abs=0.005)
+    third = Forcing(Wave.SQUARE, freq_hz=osc.natural_hz / 3)
+    assert 4 / (3 * math.pi) == pytest.approx(0.42, abs=0.005) and 1 / (2 * osc.omega_n) == pytest.approx(0.025)
+    X = np.abs(response_coefficients(osc, third, 3))
+    assert (X[3], X[1]) == pytest.approx((0.0106, 0.0036), abs=5e-5)
+    swing = lambda fo: float(np.max(periodic_steady(osc, fo, t * fo.period)))  # noqa: E731
+    assert swing(third) == pytest.approx(0.0139, abs=5e-5)
+    assert swing(Forcing(Wave.SQUARE, freq_hz=osc.natural_hz / 2)) == pytest.approx(0.0050, abs=5e-5)
+    blows = periodic_steady(osc, Forcing(Wave.IMPULSES, 0.1), t)
+    assert (blows.min(), blows.max()) == pytest.approx((-0.0045, 0.0052), abs=5e-5)
+    assert 0.1 / 400 == pytest.approx(0.00025) and osc.time_constant == pytest.approx(1.0)
+    assert 2 / math.pi == pytest.approx(0.64, abs=0.005) and 2 / math.pi / 400 == pytest.approx(0.00159, abs=5e-6)
+    tri, sq1 = Forcing(Wave.TRIANGLE), Forcing(Wave.SQUARE)
+    assert series_error(osc, tri, 3) == pytest.approx(0.019, abs=0.0005)
+    assert series_error(osc, sq1, 3) == pytest.approx(0.057, abs=0.0005)
+    assert series_error(osc, tri, 9) == pytest.approx(0.0010, abs=0.00005)
+    assert series_error(osc, sq1, 9) == pytest.approx(0.0065, abs=0.00005)

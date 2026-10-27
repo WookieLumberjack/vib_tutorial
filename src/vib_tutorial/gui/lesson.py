@@ -157,3 +157,67 @@ def connect_all(boxes: Sequence[QtWidgets.QWidget], slot: Callable[[], None]) ->
             box.toggled.connect(lambda *_: slot())
         elif isinstance(box, QtWidgets.QComboBox):
             box.currentIndexChanged.connect(lambda *_: slot())
+
+
+def marker(size: int = 11, symbol: str = "o", name: str | None = None) -> pg.PlotDataItem:
+    """Points without a line. A PlotDataItem, not a ScatterPlotItem: only it follows a plot's log axes."""
+    return pg.PlotDataItem(pen=None, symbol=symbol, symbolSize=size, name=name)
+
+
+def mark(item: pg.PlotDataItem, color: str, filled: bool = False, width: float = 2.0) -> None:
+    """Colour a `marker`: an outline, or a filled dot."""
+    item.setSymbolPen(pg.mkPen(color, width=width) if not filled else None)
+    item.setSymbolBrush(pg.mkBrush(color) if filled else None)
+
+
+def combo(items: Sequence[str], tip: str = "") -> QtWidgets.QComboBox:
+    """A combo box that shrinks to its pane (long items are elided)."""
+    box = QtWidgets.QComboBox()
+    box.addItems(list(items))
+    box.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    if tip:
+        box.setToolTip(tip)
+    return box
+
+
+def column(*widgets: QtWidgets.QWidget, stretch: bool = True) -> QtWidgets.QWidget:
+    """Widgets stacked top to bottom (a page's left pane, or a tab)."""
+    w = QtWidgets.QWidget()
+    v = QtWidgets.QVBoxLayout(w)
+    for item in widgets:
+        v.addWidget(item)
+    if stretch:
+        v.addStretch(1)
+    return w
+
+
+def stack(*items: tuple[QtWidgets.QWidget, int]) -> QtWidgets.QWidget:
+    """Widgets stacked with stretch factors, no margins (a page's centre)."""
+    w = QtWidgets.QWidget()
+    v = QtWidgets.QVBoxLayout(w)
+    v.setContentsMargins(0, 0, 0, 0)
+    for item, factor in items:
+        v.addWidget(item, factor)
+    return w
+
+
+def three_panes(page: QtWidgets.QWidget, left: QtWidgets.QWidget, centre: QtWidgets.QWidget,
+                right: QtWidgets.QWidget, sizes: Sequence[int] = (320, 760, 560)) -> QtWidgets.QSplitter:
+    """The lesson pages' layout: controls (scrolling) | the main plots | the tabs."""
+    from .layouts import ColumnScroll
+
+    splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+    splitter.addWidget(ColumnScroll(left))
+    splitter.addWidget(centre)
+    splitter.addWidget(right)
+    splitter.setSizes(list(sizes))
+    layout = QtWidgets.QHBoxLayout(page)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addWidget(splitter)
+    return splitter
+
+
+def theory(html: str) -> QtWidgets.QTextBrowser:
+    browser = QtWidgets.QTextBrowser()
+    browser.setHtml(html)
+    return browser

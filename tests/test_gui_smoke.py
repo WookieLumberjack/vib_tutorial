@@ -3753,7 +3753,8 @@ def test_shock_page(app):
     w.close()
 
 
-@pytest.mark.parametrize("name", ["sdof_page", "transient_page", "damping_page", "isolation_page", "signals_page"])
+@pytest.mark.parametrize("name", ["sdof_page", "transient_page", "periodic_page", "damping_page", "isolation_page",
+                                  "signals_page"])
 def test_lesson_pages_trials_and_tabs(app, name):
     """Every one-click trial of the One mass and Signals pages loads, and every tab draws, in either theme."""
     from vib_tutorial.gui.main_window import MainWindow

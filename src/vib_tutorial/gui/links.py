@@ -39,6 +39,8 @@ COURSE = (
          "one mass on a spring and a damper: free decay, damping, resonance, half-power, beats, poles"),
         ("transient_page", "Transient response",
          "an impulse, a step or a pulse: the impulse response, convolution, and how long a pulse has to be"),
+        ("periodic_page", "Periodic forcing",
+         "a repeating force as a Fourier series: harmonics, Gibbs, resonance through a harmonic"),
         ("damping_page", "Damping models",
          "viscous, hysteretic, friction and viscoelastic damping: their loops, losses and decays"),
         ("isolation_page", "Vibration isolation",
@@ -90,6 +92,7 @@ def course_map() -> str:
 PAGE_TITLES = {
     "sdof_page": "Single oscillator page",
     "transient_page": "Transient response page",
+    "periodic_page": "Periodic forcing page",
     "damping_page": "Damping models page",
     "isolation_page": "Vibration isolation page",
     "sim_page": "Simulation page",
