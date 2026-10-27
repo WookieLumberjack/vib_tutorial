@@ -115,6 +115,79 @@ def test_secondary_pages_build_when_opened(app):
     assert w.pages.currentWidget() is w.sim_page
 
 
+def test_theory_button_f1_and_links_between_pages(app):
+    from PySide6 import QtGui
+
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    browser = w.show_theory()
+    assert browser.isVisibleTo(w) and "Before this page" not in browser.toHtml()  # the first page's
+    shortcuts = {s.key().toString(): s for s in w.findChildren(QtGui.QShortcut)}
+    w.pages.setCurrentWidget(w.frf_page)
+    shortcuts["F1"].activated.emit()
+    assert w.frf_page.tabs.currentWidget() is w.frf_page.theory
+    w.go_to("coupling_page", "effective-mass")  # as a page: link does
+    assert w.pages.currentWidget() is w.coupling_page
+    assert w.coupling_page.tabs.currentWidget() is w.coupling_page.theory
+    shortcuts["Ctrl+5"].activated.emit()
+    assert w.pages.group_title(w.pages.currentIndex()) == "Beyond the chain"
+    w.close()
+
+
+def test_one_click_trials_set_up_their_pages(app):
+    from PySide6.QtTest import QTest
+
+    from vib_tutorial.gui import coupling_notes, frf_matrix
+    from vib_tutorial.gui.cms_notes import TRIALS as CMS_TRIALS
+    from vib_tutorial.gui.main_window import MainWindow
+    from vib_tutorial.gui.sim_trials import TRIALS as SIM_TRIALS
+
+    w = MainWindow()
+    w.show()
+    for i, trial in enumerate(SIM_TRIALS):
+        w._on_trial(i + 1)  # as picking it does
+        assert w.trial_note.text() == trial.note
+        if not trial.preset:
+            assert w.params.system().n == trial.n
+
+    p = w.frf_page
+    w.pages.setCurrentWidget(p)
+    QTest.qWait(50)
+    for i, trial in enumerate(frf_matrix.TRIALS):
+        p.trial.setCurrentIndex(i + 1)
+        assert (p.output, p.inputs) == (trial.output, set(trial.inputs))
+        assert [c.isChecked() for c in p.mode_checks] == [r + 1 not in trial.unticked for r in range(4)]
+        assert np.allclose(w.params.system().damping, trial.system().damping)
+
+    p = w.coupling_page
+    w.pages.setCurrentWidget(p)
+    for i, trial in enumerate(coupling_notes.TRIALS):
+        p.trial.setCurrentIndex(i + 1)
+        assert p.split == trial.split and p.a_mass.currentData() == trial.a_mass and p.system.n == trial.system().n
+
+    p = w.cms_page
+    w.pages.setCurrentWidget(p)
+    for i, trial in enumerate(CMS_TRIALS):
+        p.trial.setCurrentIndex(i + 1)
+        assert p.interfaces == list(trial.interfaces) and p.method.currentData() == trial.method
+        assert p.tabs.currentIndex() == trial.tab
+    p.time.reset()
+    p.recovery.reset()
+
+    p = w.test_page
+    w.pages.setCurrentWidget(p)
+    p.speed.setCurrentIndex(0)  # Instant
+    p.trial.setCurrentIndex(1)  # a force at the node of mode 2
+    for _ in range(400):
+        if not p.running:
+            break
+        QTest.qWait(25)
+    assert p.input.currentIndex() == 2 and p.ident is not None and len(p.ident.modes) == 3
+    w.close()
+
+
 def test_state_space_method(app):
     import numpy as np
 

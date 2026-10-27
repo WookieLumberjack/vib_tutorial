@@ -187,20 +187,16 @@ why the mesh's high modes, the short waves, are the ones not to trust.</p>
 <p>A beam's bending waves are dispersive on the continuum too, ω = aκ²: a bump released on it spreads
 into ripples, the short ones running ahead at twice the speed of waves twice as long.</p>
 
-<h3><a name="summary"></a>In short</h3>
-<p>A mesh is a low-pass filter on the continuum: the modes it gets right are those with many elements to a
-wavelength. Ten elements a wavelength (κh ≈ 0.63) keeps a string's lumped error under 2 %; the rule of thumb is
-6 to 10. Its top modes are artefacts of the mesh, and so is anything it does fast: a pulse on it trails ripples
-the continuum doesn't have.</p>
 <!--TAKEAWAYS-->
 """
 NOTES_HTML = NOTES_HTML.replace("<!--BEFORE-->", before(
     ("sim_page", "undamped-normal-modes-real", "Undamped normal modes"),
     ("sim_page", "rayleigh-quotient", "Estimating a frequency from a guessed shape"),
 )).replace("<!--TAKEAWAYS-->", takeaways(
-    "A mesh carries the continuum's long waves correctly and its short ones too slowly (lumped) or too fast "
-    "(consistent), and nothing shorter than two elements.",
-    "Its low modes are good and its top modes are artefacts; trust about 6 to 10 elements per wavelength.",
+    "A mesh is a low-pass filter on the continuum: it carries the long waves correctly, its short ones too "
+    "slowly (lumped) or too fast (consistent), and nothing shorter than two elements.",
+    "Its low modes are good and its top modes are artefacts of the mesh: ten elements a wavelength (κh ≈ 0.63) "
+    "keeps a string's lumped error under 2 %, and the rule of thumb is 6 to 10.",
     "A consistent mass makes the mesh Rayleigh–Ritz (upper bounds); mixing lumped and consistent cancels the "
     "leading error.",
     "Waves reflect at every change of impedance; a matched dashpot absorbs them.",
