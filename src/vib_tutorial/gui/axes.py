@@ -7,8 +7,6 @@ LogAxis draws every tick but labels all of them only when they fit, else 1,
 decade at each redraw (so it stays readable while zooming). It also turns off pyqtgraph's automatic
 SI prefix in log mode, which scales the labels and appends a confusing
 "(x0.001)" to the axis title.
-
-install_opaque_grid() also changes how every plot draws its grid: opaque, and under the data.
 """
 
 from __future__ import annotations
@@ -17,8 +15,6 @@ import math
 
 import pyqtgraph as pg
 from PySide6 import QtGui
-
-from . import style
 
 # Labelled mantissas, the first set that fits: every tick, then 1, 2 and 5, then only the decades.
 TIERS = (tuple(range(1, 10)), (1, 2, 5), (1,))
@@ -83,51 +79,3 @@ def log_axes() -> dict[str, LogAxis]:
     """Left and bottom axes for a plot with a log axis: pass as axisItems to addPlot or PlotWidget."""
     return {"left": LogAxis("left"), "bottom": LogAxis("bottom")}
 
-
-# Grid lines. pyqtgraph draws a plot's grid as its axes' ticks stretched across the plot, in the
-# foreground colour at a low alpha, and above the data (the axes sit at z 0.5, over the ViewBox).
-# Blending those long translucent lines is what a plot that rescales every frame spends its paint
-# on: on the Duffing page's phase plane and strip chart, ~35 ms a frame, against ~5 ms with the
-# same lines drawn opaque. So a grid axis draws them in the colour they would have come out over
-# the background, and goes behind the ViewBox, so that the lines pass under the curves, not over.
-GRID_Z = -200.0  # below the ViewBox (z -100): the grid goes under the data
-AXIS_Z = 0.5  # pyqtgraph's own
-
-
-def _opaque_grid_specs(self, p):
-    specs = _generate_draw_specs(self, p)
-    if specs is None or self.grid is False:
-        return specs
-    axis_spec, tick_specs, text_specs = specs
-    bg = QtGui.QColor(style.colors.background)
-    blended: dict[tuple[int, int], QtGui.QPen] = {}  # (pen id, alpha) -> opaque pen; the ticks share a few
-    out = []
-    for pen, p1, p2 in tick_specs:
-        c = pen.color()
-        a = c.alphaF()
-        if a < 1.0:
-            key = (id(pen), c.alpha())
-            if key not in blended:
-                opaque = QtGui.QPen(pen)
-                opaque.setColor(QtGui.QColor.fromRgbF(c.redF() * a + bg.redF() * (1 - a),
-                                                      c.greenF() * a + bg.greenF() * (1 - a),
-                                                      c.blueF() * a + bg.blueF() * (1 - a)))
-                blended[key] = opaque
-            pen = blended[key]
-        out.append((pen, p1, p2))
-    return axis_spec, out, text_specs
-
-
-def _set_grid(self, grid) -> None:
-    _set_grid_original(self, grid)
-    self.setZValue(AXIS_Z if self.grid is False else GRID_Z)
-
-
-_generate_draw_specs = pg.AxisItem.generateDrawSpecs
-_set_grid_original = pg.AxisItem.setGrid
-
-
-def install_opaque_grid() -> None:
-    """Draw every plot's grid opaque and under the data (see GRID_Z); make_app calls it once."""
-    pg.AxisItem.generateDrawSpecs = _opaque_grid_specs
-    pg.AxisItem.setGrid = _set_grid

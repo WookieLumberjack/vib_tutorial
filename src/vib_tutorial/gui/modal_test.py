@@ -1303,6 +1303,7 @@ class ModalTestPage(QtWidgets.QWidget):
         df = s.band / s.sine_points if a.stepped else s.resolution
         rows = []
         warnings = []
+        columns = 5 + (0 if a.stepped else 1) + (1 if s.excitation is Excitation.IMPACT else 0)
         for m in a.result.modes:
             d = m.damped
             if d is None:
@@ -1331,15 +1332,19 @@ class ModalTestPage(QtWidgets.QWidget):
                 if level < -20.0:
                     notes.append("<b>hardly excited by this tip</b>: noise will dominate")
             rows.append(
-                f"<tr><td style='color:{color}'><b>{m.index}</b></td><td>{d.fd_hz:.4g}</td>"
-                f"<td>{d.zeta:.4f}</td><td>{bw:.3g}</td><td>{lines:.3g}</td>"
-                + ("" if a.stepped else f"<td>{percent(left)}</td>")
-                + (f"<td>{tip}</td>" if s.excitation is Excitation.IMPACT else "")
-                + f"<td>{'; '.join(notes) or 'ok'}</td></tr>"
+                f"<tr><td style='white-space:nowrap; color:{color}'><b>{m.index}</b></td><td style='white-space:nowrap'>{d.fd_hz:.4g}</td>"
+                f"<td style='white-space:nowrap'>{d.zeta:.4f}</td><td style='white-space:nowrap'>{bw:.3g}</td><td style='white-space:nowrap'>{lines:.3g}</td>"
+                + ("" if a.stepped else f"<td style='white-space:nowrap'>{percent(left)}</td>")
+                + (f"<td style='white-space:nowrap'>{tip}</td>" if s.excitation is Excitation.IMPACT else "")
+                + "</tr>"
+                + (f"<tr><td></td><td colspan='{columns - 1}'>{'; '.join(notes)}</td></tr>" if notes else "")
             )
-        head = ("<tr><th>Mode</th><th>f<sub>d</sub> [Hz]</th><th>ζ</th><th>2ζf<sub>n</sub> [Hz]</th>"
-                + ("<th>Points in it</th>" if a.stepped else "<th>Lines in it</th><th>Left at T</th>")
-                + ("<th>Hammer level</th>" if s.excitation is Excitation.IMPACT else "") + "<th>Notes</th></tr>")
+        # Numbers and headers don't wrap (in a narrow pane they broke mid-number); a mode's notes, if
+        # it has any, take a row of their own under it, across the table.
+        head = ("<tr><th style='white-space:nowrap'>Mode</th><th style='white-space:nowrap'>f<sub>d</sub><br>[Hz]</th><th style='white-space:nowrap'>ζ</th>"
+                "<th style='white-space:nowrap'>2ζf<sub>n</sub><br>[Hz]</th>"
+                + ("<th style='white-space:nowrap'>Points<br>in it</th>" if a.stepped else "<th style='white-space:nowrap'>Lines<br>in it</th><th style='white-space:nowrap'>Left<br>at T</th>")
+                + ("<th style='white-space:nowrap'>Hammer<br>level</th>" if s.excitation is Excitation.IMPACT else "") + "</tr>")
         e = s.excitation
         w = self.window.currentData()
         if e is Excitation.IMPACT and not s.anti_alias and s.tip_width < 2.0 / s.fs:
@@ -1369,7 +1374,8 @@ class ModalTestPage(QtWidgets.QWidget):
             f"<p style='color:{colors.muted}'>2ζf<sub>n</sub> is the half-power bandwidth of each peak; "
             "with fewer than about 2 lines (Δf apart, or stepped-sine frequencies) across it, the peak is missed. "
             "<i>Left at T</i> is how much of a free decay is left at the end of a block "
-            "(e<sup>σT</sup>): a hit or burst that has not died away is cut off, which leaks.</p>"
+            "(e<sup>σT</sup>): a hit or burst that has not died away is cut off, which leaks. A problem with a "
+            "mode is noted on a row under it; a mode with nothing under it should measure well.</p>"
         )
 
 
