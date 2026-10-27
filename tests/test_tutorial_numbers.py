@@ -760,3 +760,49 @@ def test_seismic_trials():
     alone = abs(eight.shear[:, 0]) / total
     assert (alone[0], alone[-1]) == pytest.approx((0.96, 0.74), abs=0.005)
     assert Design(zeta=0.10).eta == pytest.approx(0.82, abs=0.005)
+
+
+def test_quarter_car_trials():
+    from dataclasses import replace
+
+    from vib_tutorial.core.quarter_car import (
+        Car,
+        Output,
+        Road,
+        best_damper,
+        drive,
+        response,
+    )
+
+    car, road = Car(), Road("C", 20.0)
+    r = response(car, road)
+    assert car.modes() == pytest.approx((1.24, 11.8), abs=0.01)
+    assert (r.rms[Output.BODY], r.load_ratio) == pytest.approx((1.48, 0.24), abs=0.005)
+    assert r.rms[Output.TRAVEL] == pytest.approx(0.0107, abs=5e-5)
+    rough = response(car, Road("D", 30.0))
+    assert (rough.rms[Output.BODY], rough.load_ratio, rough.lift_probability) == pytest.approx(
+        (3.63, 0.59, 0.044), abs=0.005)
+    dampers = np.geomspace(150.0, 10e3, 4000)
+    assert best_damper(car, road, Output.BODY, dampers) == pytest.approx(830, abs=10)
+    assert best_damper(car, road, Output.TYRE, dampers) == pytest.approx(2340, abs=10)
+    soft = replace(car, damper=830.0)
+    rs = response(soft, road)
+    assert soft.body_zeta() == pytest.approx(0.17, abs=0.005)
+    assert (rs.rms[Output.BODY], rs.load_ratio) == pytest.approx((1.36, 0.29), abs=0.005)
+    assert rs.rms[Output.TRAVEL] == pytest.approx(0.0144, abs=5e-5)
+    assert 1 - rs.rms[Output.BODY] / r.rms[Output.BODY] == pytest.approx(0.08, abs=0.005)
+    firm = replace(car, damper=2340.0)
+    rf = response(firm, road)
+    assert (firm.body_zeta(), rf.load_ratio, rf.rms[Output.BODY]) == pytest.approx((0.48, 0.23, 1.72), abs=0.005)
+    springy = replace(car, spring=10e3)
+    rk = response(springy, road)
+    assert (springy.modes()[0], rk.rms[Output.BODY]) == pytest.approx((0.90, 1.35), abs=0.005)
+    assert 1 - rk.rms[Output.BODY] / r.rms[Output.BODY] == pytest.approx(0.09, abs=0.005)
+    assert car.sprung * 9.80665 / springy.spring == pytest.approx(0.294, abs=5e-4)
+    heavy = replace(car, unsprung=60.0)
+    assert (heavy.modes()[1], response(heavy, road).load_ratio) == pytest.approx((9.6, 0.26), abs=0.05)
+    d = drive(car, road, 60.0)
+    skip = int(2.0 / (d.t[1] - d.t[0]))
+    for record, spectral in ((d.body, r.rms[Output.BODY]), (d.travel, r.rms[Output.TRAVEL]),
+                             (d.tyre, r.rms[Output.TYRE])):
+        assert np.std(record[skip:]) == pytest.approx(spectral, rel=0.02)
