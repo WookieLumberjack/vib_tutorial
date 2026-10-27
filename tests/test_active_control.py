@@ -98,7 +98,7 @@ def test_active_control_trials():
     z = [p.zeta for p in oscillating_poles(closed_loop(s, Controller(3, 3, 20.0))[0])]
     assert z[0] == pytest.approx(0.72, abs=0.005)
     # Too much gain pins the mass
-    g, zbest = best_gain(s, Controller(3, 3, 0.0))
+    g, _ = best_gain(s, Controller(3, 3, 0.0))
     assert g == pytest.approx(25, rel=0.1)
     g = np.geomspace(1.0, 1000.0, 600)
     z = tracked_damping(s, Controller(3, 3, 0.0), g)
@@ -118,7 +118,7 @@ def test_active_control_trials():
     tmd = tmd_for(s, 3, 0.05)
     assert tmd[1] == pytest.approx(0.116, abs=0.001)
     fgrid = np.geomspace(0.3, 12.0, 4000)
-    peak = lambda A, B, Cx: np.max(np.abs(frf(A, B, Cx, 3, 3, fgrid)))  # noqa: E731
+    peak = lambda A, B, Cx: np.max(np.abs(frf(A, B, Cx, 3, 3, fgrid)))
     assert peak(*closed_loop(s, None)) == pytest.approx(0.26, abs=0.005)
     assert peak(*closed_loop(s, None, tmd)) == pytest.approx(0.051, abs=0.001)
     assert peak(*closed_loop(s, Controller(3, 3, 2.3))) == pytest.approx(0.051, abs=0.002)

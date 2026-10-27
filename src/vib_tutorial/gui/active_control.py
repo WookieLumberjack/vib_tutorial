@@ -317,7 +317,7 @@ class ActiveControlPage(QtWidgets.QWidget):
         if self.isVisible():
             self.redraw()
 
-    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+    def showEvent(self, event) -> None:
         super().showEvent(event)
         if self._dirty:
             self.redraw()
