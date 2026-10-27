@@ -51,7 +51,7 @@ def test_galloping_onset_is_where_the_net_damping_changes_sign():
 def test_galloping_branches_are_where_the_motion_settles():
     g = Galloping()
     for U, start in ((6.0, 0.001), (6.0, 0.12), (12.0, 0.001)):
-        t, y, _ = Galloping(speed=U, start=start).simulate(600)
+        _t, y, _ = Galloping(speed=U, start=start).simulate(600)
         amp = settled_amplitude(y)
         stable = [b.amplitude[0] for b in galloping_branches(g, np.array([U])) if b.stable]
         assert min(abs(a - amp) for a in stable) < 0.01 * amp

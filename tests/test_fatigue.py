@@ -39,7 +39,7 @@ def test_moments_and_record_agree():
     s = Stress(sigma2=10.0)
     r = rates(s)
     assert r.sigma == pytest.approx(math.sqrt(20 ** 2 + 10 ** 2), rel=1e-3)
-    t, x = synthesize(s, 600.0, 3)
+    _t, x = synthesize(s, 600.0, 3)
     assert np.std(x) == pytest.approx(r.sigma, rel=0.01)
     ups = np.count_nonzero((x[:-1] < 0) & (x[1:] >= 0)) / 600.0
     assert ups == pytest.approx(r.nu0, rel=0.03)

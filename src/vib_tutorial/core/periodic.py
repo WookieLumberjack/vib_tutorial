@@ -162,7 +162,7 @@ def from_rest(osc: Oscillator, forcing: Forcing, periods: float, per_period: int
     """(t, x) from rest over `periods` periods, the force stepped exactly (impulses as velocity jumps)."""
     T = forcing.period
     h = T / per_period
-    n = int(round(periods * per_period))
+    n = round(periods * per_period)
     t = np.arange(n + 1) * h
     A, B = osc.matrices()
     if forcing.wave is Wave.IMPULSES:

@@ -41,7 +41,7 @@ def test_rayleigh_ritz_is_above_each_mode_and_exact_with_every_shape(system):
     for basis in BASES:
         previous = None
         for r in range(1, system.n + 1):
-            wr, shapes = rayleigh_ritz(system, ritz_basis(system, basis, r))
+            wr, _shapes = rayleigh_ritz(system, ritz_basis(system, basis, r))
             assert np.all(wr >= w[:r] * (1 - 1e-9))
             if previous is not None:
                 assert np.all(wr[:-1] <= previous * (1 + 1e-9))  # adding a shape never raises an estimate

@@ -10,6 +10,7 @@ cycles (`rainflow`, the ASTM E1049 three-point algorithm).
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass
 
@@ -152,7 +153,7 @@ def synthesize(stress: Stress, duration: float, seed: int = 1, per_top: float = 
     """(t, x): a Gaussian record with the PSD, `duration` long, sampled at `per_top` × `top_hz` (random phases on
     lines 1/duration apart; it repeats after `duration`)."""
     fs = per_top * stress.top_hz
-    n = int(round(duration * fs))
+    n = round(duration * fs)
     n += n % 2
     df = fs / n
     f = np.arange(n // 2 + 1) * df
@@ -193,7 +194,7 @@ def rainflow(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
                 last = stack.pop()
                 del stack[-2:]
                 stack.append(last)
-    for a, b in zip(stack[:-1], stack[1:]):
+    for a, b in itertools.pairwise(stack):
         ranges.append(abs(b - a))
         counts.append(0.5)
     return np.array(ranges), np.array(counts)

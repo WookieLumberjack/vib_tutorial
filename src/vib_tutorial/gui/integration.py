@@ -15,7 +15,17 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 
-from ..core.integration import SCHEMES, STABLE_LIMIT, TWO_PI, Load, Model, Scheme, exact, simulate, spectral_curves
+from ..core.integration import (
+    SCHEMES,
+    STABLE_LIMIT,
+    TWO_PI,
+    Load,
+    Model,
+    Scheme,
+    exact,
+    simulate,
+    spectral_curves,
+)
 from . import settle_plots
 from .lesson import (
     Form,
@@ -378,7 +388,7 @@ class IntegrationPage(QtWidgets.QWidget):
     def _draw_runs(self) -> None:
         h, model, load = self.h, self.model, self.load
         span = self.periods.value() * self.T
-        steps = min(MOST_STEPS, max(1, int(round(span / h))))
+        steps = min(MOST_STEPS, max(1, round(span / h)))
         span = steps * h
         tf = np.linspace(0.0, span, POINTS + 1)
         self.exact_item.setData(tf, exact(model, load, tf))

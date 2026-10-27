@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtWidgets
 
 from ..core.fatigue import (
     Curve,
@@ -54,7 +54,7 @@ BINS = 40
 class FatigueTrial:
     name: str
     note: str
-    stress: Stress = Stress()
+    stress: Stress = Stress()  # noqa: RUF009 (frozen, so sharing one is safe)
     b: float = 3.0
     duration: float = 600.0
     seed: int = 1
@@ -389,7 +389,7 @@ class FatiguePage(QtWidgets.QWidget):
                 item.setData(S, w / np.trapezoid(w, S))
             self.dmg_plot.setXRange(0.0, top, padding=0)
             biggest = np.sort(rec.ranges[rec.ranges > 0] ** b * rec.counts[rec.ranges > 0])[::-1]
-            tenth = max(1, int(round(0.1 * len(biggest))))
+            tenth = max(1, round(0.1 * len(biggest)))
             self.tab_note.setText(f"With b = {b:.3g}, the largest tenth of the record's cycles do "
                                   f"{100 * biggest[:tenth].sum() / biggest.sum():.0f} % of its damage.")
         else:

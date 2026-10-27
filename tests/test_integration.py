@@ -42,7 +42,7 @@ def test_each_scheme_converges_at_its_order(scheme, order):
     errs = []
     for per in (80, 160):
         h = T / per
-        n = int(round(2 * T / h))
+        n = round(2 * T / h)
         x = simulate(scheme, m, load, h, n, -0.1)
         errs.append(np.max(np.abs(x - exact(m, load, np.arange(n + 1) * h))))
     assert math.log2(errs[0] / errs[1]) == pytest.approx(order, abs=0.25)

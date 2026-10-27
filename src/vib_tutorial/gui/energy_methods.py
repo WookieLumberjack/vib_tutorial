@@ -380,7 +380,7 @@ class EnergyMethodsPage(QtWidgets.QWidget):
         if self.isVisible():
             self.redraw()
 
-    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+    def showEvent(self, event) -> None:
         super().showEvent(event)
         if self._dirty:
             self.redraw()
@@ -623,6 +623,6 @@ class EnergyMethodsPage(QtWidgets.QWidget):
             + "<p>Each spring adds k to the two diagonal entries of the masses it joins and −k to the two entries "
               "between them: the assembly the Simulation page's chain uses. Lagrange's equations then give "
               "Mẍ + Kx = f.</p>"
-            + (f"<p>Dunkerley's terms, each mass alone on the massless chain: "
+            + ("<p>Dunkerley's terms, each mass alone on the massless chain: "
                + ", ".join(f"m{i + 1} {math.sqrt(v) / TWO_PI:.3g} Hz" for i, v in enumerate(dunkerley_terms(s)))
                + ".</p>" if self.held else ""))

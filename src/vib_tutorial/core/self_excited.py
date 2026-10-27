@@ -19,6 +19,7 @@ The time responses are fixed-step RK4 over many parameters at once (`rk4`): they
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -88,7 +89,7 @@ class VanDerPol:
     def simulate(self, periods: float, per_period: int = 200) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """(t, x, v) from x = `start` at rest."""
         h = 1.0 / (self.freq_hz * per_period)
-        n = int(round(periods * per_period))
+        n = round(periods * per_period)
         z = rk4(self.rhs(self.eps), np.array([self.start, 0.0]), h, n)
         return np.arange(n + 1) * h, z[:, 0], z[:, 1]
 
@@ -101,7 +102,7 @@ class VanDerPol:
         """The settled amplitude at each ε (all stepped together, from x = x_r√|ε| or `start`)."""
         eps = np.asarray(eps, dtype=float)
         h = 1.0 / (self.freq_hz * per_period)
-        n = int(round(periods * per_period))
+        n = round(periods * per_period)
         x0 = np.maximum(self.x_ref * np.sqrt(np.abs(eps)), self.start)
         z = rk4(self.rhs(eps), np.array([x0, np.zeros_like(eps)]), h, n, keep=4)
         return settled_amplitude(z[:, 0, :])
@@ -152,7 +153,7 @@ class Galloping:
 
     def simulate(self, periods: float, per_period: int = 50) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         h = 1.0 / (self.freq_hz * per_period)
-        n = int(round(periods * per_period))
+        n = round(periods * per_period)
         z = rk4(self.rhs(self.speed), np.array([self.start, 0.0]), h, n)
         return np.arange(n + 1) * h, z[:, 0], z[:, 1]
 
@@ -263,7 +264,7 @@ class Viv:
         """(t, z[time, state, case]) at each reduced velocity, from rest with the wake at q = 2 (all at once)."""
         reduced = np.atleast_1d(np.asarray(reduced, dtype=float))
         h = 1.0 / (self.freq_hz * max(per_period, 1) * max(1.0, float(np.max(reduced)) * self.strouhal))
-        n = int(round(periods / self.freq_hz / h))
+        n = round(periods / self.freq_hz / h)
         z0 = np.array([np.zeros_like(reduced), np.zeros_like(reduced), np.full_like(reduced, 2.0),
                        np.zeros_like(reduced)])
         z = rk4(self.rhs(reduced), z0, h, n, keep=keep)
@@ -327,9 +328,9 @@ class Flutter:
             lam = self.poles(float(U))
             up = lam[lam.imag > 1e-9]
             up = up[np.argsort(up.imag)]
-            if prev is not None and up.size == 2:
-                if abs(up[0] - prev[1]) + abs(up[1] - prev[0]) < abs(up[0] - prev[0]) + abs(up[1] - prev[1]):
-                    up = up[::-1]
+            if prev is not None and up.size == 2 and (
+                    abs(up[0] - prev[1]) + abs(up[1] - prev[0]) < abs(up[0] - prev[0]) + abs(up[1] - prev[1])):
+                up = up[::-1]
             for j, p in enumerate(up[:2]):
                 f[i, j] = abs(p) / TWO_PI
                 z[i, j] = -p.real / abs(p)
@@ -343,7 +344,7 @@ class Flutter:
             return bool(np.max(self.poles(U).real) > 0)
 
         U = np.linspace(0.0, top, 801)
-        for lo, hi in zip(U[:-1], U[1:]):
+        for lo, hi in itertools.pairwise(U):
             if growing(hi):
                 for _ in range(60):
                     mid = 0.5 * (lo + hi)
