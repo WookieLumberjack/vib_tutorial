@@ -128,7 +128,7 @@ springs, with N or so modes where the continuum has infinitely many. How good ar
 string of beads and a bar becomes the first page's chain (k = EA/h, m = ρAh), and the clearest way to compare
 them with the continuum is through the waves each can carry.</p>
 
-<h3>The continuum's waves</h3>
+<h3><a name="continuum-waves"></a>The continuum's waves</h3>
 <p>A string under tension T (mass μ per length) and a bar (EA, ρA) obey one equation, the wave equation:</p>
 <p align="center">μ w<sub>tt</sub> = T w<sub>xx</sub>,&nbsp;&nbsp; ρA u<sub>tt</sub> = EA u<sub>xx</sub>.</p>
 <p>A wave e<sup>i(κx − ωt)</sup> solves it when ω = cκ, with c = √(T/μ) or √(E/ρ): every wavelength travels at

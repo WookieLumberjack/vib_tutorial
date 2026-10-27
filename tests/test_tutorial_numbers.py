@@ -669,3 +669,46 @@ def test_pendulum_trials():
     _, th, _ = swing(lean, math.radians(1.0), 70.0)
     assert math.degrees(th[-1]) == pytest.approx(40.8, abs=0.1)
     assert Pendulum(gravity=1.62).period0 == pytest.approx(4.94, abs=0.005)
+
+
+def test_beams_plates_trials():
+    import math
+
+    from vib_tutorial.core.beams_plates import (
+        Beam,
+        Plate,
+        Theory,
+        beam_frequencies,
+        beam_omega,
+        circular_modes,
+        rect_modes,
+        wave_speeds,
+    )
+
+    b = Beam()
+    e = beam_frequencies(b, 5, Theory.EULER)
+    assert e[0] == pytest.approx(235, abs=0.5)
+    ratio = {th: beam_frequencies(b, 5, th) / e for th in Theory}
+    assert 1 / ratio[Theory.TIMOSHENKO][0] - 1 == pytest.approx(0.017, abs=5e-4)
+    assert 1 / ratio[Theory.TIMOSHENKO][4] - 1 == pytest.approx(0.33, abs=0.005)
+    assert ratio[Theory.TIMOSHENKO][4] == pytest.approx(0.75, abs=0.005)
+    assert (ratio[Theory.SHEAR][4], ratio[Theory.RAYLEIGH][4]) == pytest.approx((0.78, 0.91), abs=0.005)
+    slim = Beam(depth=0.02)
+    r = beam_frequencies(slim, 10) / beam_frequencies(slim, 10, Theory.EULER)
+    assert (1 - r[0], 1 - r[9]) == pytest.approx((0.0007, 0.060), abs=5e-4)
+    assert wave_speeds(b)[1] == pytest.approx(2900, abs=50)
+    cutoff = float(beam_omega(b, 1e-6, branch=1)) / (2 * math.pi)
+    assert cutoff == pytest.approx(16e3, rel=0.02)
+    assert float(beam_omega(b, math.pi, branch=1)) / (2 * math.pi) == pytest.approx(16.4e3, rel=0.01)
+    plate = Plate()
+    modes = rect_modes(plate, 6)
+    assert [round(m.freq_hz, 1) for m in modes[:4]] == pytest.approx([66.6, 128.1, 204.9, 230.5], abs=0.1)
+    assert (modes[5].m, modes[5].n) == (3, 2)
+    square = rect_modes(Plate(0.4, 0.4), 6)
+    assert (square[4].m, square[4].n, square[5].m, square[5].n) == (1, 3, 3, 1)
+    assert square[4].freq_hz == pytest.approx(square[5].freq_hz)
+    circle = circular_modes(Plate(0.2, 0.2, circular=True), 4)
+    assert [m.root ** 2 for m in circle] == pytest.approx([10.22, 21.26, 34.88, 39.77], abs=0.005)
+    assert [m.freq_hz for m in circle] == pytest.approx([191, 397, 652, 743], abs=0.5)
+    per_hz = plate.area / (2 * plate.scale)
+    assert (per_hz, 1 / per_hz) == pytest.approx((0.026, 39), rel=0.02)

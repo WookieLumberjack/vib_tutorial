@@ -12,6 +12,7 @@ def notes() -> dict[str, str]:
     from vib_tutorial.gui import (
         active_control,
         background,
+        beams_plates,
         cms_notes,
         complex_modes,
         continuum,
@@ -58,6 +59,7 @@ def notes() -> dict[str, str]:
         "torsional_page": torsional.NOTES_HTML,
         "duffing_page": duffing.NOTES_HTML,
         "rotor_page": rotor_notes.THEORY_HTML,
+        "beams_page": beams_plates.NOTES_HTML,
         "pendulum_page": pendulum.NOTES_HTML,
         "active_control_page": active_control.NOTES_HTML,
         "self_excited_page": self_excited.NOTES_HTML,
