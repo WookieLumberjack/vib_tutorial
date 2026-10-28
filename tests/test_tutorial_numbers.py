@@ -343,9 +343,17 @@ def test_isolation_trials():
 
 
 def test_signals_trials():
-    from vib_tutorial.core.signals import Kind, Source, Window, mass_loaded, nearest_line_reading, sample
+    from vib_tutorial.core.signals import (
+        Kind,
+        Source,
+        Window,
+        mass_loaded,
+        nearest_line_reading,
+        sample,
+        usable_band,
+        window_props,
+    )
     from vib_tutorial.core.signals import spectrum as averaged
-    from vib_tutorial.core.signals import usable_band, window_props
 
     def reading(source, f, window, block=1024, averages=1, filtered=True):
         n = block + (averages - 1) * block // 2
@@ -376,3 +384,559 @@ def test_signals_trials():
     assert usable_band(0.7, accelerometer=False) == pytest.approx(1.7, abs=0.05)
     assert usable_band(0.7, accelerometer=False) * 4.5 == pytest.approx(7.6, abs=0.05)
     assert mass_loaded(200.0, 0.5, 0.03) / 200 - 1 == pytest.approx(-0.029, abs=0.0005)
+
+
+def test_periodic_trials():
+    import math
+
+    from vib_tutorial.core.periodic import (
+        Forcing,
+        Wave,
+        periodic_steady,
+        response_coefficients,
+        series,
+        series_error,
+    )
+    from vib_tutorial.core.sdof import Oscillator
+
+    osc = Oscillator()
+    t = np.linspace(0.0, 1.0, 20001)
+    sq = Forcing(Wave.SQUARE)
+    assert np.max(series(sq.coefficients(5), 1.0, t)) - 1 == pytest.approx(0.19, abs=0.005)
+    fine = np.linspace(0.0, 0.01, 20001)
+    assert np.max(series(sq.coefficients(401), 1.0, fine)) - 1 == pytest.approx(0.18, abs=0.005)
+    third = Forcing(Wave.SQUARE, freq_hz=osc.natural_hz / 3)
+    assert 4 / (3 * math.pi) == pytest.approx(0.42, abs=0.005) and 1 / (2 * osc.omega_n) == pytest.approx(0.025)
+    X = np.abs(response_coefficients(osc, third, 3))
+    assert (X[3], X[1]) == pytest.approx((0.0106, 0.0036), abs=5e-5)
+    swing = lambda fo: float(np.max(periodic_steady(osc, fo, t * fo.period)))
+    assert swing(third) == pytest.approx(0.0139, abs=5e-5)
+    assert swing(Forcing(Wave.SQUARE, freq_hz=osc.natural_hz / 2)) == pytest.approx(0.0050, abs=5e-5)
+    blows = periodic_steady(osc, Forcing(Wave.IMPULSES, 0.1), t)
+    assert (blows.min(), blows.max()) == pytest.approx((-0.0045, 0.0052), abs=5e-5)
+    assert 0.1 / 400 == pytest.approx(0.00025) and osc.time_constant == pytest.approx(1.0)
+    assert 2 / math.pi == pytest.approx(0.64, abs=0.005) and 2 / math.pi / 400 == pytest.approx(0.00159, abs=5e-6)
+    tri, sq1 = Forcing(Wave.TRIANGLE), Forcing(Wave.SQUARE)
+    assert series_error(osc, tri, 3) == pytest.approx(0.019, abs=0.0005)
+    assert series_error(osc, sq1, 3) == pytest.approx(0.057, abs=0.0005)
+    assert series_error(osc, tri, 9) == pytest.approx(0.0010, abs=0.00005)
+    assert series_error(osc, sq1, 9) == pytest.approx(0.0065, abs=0.00005)
+
+
+def test_energy_methods_trials():
+    from vib_tutorial.core.energy_methods import (
+        Basis,
+        Shape,
+        contaminated,
+        dunkerley,
+        dunkerley_terms,
+        exact,
+        holzer,
+        holzer_roots,
+        iterate,
+        rayleigh,
+        ritz_table,
+        trial_shape,
+    )
+    from vib_tutorial.gui.energy_methods import chain
+
+    def hz(w2):
+        return np.sqrt(w2) / (2 * np.pi)
+
+    s = chain()
+    f = exact(s)[0] / (2 * np.pi)
+    assert f == pytest.approx([1.105, 3.183, 4.877, 5.982], abs=0.0005)
+
+    def ray(shape, eps=0.0, passes=0, system=s):
+        return hz(rayleigh(system, iterate(system, contaminated(system, trial_shape(system, shape), eps), passes)))
+
+    assert ray(Shape.STATIC) == pytest.approx(1.112, abs=0.0005)
+    assert ray(Shape.STATIC) / f[0] - 1 == pytest.approx(0.0055, abs=0.00005)
+    assert ray(Shape.LINEAR) / f[0] - 1 == pytest.approx(0.051, abs=0.0005)
+    assert ray(Shape.LINEAR, passes=1) / f[0] - 1 == pytest.approx(0.00063, abs=0.000005)
+    assert ray(Shape.SINE) == pytest.approx(f[0], rel=1e-12)
+    assert ray(Shape.SINE, 0.1) / f[0] - 1 == pytest.approx(0.046, abs=0.0005)
+    assert ray(Shape.SINE, 0.2) / f[0] - 1 == pytest.approx(0.166, abs=0.0005)
+    assert ray(Shape.TIP) == pytest.approx(3.18, abs=0.005) and ray(Shape.TIP) / f[0] - 1 == pytest.approx(1.88, abs=0.005)
+    assert ray(Shape.TIP, passes=1) / f[0] - 1 == pytest.approx(0.051, abs=0.0005)
+    assert ray(Shape.TIP, passes=2) / f[0] - 1 == pytest.approx(0.00063, abs=0.000005)
+    assert (f[0] / f[1]) ** 2 == pytest.approx(0.12, abs=0.005)
+    assert hz(dunkerley_terms(s)) == pytest.approx([3.18, 2.25, 1.84, 1.59], abs=0.005)
+    assert hz(dunkerley(s)) == pytest.approx(1.007, abs=0.0005) and hz(dunkerley(s)) / f[0] - 1 == pytest.approx(
+        -0.089, abs=0.0005)
+    tip = chain(masses=(1.0, 1.0, 1.0, 5.0))
+    ft = exact(tip)[0] / (2 * np.pi)
+    assert hz(dunkerley_terms(tip))[-1] == pytest.approx(0.71, abs=0.005)
+    assert (hz(dunkerley(tip)), ft[0]) == pytest.approx((0.624, 0.653), abs=0.0005)
+    assert hz(dunkerley(tip)) / ft[0] - 1 == pytest.approx(-0.044, abs=0.0005)
+    assert ray(Shape.STATIC, system=tip) / ft[0] - 1 == pytest.approx(0.0025, abs=0.00005)
+    table = ritz_table(s, Basis.KRYLOV)
+    assert table[1, 0] == pytest.approx(f[0], abs=0.00005)
+    assert table[1, 1] == pytest.approx(3.30, abs=0.005) and table[1, 1] / f[1] - 1 == pytest.approx(0.036, abs=0.0005)
+    assert (table[2, 1], table[2, 2]) == pytest.approx((3.184, 5.02), abs=0.005)
+    stiff = chain(stiffness=(4000.0, 400.0, 400.0, 400.0))
+    fs = exact(stiff)[0] / (2 * np.pi)
+    powers = ritz_table(stiff, Basis.POWERS)
+    assert (powers[1, 0], fs[0]) == pytest.approx((1.63, 1.38), abs=0.005)
+    assert powers[1, 0] / fs[0] - 1 == pytest.approx(0.18, abs=0.005)
+    assert (powers[1, 1], fs[1]) == pytest.approx((6.04, 3.89), abs=0.005)
+    assert ritz_table(stiff, Basis.KRYLOV)[0, 0] / fs[0] - 1 < 0.008
+    assert holzer(s, 2 * np.pi * 1.0)[-1].spring == pytest.approx(61, abs=0.5)
+    assert holzer_roots(s, 7.0) == pytest.approx(f, abs=0.0005)
+
+
+def test_integration_trials():
+    import math
+
+    from vib_tutorial.core.integration import (
+        Load,
+        Model,
+        Scheme,
+        exact,
+        simulate,
+        spectral,
+        stable_limit,
+    )
+
+    def at(per_period, scheme, alpha=-0.1):
+        return spectral(scheme, 2 * math.pi / per_period, 0.0, alpha)
+
+    assert Model().frequencies_hz()[0] == pytest.approx(3.18, abs=0.005)
+    assert at(10, Scheme.CENTRAL).period_error == pytest.approx(-0.017, abs=0.0005)
+    assert at(10, Scheme.AVERAGE).period_error == pytest.approx(0.032, abs=0.0005)
+    assert at(10, Scheme.LINEAR).period_error == pytest.approx(0.016, abs=0.0005)
+    assert at(10, Scheme.RK4).period_error == pytest.approx(0.0011, abs=0.00005)
+    assert at(10, Scheme.RK4).damping == pytest.approx(0.00065, abs=0.000005)
+    assert 10 * at(10, Scheme.AVERAGE).period_error == pytest.approx(1 / 3, abs=0.02)
+    assert 2 * math.pi / 3.0 == pytest.approx(2.09, abs=0.005) and at(3.0, Scheme.CENTRAL).radius > 1
+    assert 2 * math.pi / 3.2 == pytest.approx(1.96, abs=0.005)
+    assert at(3.2, Scheme.CENTRAL).radius == pytest.approx(1.0)
+    assert at(3.2, Scheme.CENTRAL).period_error == pytest.approx(-0.29, abs=0.005)
+    assert at(3.0, Scheme.AVERAGE).period_error == pytest.approx(0.30, abs=0.005)
+    assert at(1.0, Scheme.AVERAGE).period_error + 1 == pytest.approx(2.5, abs=0.05)
+    assert at(1.0, Scheme.AVERAGE).radius == pytest.approx(1.0)
+    assert stable_limit(Scheme.LINEAR) == pytest.approx(2 * math.sqrt(3)) and 2 * math.sqrt(3) / (2 * math.pi) == (
+        pytest.approx(0.55, abs=0.005))
+    assert at(1.0, Scheme.LINEAR).radius > 1
+    rk = at(5, Scheme.RK4)
+    assert rk.period_error == pytest.approx(0.011, abs=0.0005) and 1 - rk.radius == pytest.approx(0.022, abs=0.0005)
+    assert rk.damping == pytest.approx(0.018, abs=0.0005) and rk.radius ** 50 == pytest.approx(0.33, abs=0.005)
+    assert at(5, Scheme.AVERAGE).period_error == pytest.approx(0.12, abs=0.005)
+    eu = at(50, Scheme.EULER).radius
+    assert eu - 1 == pytest.approx(0.008, abs=0.0005) and eu ** 50 - 1 == pytest.approx(0.48, abs=0.005)
+    assert eu ** 500 == pytest.approx(50, abs=1)
+    stiff = Model(stiff_hz=1000.0)
+    f = stiff.frequencies_hz()
+    assert f == pytest.approx([3.03, 1049], abs=0.5) and f[0] == pytest.approx(3.03, abs=0.005)
+    h = 1 / f[0] / 50
+    assert 2 * math.pi * f[1] * h == pytest.approx(43, abs=0.5) and 1 / (f[1] * h) == pytest.approx(1 / 7, abs=0.005)
+    for scheme in (Scheme.CENTRAL, Scheme.RK4):
+        x = simulate(scheme, stiff, Load(), h, 250)
+        assert np.isnan(x[: int(0.020 / h) + 1]).any()
+    assert np.all(np.isfinite(simulate(Scheme.AVERAGE, stiff, Load(), h, 250)))
+    assert spectral(Scheme.HHT, 2 * math.pi * f[1] * h, 0.0, -0.3).radius == pytest.approx(0.57, abs=0.005)
+    assert spectral(Scheme.HHT, 2 * math.pi * f[0] * h, 0.0, -0.3).damping == pytest.approx(0.00004, abs=0.000005)
+    m, load = Model(), Load(0.0, 1.0, 2.0)
+    h = 1 / m.frequencies_hz()[0] / 10
+    t = np.arange(101) * h
+    ref = exact(m, load, t)
+    errs = {s: np.max(np.abs(simulate(s, m, load, h, 100) - ref)) / np.max(np.abs(ref))
+            for s in (Scheme.FOH, Scheme.CENTRAL, Scheme.AVERAGE, Scheme.RK4)}
+    assert errs[Scheme.FOH] == pytest.approx(0.013, abs=0.0005)
+    assert [errs[s] for s in (Scheme.RK4, Scheme.CENTRAL, Scheme.AVERAGE)] == pytest.approx([0.03, 0.41, 0.61],
+                                                                                           abs=0.005)
+
+
+def test_fatigue_trials():
+    from vib_tutorial.core.fatigue import (
+        Curve,
+        Stress,
+        dirlik_damage,
+        life_text,
+        narrow_band_damage,
+        rates,
+        record,
+    )
+
+    c, c5 = Curve(), Curve(b=5.0)
+    one = Stress()
+    r = record(one, 600.0)
+    assert rates(one).alpha2 == pytest.approx(0.95, abs=0.005)
+    for est in (narrow_band_damage(one, c), dirlik_damage(one, c)):
+        assert abs(est / r.damage_rate(c) - 1) < 0.015
+    assert life_text(r.damage_rate(c)) == "25.1 days"
+    two = Stress(sigma2=10.0)
+    r2 = record(two, 600.0)
+    assert rates(two).alpha2 == pytest.approx(0.46, abs=0.005) and rates(two).nu0 == pytest.approx(6.9, abs=0.05)
+    assert narrow_band_damage(two, c) / r2.damage_rate(c) == pytest.approx(1.6, abs=0.05)
+    assert dirlik_damage(two, c) / r2.damage_rate(c) == pytest.approx(0.92, abs=0.005)
+    assert narrow_band_damage(two, c5) / r2.damage_rate(c5) == pytest.approx(1.6, abs=0.05)
+    assert dirlik_damage(two, c5) / r2.damage_rate(c5) == pytest.approx(0.82, abs=0.005)
+    average = np.mean([record(two, 600.0, k).damage_rate(c5) for k in range(1, 21)])
+    assert dirlik_damage(two, c5) / average == pytest.approx(0.85, abs=0.005)
+    assert life_text(record(Stress(sigma1=40.0), 600.0).damage_rate(c)) == "3.13 days"
+    assert 1.1 ** 3 == pytest.approx(1.33, abs=0.005)
+    wide = Stress(zeta1=0.3)
+    rw = record(wide, 600.0)
+    assert rates(wide).alpha2 == pytest.approx(0.64, abs=0.005)
+    assert narrow_band_damage(wide, c) / rw.damage_rate(c) == pytest.approx(1.15, abs=0.005)
+    assert abs(dirlik_damage(wide, c) / rw.damage_rate(c) - 1) < 0.02
+    short = [record(two, 20.0, k).damage_rate(c5) / r2.damage_rate(c5) for k in range(1, 11)]
+    assert (min(short), max(short)) == pytest.approx((0.67, 1.53), abs=0.005)
+
+
+def test_self_excited_trials():
+    from vib_tutorial.core.self_excited import (
+        Flutter,
+        Galloping,
+        VanDerPol,
+        Viv,
+        dominant_hz,
+        galloping_branches,
+        settled_amplitude,
+    )
+
+    v = VanDerPol()
+    t, x, _ = v.simulate(60)
+    assert settled_amplitude(x) == pytest.approx(0.0089, abs=0.00005) and -v.eps / 2 == pytest.approx(-0.1)
+    t, x, _ = VanDerPol(eps=5.0).simulate(20)
+    assert 1 / dominant_hz(x, t[1] - t[0]) == pytest.approx(1.84, abs=0.03)
+    g = Galloping()
+    assert g.onset == pytest.approx(3.81, abs=0.005)
+    U = np.linspace(4.0, 7.5, 351)
+    pairs = [b for b in galloping_branches(g, U) if not b.stable]
+    band = U[np.isfinite(pairs[0].amplitude)]
+    assert (band.min(), band.max()) == pytest.approx((4.7, 7.0), abs=0.05)
+    at6 = sorted(b.amplitude[0] / g.side for b in galloping_branches(g, np.array([6.0])) if b.stable)
+    assert at6 == pytest.approx([0.51, 1.28], abs=0.005)
+    for start, want in ((0.001, 0.51), (0.12, 1.28)):
+        _, y, _ = Galloping(speed=6.0, start=start).simulate(600)
+        assert settled_amplitude(y) / g.side == pytest.approx(want, abs=0.01)
+    _, y, _ = Galloping(speed=12.0).simulate(200)
+    assert settled_amplitude(y) / g.side == pytest.approx(2.7, abs=0.05) and 12 / g.onset == pytest.approx(3.1, abs=0.1)
+    viv = Viv()
+    assert viv.mass_ratio == pytest.approx(10.2, abs=0.05) and viv.strouhal * 5.5 == pytest.approx(1.1)
+    amp, freq = viv.sweep(np.array([4.0, 4.5, 5.5, 6.25, 6.5, 9.0]))
+    assert amp[2] == pytest.approx(0.21, abs=0.005) and freq[2] == pytest.approx(1.0, abs=0.01)
+    assert freq[1:4] == pytest.approx([1.0, 1.0, 1.0], abs=0.04) and abs(freq[4] - 1) > 0.04
+    assert abs(freq[0] - 1) > 0.04
+    assert amp[5] == pytest.approx(0.019, abs=0.0005) and freq[5] == pytest.approx(1.7, abs=0.02)
+    f = Flutter()
+    assert f.flutter_speed() == pytest.approx(19.1, abs=0.05) and f.divergence_speed() == pytest.approx(39, abs=0.5)
+    fr, _ = f.modes(np.array([0.0, 19.0]))
+    assert fr[0] == pytest.approx([2.93, 6.71], abs=0.1) and fr[1] == pytest.approx([3.4, 5.0], abs=0.05)
+    assert Flutter(x_cg=-0.2).flutter_speed() == pytest.approx(f.divergence_speed(), abs=0.05)
+    assert Flutter(x_cg=0.0).flutter_speed() == pytest.approx(17.7, abs=0.05)
+
+
+def test_pendulum_trials():
+    import math
+
+    from vib_tutorial.core.pendulum import (
+        Kind,
+        Pendulum,
+        conjugate_pivot,
+        duffing_period,
+        period,
+        rod_period,
+        swing,
+    )
+
+    p = Pendulum()
+    assert (p.natural_hz, p.period0) == pytest.approx((0.498, 2.006), abs=5e-4)
+    assert Pendulum(mass=7.0).period0 == pytest.approx(p.period0)
+    assert period(p, math.radians(90)) == pytest.approx(2.368, abs=5e-4)
+    assert period(p, math.radians(90)) / p.period0 - 1 == pytest.approx(0.18, abs=0.005)
+    # Duffing's estimate (either form) within 1 % up to about 75°
+    for a, inside in ((70, True), (80, False)):
+        T = period(p, math.radians(a))
+        for guess in (duffing_period(p, math.radians(a)), p.period0 * (1 + math.radians(a) ** 2 / 16)):
+            assert (abs(guess / T - 1) < 0.01) == inside
+    assert period(p, math.radians(170)) / p.period0 == pytest.approx(2.44, abs=0.005)
+    rod = Pendulum(Kind.ROD)
+    assert (rod.inertia, rod.equivalent_length, rod.period0) == pytest.approx((1 / 3, 0.667, 1.638), abs=5e-4)
+    assert rod_period(1.0, 1 / math.sqrt(12)) == pytest.approx(1.524, abs=5e-4)
+    assert conjugate_pivot(1.0, 0.5) == pytest.approx(0.167, abs=5e-4)
+    assert rod_period(1.0, conjugate_pivot(1.0, 0.5)) == pytest.approx(rod.period0)
+    disc = Pendulum(Kind.TORSION, length=0.1, spring=0.5)
+    assert disc.natural_hz == pytest.approx(1.59, abs=0.005)
+    assert period(disc, math.radians(170)) == pytest.approx(disc.period0, rel=1e-9)
+    inv = Pendulum(Kind.INVERTED, spring=15.0)
+    assert (inv.stiffness, inv.natural_hz) == pytest.approx((5.19, 0.363), abs=5e-4)
+    assert 1 - period(inv, math.radians(60)) / inv.period0 == pytest.approx(0.10, abs=0.005)
+    lean = Pendulum(Kind.INVERTED, spring=9.0, zeta=0.1)
+    assert math.degrees(lean.leaning()) == pytest.approx(40.8, abs=0.05)
+    _, th, _ = swing(lean, math.radians(1.0), 70.0)
+    assert math.degrees(th[-1]) == pytest.approx(40.8, abs=0.1)
+    assert Pendulum(gravity=1.62).period0 == pytest.approx(4.94, abs=0.005)
+
+
+def test_beams_plates_trials():
+    import math
+
+    from vib_tutorial.core.beams_plates import (
+        Beam,
+        Plate,
+        Theory,
+        beam_frequencies,
+        beam_omega,
+        circular_modes,
+        rect_modes,
+        wave_speeds,
+    )
+
+    b = Beam()
+    e = beam_frequencies(b, 5, Theory.EULER)
+    assert e[0] == pytest.approx(235, abs=0.5)
+    ratio = {th: beam_frequencies(b, 5, th) / e for th in Theory}
+    assert 1 / ratio[Theory.TIMOSHENKO][0] - 1 == pytest.approx(0.017, abs=5e-4)
+    assert 1 / ratio[Theory.TIMOSHENKO][4] - 1 == pytest.approx(0.33, abs=0.005)
+    assert ratio[Theory.TIMOSHENKO][4] == pytest.approx(0.75, abs=0.005)
+    assert (ratio[Theory.SHEAR][4], ratio[Theory.RAYLEIGH][4]) == pytest.approx((0.78, 0.91), abs=0.005)
+    slim = Beam(depth=0.02)
+    r = beam_frequencies(slim, 10) / beam_frequencies(slim, 10, Theory.EULER)
+    assert (1 - r[0], 1 - r[9]) == pytest.approx((0.0007, 0.060), abs=5e-4)
+    assert wave_speeds(b)[1] == pytest.approx(2900, abs=50)
+    cutoff = float(beam_omega(b, 1e-6, branch=1)) / (2 * math.pi)
+    assert cutoff == pytest.approx(16e3, rel=0.02)
+    assert float(beam_omega(b, math.pi, branch=1)) / (2 * math.pi) == pytest.approx(16.4e3, rel=0.01)
+    plate = Plate()
+    modes = rect_modes(plate, 6)
+    assert [round(m.freq_hz, 1) for m in modes[:4]] == pytest.approx([66.6, 128.1, 204.9, 230.5], abs=0.1)
+    assert (modes[5].m, modes[5].n) == (3, 2)
+    square = rect_modes(Plate(0.4, 0.4), 6)
+    assert (square[4].m, square[4].n, square[5].m, square[5].n) == (1, 3, 3, 1)
+    assert square[4].freq_hz == pytest.approx(square[5].freq_hz)
+    circle = circular_modes(Plate(0.2, 0.2, circular=True), 4)
+    assert [m.root ** 2 for m in circle] == pytest.approx([10.22, 21.26, 34.88, 39.77], abs=0.005)
+    assert [m.freq_hz for m in circle] == pytest.approx([191, 397, 652, 743], abs=0.5)
+    per_hz = plate.area / (2 * plate.scale)
+    assert (per_hz, 1 / per_hz) == pytest.approx((0.026, 39), rel=0.02)
+
+
+def test_seismic_trials():
+    from vib_tutorial.core.seismic import (
+        GROUNDS,
+        Design,
+        Rule,
+        building,
+        combine,
+        correlation,
+        modal,
+        suite,
+        with_tank,
+    )
+
+    d = Design()
+    five = building(5)
+    m = modal(five, d)
+    rho = correlation(m.f, d.zeta)
+    assert m.T[0] == pytest.approx(0.99, abs=0.005)
+    assert (m.mass_share[0], m.mass_share[:2].sum()) == pytest.approx((0.88, 0.97), abs=0.005)
+    assert m.sa[0] / 9.81 == pytest.approx(0.52, abs=0.005)
+    shear = {r: float(combine(m.shear, r, rho)[0]) for r in Rule}
+    assert (shear[Rule.CQC], shear[Rule.SRSS], shear[Rule.ABS]) == pytest.approx((229e3, 229e3, 277e3), abs=1e3)
+    records = suite(five, d).base_shear
+    assert records == pytest.approx(235e3, abs=1e3)
+    assert shear[Rule.ABS] / records - 1 == pytest.approx(0.18, abs=0.005)
+    assert rho[0, 1] == pytest.approx(0.007, abs=5e-4)
+    tank = with_tank(five, 0.01)
+    mt = modal(tank, d)
+    rt = correlation(mt.f, d.zeta)
+    assert (mt.f[0], mt.f[1], rt[0, 1]) == pytest.approx((0.96, 1.06, 0.50), abs=0.005)
+    vt = suite(tank, d).base_shear
+    assert float(combine(mt.shear, Rule.SRSS, rt)[0]) / vt - 1 == pytest.approx(-0.21, abs=0.01)
+    assert abs(float(combine(mt.shear, Rule.CQC, rt)[0]) / vt - 1) < 0.11
+    swing = suite(tank, d).displacement[-1]
+    assert float(combine(mt.displacement, Rule.SRSS, rt)[-1]) / swing - 1 == pytest.approx(0.54, abs=0.01)
+    assert abs(float(combine(mt.displacement, Rule.CQC, rt)[-1]) / swing - 1) < 0.11
+    soft = modal(five, Design(ground=GROUNDS[3]))
+    assert soft.sa[0] / 9.81 == pytest.approx(0.82, abs=0.005)
+    assert float(combine(soft.shear, Rule.CQC, correlation(soft.f, 0.05))[0]) == pytest.approx(357e3, abs=1e3)
+    eight = modal(building(8), d)
+    assert (eight.T[0], eight.mass_share[0]) == pytest.approx((1.52, 0.86), abs=0.005)
+    assert eight.sa[0] / 9.81 == pytest.approx(0.34, abs=0.005) and eight.sa[1:4] / 9.81 == pytest.approx(0.86, abs=0.005)
+    total = combine(eight.shear, Rule.CQC, correlation(eight.f, 0.05))
+    alone = abs(eight.shear[:, 0]) / total
+    assert (alone[0], alone[-1]) == pytest.approx((0.96, 0.74), abs=0.005)
+    assert Design(zeta=0.10).eta == pytest.approx(0.82, abs=0.005)
+
+
+def test_quarter_car_trials():
+    from dataclasses import replace
+
+    from vib_tutorial.core.quarter_car import (
+        Car,
+        Output,
+        Road,
+        best_damper,
+        drive,
+        response,
+    )
+
+    car, road = Car(), Road("C", 20.0)
+    r = response(car, road)
+    assert car.modes() == pytest.approx((1.24, 11.8), abs=0.01)
+    assert (r.rms[Output.BODY], r.load_ratio) == pytest.approx((1.48, 0.24), abs=0.005)
+    assert r.rms[Output.TRAVEL] == pytest.approx(0.0107, abs=5e-5)
+    rough = response(car, Road("D", 30.0))
+    assert (rough.rms[Output.BODY], rough.load_ratio, rough.lift_probability) == pytest.approx(
+        (3.63, 0.59, 0.044), abs=0.005)
+    dampers = np.geomspace(150.0, 10e3, 4000)
+    assert best_damper(car, road, Output.BODY, dampers) == pytest.approx(830, abs=10)
+    assert best_damper(car, road, Output.TYRE, dampers) == pytest.approx(2340, abs=10)
+    soft = replace(car, damper=830.0)
+    rs = response(soft, road)
+    assert soft.body_zeta() == pytest.approx(0.17, abs=0.005)
+    assert (rs.rms[Output.BODY], rs.load_ratio) == pytest.approx((1.36, 0.29), abs=0.005)
+    assert rs.rms[Output.TRAVEL] == pytest.approx(0.0144, abs=5e-5)
+    assert 1 - rs.rms[Output.BODY] / r.rms[Output.BODY] == pytest.approx(0.08, abs=0.005)
+    firm = replace(car, damper=2340.0)
+    rf = response(firm, road)
+    assert (firm.body_zeta(), rf.load_ratio, rf.rms[Output.BODY]) == pytest.approx((0.48, 0.23, 1.72), abs=0.005)
+    springy = replace(car, spring=10e3)
+    rk = response(springy, road)
+    assert (springy.modes()[0], rk.rms[Output.BODY]) == pytest.approx((0.90, 1.35), abs=0.005)
+    assert 1 - rk.rms[Output.BODY] / r.rms[Output.BODY] == pytest.approx(0.09, abs=0.005)
+    assert car.sprung * 9.80665 / springy.spring == pytest.approx(0.294, abs=5e-4)
+    heavy = replace(car, unsprung=60.0)
+    assert (heavy.modes()[1], response(heavy, road).load_ratio) == pytest.approx((9.6, 0.26), abs=0.05)
+    d = drive(car, road, 60.0)
+    skip = int(2.0 / (d.t[1] - d.t[0]))
+    for record, spectral in ((d.body, r.rms[Output.BODY]), (d.travel, r.rms[Output.TRAVEL]),
+                             (d.tyre, r.rms[Output.TYRE])):
+        assert np.std(record[skip:]) == pytest.approx(spectral, rel=0.02)
+
+
+def test_variability_trials():
+    from vib_tutorial.core.model import ChainSystem
+    from vib_tutorial.core.variability import (
+        Ring,
+        Scatter,
+        amplification,
+        amplification_curve,
+        monte_carlo,
+        participation,
+        ring_modes,
+        sensitivity_sigma,
+        tuned_band,
+        whitehead,
+    )
+
+    chain = ChainSystem.uniform(4)
+    f = np.linspace(0.1, 10.0, 200)
+    springs = monte_carlo(chain, Scatter(0.0, 0.05, 0.0), 200, f, 3, 3)
+    assert springs.nominal_freqs[0] == pytest.approx(1.105, abs=5e-4)
+    assert springs.freqs[:, 0].std() == pytest.approx(0.015, abs=5e-4)
+    assert np.mean(springs.freqs.std(axis=0) / springs.nominal_freqs) == pytest.approx(0.014, abs=5e-4)
+    assert sensitivity_sigma(chain, Scatter(0.0, 0.05, 0.0)) / springs.nominal_freqs == pytest.approx(
+        0.0144, abs=5e-5)
+    both = monte_carlo(chain, Scatter(0.05, 0.05, 0.0), 200, f, 3, 3)
+    assert both.freqs[:, 0].std() == pytest.approx(0.023, abs=5e-4)
+    assert np.mean(both.freqs.std(axis=0) / both.nominal_freqs) == pytest.approx(0.02, abs=1e-3)
+    dampers = monte_carlo(chain, Scatter(0.0, 0.0, 0.3), 200, f, 3, 3)
+    assert np.ptp(dampers.freqs, axis=0) == pytest.approx(0.0, abs=1e-12)
+
+    tuned = Ring()
+    assert tuned_band(tuned) == pytest.approx((15.9, 17.4), abs=0.05)
+    p = participation(ring_modes(tuned)[1])
+    assert (p.min(), p.max()) == pytest.approx((6.0, 12.0), abs=0.05)
+    weak = Ring(coupling=0.005, mistuning=0.01)
+    assert participation(ring_modes(weak)[1])[0] == pytest.approx(1.3, abs=0.05)
+    strong = participation(ring_modes(Ring(coupling=0.2, mistuning=0.01))[1])
+    assert (strong.min(), strong.max()) == pytest.approx((6.0, 12.0), abs=0.1)
+
+    forced = Ring(coupling=0.02, mistuning=0.01)
+    assert amplification(forced, 3) == pytest.approx(1.06, abs=0.005)
+    _, top = amplification_curve(forced, 3, np.array([0.01, 0.02, 0.1]), 12)
+    assert top == pytest.approx([1.34, 1.42, 1.28], abs=0.005)
+    assert whitehead(12) == pytest.approx(2.23, abs=0.005)
+
+
+def test_diagnostics_trials():
+    from dataclasses import replace
+
+    from vib_tutorial.core.diagnostics import (
+        BearingFault,
+        GearFault,
+        Machine,
+        RunUp,
+        amplitude_spectrum,
+        band_pass,
+        cepstrum,
+        envelope_spectrum,
+        kurtosis,
+        line_amplitude,
+        order_map,
+        order_track,
+        run_up,
+        sidebands,
+    )
+
+    band = (2550.0, 3450.0)
+    m = Machine(speed=1797 / 60)
+    assert m.mesh_hz == pytest.approx(808.65)
+    healthy = record_of(m)
+    assert kurtosis(healthy.x) == pytest.approx(2.40, abs=0.005)
+    _, c = cepstrum(healthy.x, healthy.fs)
+    at = round(healthy.fs / m.speed)
+    assert c[at - 2:at + 3].max() == pytest.approx(0.027, abs=5e-4)
+
+    ecc = replace(m, gear=GearFault.ECCENTRIC)
+    s = amplitude_spectrum(record_of(ecc).x, healthy.fs)
+    _, a = sidebands(s.freqs, s.amplitude, m.mesh_hz, m.speed, 1)
+    assert (a[2], a[0], a[1]) == pytest.approx((0.23, 0.08, 1.0), abs=0.005)
+
+    crack = record_of(replace(m, gear=GearFault.CRACK))
+    s = amplitude_spectrum(crack.x, crack.fs)
+    _, a = sidebands(s.freqs, s.amplitude, m.mesh_hz, m.speed, 6)
+    assert np.delete(a, 6) == pytest.approx(0.042, abs=0.006)
+    _q, c = cepstrum(crack.x, crack.fs)
+    assert 1e3 / m.speed == pytest.approx(33.4, abs=0.05)
+    assert c[at - 2:at + 3].max() == pytest.approx(0.12, abs=0.005)
+
+    noisy = replace(m, noise=1.0)
+    f = noisy.bearing.frequencies(m.speed)
+    assert (f["BPFO"] / m.speed, f["BPFO"], f["BPFI"], 2 * f["BSF"], f["FTF"]) == pytest.approx(
+        (3.585, 107.4, 162.2, 141.2, 11.9), abs=0.05)
+    outer = replace(noisy, bearing_fault=BearingFault.OUTER)
+    r = record_of(outer)
+    s = amplitude_spectrum(r.x, r.fs)
+    d = outer.defect_hz()
+    assert line_amplitude(s.freqs, s.amplitude, d) == pytest.approx(0.049, abs=5e-4)
+    assert np.median(s.amplitude[(s.freqs > 50) & (s.freqs < 700)]) == pytest.approx(0.043, abs=5e-4)
+    assert (kurtosis(r.x), kurtosis(band_pass(r.x, r.fs, band))) == pytest.approx((3.1, 5.6), abs=0.05)
+    e = envelope_spectrum(r.x, r.fs, band)
+    assert [line_amplitude(e.freqs, e.amplitude, h * d) for h in (1, 2, 3)] == pytest.approx(
+        [0.45, 0.34, 0.23], abs=0.005)
+    assert np.median(e.amplitude[(e.freqs > 20) & (e.freqs < 500)]) < 0.045
+    for fault, (centre, lower, upper) in ((BearingFault.INNER, (0.31, 0.16, 0.13)),
+                                          (BearingFault.BALL, (0.29, 0.14, 0.135))):
+        mm = replace(noisy, bearing_fault=fault)
+        r = record_of(mm)
+        e = envelope_spectrum(r.x, r.fs, band)
+        d, fm = mm.defect_hz(), mm.modulation_hz()
+        assert [line_amplitude(e.freqs, e.amplitude, v) for v in (d, d - fm, d + fm)] == pytest.approx(
+            [centre, lower, upper], abs=0.005)
+
+    slow, fast = RunUp(), RunUp(duration=4.0)
+    fine = np.linspace(slow.start, slow.end, 2000)
+    steady = slow.steady(1, fine)
+    assert (steady.max(), 60 * fine[steady.argmax()]) == pytest.approx((211, 2406), abs=1)
+    om = order_map(run_up(slow))
+    one, two = order_track(om, 1), order_track(om, 2)
+    assert (one.max(), 60 * om.speed[one.argmax()]) == pytest.approx((209, 2445), abs=1)
+    assert 60 * om.speed[two.argmax()] == pytest.approx(1220, abs=5)
+    assert (two.max(), slow.steady(2, fine).max()) == pytest.approx((28.5, 33.3), abs=0.05)
+    om = order_map(run_up(fast))
+    one = order_track(om, 1)
+    assert (one.max(), 60 * om.speed[one.argmax()]) == pytest.approx((179, 2531), abs=1)
+    assert 1 - one.max() / steady.max() == pytest.approx(0.15, abs=0.005)
+    sweep = 2 * slow.zeta * slow.mode / ((fast.end - fast.start) / fast.duration)
+    assert (sweep, sweep * slow.mode) == pytest.approx((0.16, 6.4), abs=0.005)
+
+
+def record_of(machine):
+    from vib_tutorial.core.diagnostics import record
+
+    return record(machine)

@@ -10,25 +10,37 @@ from vib_tutorial.gui.links import COURSE, PAGE_TITLES
 
 def notes() -> dict[str, str]:
     from vib_tutorial.gui import (
+        active_control,
         background,
+        beams_plates,
         cms_notes,
         complex_modes,
         continuum,
         coupling_notes,
         damping_models,
+        diagnostics,
         duffing,
+        energy_methods,
+        fatigue,
         frf_matrix,
+        integration,
         isolation,
         modal_test,
         model_updating,
         oma,
+        pendulum,
+        periodic,
+        quarter_car,
         random_vibration,
         rotor_notes,
         sdof,
+        seismic,
+        self_excited,
         shock,
         signals,
         torsional,
         transient,
+        variability,
     )
 
     return {
@@ -51,6 +63,18 @@ def notes() -> dict[str, str]:
         "torsional_page": torsional.NOTES_HTML,
         "duffing_page": duffing.NOTES_HTML,
         "rotor_page": rotor_notes.THEORY_HTML,
+        "diagnostics_page": diagnostics.NOTES_HTML,
+        "variability_page": variability.NOTES_HTML,
+        "quarter_car_page": quarter_car.NOTES_HTML,
+        "seismic_page": seismic.NOTES_HTML,
+        "beams_page": beams_plates.NOTES_HTML,
+        "pendulum_page": pendulum.NOTES_HTML,
+        "active_control_page": active_control.NOTES_HTML,
+        "self_excited_page": self_excited.NOTES_HTML,
+        "fatigue_page": fatigue.NOTES_HTML,
+        "integration_page": integration.NOTES_HTML,
+        "energy_page": energy_methods.NOTES_HTML,
+        "periodic_page": periodic.NOTES_HTML,
     }
 
 

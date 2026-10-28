@@ -971,6 +971,54 @@ def signals_spectra():
     lesson("signals_page", 2, "signals_spectra")  # a Hann window finds the small tone
 
 
+def pendulums():
+    lesson("pendulum_page", 1, "pendulums")  # large swings are slower
+
+
+def periodic_forcing():
+    lesson("periodic_page", 1, "periodic_forcing")  # resonance through the third harmonic
+
+
+def energy_methods():
+    lesson("energy_page", 6, "energy_methods")  # Rayleigh–Ritz from above
+
+
+def beams_plates():
+    lesson("beams_page", 4, "beams_plates")  # twin modes and Chladni's figures
+
+
+def numerical_integration():
+    lesson("integration_page", 1, "numerical_integration")  # central difference's limit
+
+
+def fatigue():
+    lesson("fatigue_page", 1, "fatigue")  # two modes: the narrow-band formula is pessimistic
+
+
+def quarter_car():
+    lesson("quarter_car_page", 0, "quarter_car")  # a car on an average road
+
+
+def seismic_response():
+    lesson("seismic_page", 2, "seismic_response")  # close modes need CQC
+
+
+def variability():
+    lesson("variability_page", 6, "variability")  # a mistuned disc's forced response
+
+
+def self_excited():
+    lesson("self_excited_page", 8, "self_excited")  # flutter: two modes coalesce
+
+
+def active_control():
+    lesson("active_control_page", 2, "active_control")  # non-collocated: spillover
+
+
+def machinery_diagnostics():
+    lesson("diagnostics_page", 3, "machinery_diagnostics")  # an outer race defect by its envelope
+
+
 SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damper,
          classical_release_nonproportional, state_space_release, modal_coordinates, energy_by_mode,
          energy_history, element_forces, frequency_response, frf_matrix, modal_coupling,
@@ -980,7 +1028,9 @@ SHOTS = [main_window, dark_theme, pluck, chirp, base_excitation, tuned_mass_damp
          jeffcott_shaft_mass, jeffcott_asymmetric, jeffcott_asymmetry_chart, jeffcott_cracked,
          duffing_jump, mathieu_sweep, torsional_compressor, torsional_startup, continuum_string, continuum_beam,
          continuum_waves, single_oscillator, transient_response, damping_models, vibration_isolation,
-         signals_spectra]
+         signals_spectra, pendulums, periodic_forcing, energy_methods, beams_plates,
+         numerical_integration, fatigue, quarter_car, seismic_response, variability,
+         self_excited, active_control, machinery_diagnostics]
 
 
 def main(names: list[str]) -> None:

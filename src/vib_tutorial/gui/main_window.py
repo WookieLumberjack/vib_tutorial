@@ -115,6 +115,42 @@ def _page_class(name: str) -> type[QtWidgets.QWidget]:
     if name == "random_page":
         from .random_vibration import RandomVibrationPage
         return RandomVibrationPage
+    if name == "periodic_page":
+        from .periodic import PeriodicPage
+        return PeriodicPage
+    if name == "energy_page":
+        from .energy_methods import EnergyMethodsPage
+        return EnergyMethodsPage
+    if name == "integration_page":
+        from .integration import IntegrationPage
+        return IntegrationPage
+    if name == "fatigue_page":
+        from .fatigue import FatiguePage
+        return FatiguePage
+    if name == "self_excited_page":
+        from .self_excited import SelfExcitedPage
+        return SelfExcitedPage
+    if name == "active_control_page":
+        from .active_control import ActiveControlPage
+        return ActiveControlPage
+    if name == "pendulum_page":
+        from .pendulum import PendulumPage
+        return PendulumPage
+    if name == "beams_page":
+        from .beams_plates import BeamsPlatesPage
+        return BeamsPlatesPage
+    if name == "seismic_page":
+        from .seismic import SeismicPage
+        return SeismicPage
+    if name == "quarter_car_page":
+        from .quarter_car import QuarterCarPage
+        return QuarterCarPage
+    if name == "variability_page":
+        from .variability import VariabilityPage
+        return VariabilityPage
+    if name == "diagnostics_page":
+        from .diagnostics import DiagnosticsPage
+        return DiagnosticsPage
     from .modal_test import ModalTestPage
     return ModalTestPage
 MODE_ANIMATION_HZ = 0.5  # visual rate for the animated mode-shape plot
@@ -540,6 +576,18 @@ class MainWindow(QtWidgets.QMainWindow):
     complex_page = property(lambda self: self._page("complex_page"))
     updating_page = property(lambda self: self._page("updating_page"))
     shock_page = property(lambda self: self._page("shock_page"))
+    diagnostics_page = property(lambda self: self._page("diagnostics_page"))
+    variability_page = property(lambda self: self._page("variability_page"))
+    quarter_car_page = property(lambda self: self._page("quarter_car_page"))
+    seismic_page = property(lambda self: self._page("seismic_page"))
+    beams_page = property(lambda self: self._page("beams_page"))
+    pendulum_page = property(lambda self: self._page("pendulum_page"))
+    active_control_page = property(lambda self: self._page("active_control_page"))
+    self_excited_page = property(lambda self: self._page("self_excited_page"))
+    fatigue_page = property(lambda self: self._page("fatigue_page"))
+    integration_page = property(lambda self: self._page("integration_page"))
+    energy_page = property(lambda self: self._page("energy_page"))
+    periodic_page = property(lambda self: self._page("periodic_page"))
 
     def _page(self, name: str) -> QtWidgets.QWidget:
         """The page `name` from LAZY_PAGES, built and put in its tab on first use."""

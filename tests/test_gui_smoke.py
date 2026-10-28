@@ -2676,7 +2676,8 @@ def test_frame_stats_overlay_is_off_unless_asked_for(app, monkeypatch, tmp_path)
             app.processEvents()
         row = w.pages.groups.currentWidget()
         bar = row.tabBar()
-        QTest.mouseClick(bar, QtCore.Qt.MouseButton.LeftButton, pos=bar.tabRect(row.count() - 1).center())
+        tab = next(i for i in range(bar.count()) if bar.tabText(i) == "Jeffcott rotor")
+        QTest.mouseClick(bar, QtCore.Qt.MouseButton.LeftButton, pos=bar.tabRect(tab).center())
         for _ in range(3):
             app.processEvents()
         page = w.pages.currentWidget()
@@ -3753,7 +3754,11 @@ def test_shock_page(app):
     w.close()
 
 
-@pytest.mark.parametrize("name", ["sdof_page", "transient_page", "damping_page", "isolation_page", "signals_page"])
+@pytest.mark.parametrize("name", ["sdof_page", "transient_page", "periodic_page", "damping_page", "isolation_page",
+                                  "energy_page", "integration_page", "fatigue_page",
+                                  "pendulum_page", "beams_page", "self_excited_page", "active_control_page",
+                                  "seismic_page", "quarter_car_page", "variability_page", "diagnostics_page",
+                                  "signals_page"])
 def test_lesson_pages_trials_and_tabs(app, name):
     """Every one-click trial of the One mass and Signals pages loads, and every tab draws, in either theme."""
     from vib_tutorial.gui.main_window import MainWindow

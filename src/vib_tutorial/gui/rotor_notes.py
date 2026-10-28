@@ -668,7 +668,7 @@ start-up transient to die away. It then runs up to the second speed and back at 
 each revolution. Tick <i>Hold earlier sweeps</i> to compare ramp rates. The summary under the Bode plot
 gives each sweep's peak against the steady-state one, and how many rpm away from it the peak came.</p>
 
-<h3>Waterfall and cascade plots</h3>
+<h3><a name="waterfall"></a>Waterfall and cascade plots</h3>
 <p>A spectrum analyser on a machine takes the spectrum of a block of signal, then of the next, and so
 on. Stacked against time the spectra make a <b>waterfall</b> plot; against the speed during a run-up or
 coast-down, a <b>cascade</b>. The unbalance makes a ridge along +1X that moves with the speed and peaks
