@@ -38,11 +38,14 @@ uv run pytest         # run the tests
 |---|---|
 | **Left** | System parameters (m, k, c for each element and friction F<sub>f</sub> for each mass, 1 to 8 masses), the excitation (a force on a mass, or motion of the ground), and simulation controls (run/pause, speed, plot window, auto-scale) |
 | **Centre** | Animation of the chain (with a scale bar for the real displacement) and live energy bars, above time histories of the applied force and of the motion (in physical or modal coordinates), of the energy, or of the force in each spring and damper |
-| **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Theory* (notes written for students, with a map of the course) |
-| **Top** | The pages, in six groups, and the *Theory*, *About* and *Theme* controls |
+| **Right** | Tabs: *Modal analysis* (table, mode shapes, release), *Frequency response*, and *Theory* (notes written for students) |
+| **Top** | The pages, in six groups, and the *Theory*, *Theory window*, *About* and *Theme* controls |
 
 The pages are grouped in the order they are meant to be read, each using only ideas from the pages
-before it (Ctrl+1 to Ctrl+6 jump to a group; the window opens on the Simulation page):
+before it (Ctrl+1 to Ctrl+6 jump to a group; the window opens on the first, *Single oscillator*, whose
+Theory starts with the map of the course). The *Theory window* (Ctrl+F1) shows any page's Theory in a
+window of its own, with the pages and their sections listed: it keeps its place as you move between pages,
+or follows them:
 
 1. **One mass.** **Single oscillator** (free decay, damping, resonance, half-power bandwidth, beats and
    poles, on one mass), **Pendulums** (gravity as the spring, and large swings), **Transient response**

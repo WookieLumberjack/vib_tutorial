@@ -32,7 +32,7 @@ def takeaways(*points: str) -> str:
 
 # The pages in the order they're meant to be read, in groups: (group, ((attribute, tab title, what it's
 # about), ...)). Each page uses only ideas from the pages before it. The main window's tabs and the
-# Simulation page's course map are both made from this.
+# Single oscillator page's course map are both made from this.
 COURSE = (
     ("One mass", (
         ("sdof_page", "Single oscillator",

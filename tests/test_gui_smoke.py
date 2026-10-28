@@ -114,6 +114,18 @@ def test_secondary_pages_build_when_opened(app):
     page.edit_parameters.emit()
     assert w.pages.currentWidget() is w.sim_page
 
+    # The Theory window reads each page's notes from its module: the same as its Theory tab shows.
+    from PySide6 import QtGui
+
+    from vib_tutorial.gui.theory_window import page_html
+
+    for name in ["sim_page", *(name for name, _ in LAZY_PAGES)]:
+        page = getattr(w, name)
+        shown = w.background if name == "sim_page" else getattr(page, "notes", None) or page.theory
+        doc = QtGui.QTextDocument()
+        doc.setHtml(page_html(name))
+        assert doc.toPlainText() == shown.toPlainText(), name
+
 
 def test_theory_button_f1_and_links_between_pages(app):
     from PySide6 import QtGui
@@ -135,6 +147,73 @@ def test_theory_button_f1_and_links_between_pages(app):
     shortcuts["Ctrl+6"].activated.emit()
     assert w.pages.group_title(w.pages.currentIndex()) == "Beyond the chain"
     w.close()
+
+
+def test_app_opens_on_the_course_s_first_page(app):
+    from vib_tutorial.gui import links
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.open_first_page()
+    assert w.page_name(w.pages.currentWidget()) == links.COURSE[0][1][0][0] == "sdof_page"
+    browser = w.show_theory()
+    assert "The pages, in order" in browser.toPlainText()  # the course map heads the first page's notes
+    assert 'href="page:sdof_page#course-map"' in w.background.toHtml()  # the Simulation page links to it
+
+
+def test_theory_window(app):
+    from PySide6 import QtGui
+    from PySide6.QtTest import QTest
+
+    from vib_tutorial.gui import links
+    from vib_tutorial.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    shortcuts = {s.key().toString(): s for s in w.findChildren(QtGui.QShortcut)}
+    shortcuts["Ctrl+F1"].activated.emit()
+    t = w.theory_window
+    assert t.isVisible() and t.page == "sim_page"  # opens at the page showing
+    assert not w._built  # without building any page
+    pages = [t.tree.topLevelItem(g).child(i) for g in range(t.tree.topLevelItemCount())
+             for i in range(t.tree.topLevelItem(g).childCount())]
+    assert [p.data(0, QtCore.Qt.ItemDataRole.UserRole)[0] for p in pages] == [
+        name for _, group in links.COURSE for name, _, _ in group]
+    assert [t.tree.topLevelItem(g).text(0) for g in range(t.tree.topLevelItemCount())] == [
+        group for group, _ in links.COURSE]
+
+    # A page's sections, from its headings (anchored if they weren't: the Substructuring notes).
+    cms = next(p for p in pages if p.data(0, QtCore.Qt.ItemDataRole.UserRole)[0] == "cms_page")
+    cms.setExpanded(True)
+    assert cms.childCount() > 5 and cms.child(0).data(0, QtCore.Qt.ItemDataRole.UserRole)[1].startswith("section-")
+    t.tree.itemClicked.emit(cms.child(2), 0)
+    assert t.page == "cms_page" and w.pages.currentWidget() is w.sim_page and not w._built
+
+    # A link to another page stays in the window; Back and Forward return to each place.
+    t.browser.anchorClicked.emit(QtCore.QUrl("page:frf_page#three-forms"))
+    assert t.page == "frf_page" and not w._built
+    t.back()
+    assert t.page == "cms_page" and t.forward_button.isEnabled()
+    t.forward()
+    assert t.page == "frf_page" and not t.forward_button.isEnabled()
+
+    # Off, it stays put as the main window changes page; on, it follows; Open shows its page.
+    w.pages.setCurrentWidget(w.shock_page)
+    assert t.page == "frf_page"
+    t.follow.setChecked(True)
+    w.pages.setCurrentWidget(w.oma_page)
+    assert t.page == "oma_page"
+    t.show_page("duffing_page")
+    t.open_button.click()
+    assert w.pages.currentWidget() is w.duffing_page
+    t.follow.setChecked(False)
+
+    w.set_theme("Dark")
+    assert t.page == "duffing_page" and "Duffing" in t.browser.toPlainText()
+    w.set_theme("Light")
+    QTest.qWait(50)  # let the pages built here draw what they queued before teardown clears their plots
+    w.close()
+    assert not t.isVisible()  # it closes with the main window
 
 
 def test_one_click_trials_set_up_their_pages(app):
