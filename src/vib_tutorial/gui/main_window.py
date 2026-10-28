@@ -6,6 +6,7 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -39,6 +40,9 @@ from .tab_groups import PageGroups
 from . import links
 from . import frame_stats, settle_plots, theming
 from .style import SYSTEM, colors
+
+if TYPE_CHECKING:
+    from .theory_window import TheoryWindow
 
 FRAME_MS = 16  # ~60 fps
 FRAME_BUDGET = 0.012  # s of computing per frame: past it (friction on a stiff chain) the simulation runs slower
@@ -258,10 +262,14 @@ THEORY_TIP = (
     "and its symbols. (F1)</p>"
     "<p>Ctrl+1 to Ctrl+6 switch between the groups of pages.</p>"
 )
+THEORY_WINDOW_TIP = (
+    "<p>Every page's Theory in a window of its own, with the pages and their sections listed: it keeps "
+    "its place as you move between pages, or follows them. (Ctrl+F1)</p>"
+)
 ABOUT_HTML = """<h3>Vibration Tutorial {version}</h3>
 <p>An interactive teaching tool for mechanical vibration: a chain of masses, springs and dampers, and the
-systems built from it. Start with <i>Foundations</i> and read each page's <i>Theory</i> tab (F1); the pages
-are in the order they are meant to be read.</p>
+systems built from it. Start with the first page, <i>One mass → Single oscillator</i>, and read each page's
+<i>Theory</i> tab (F1); the pages are in the order they are meant to be read.</p>
 <p><b>For educational use only.</b> This program was written with an AI coding assistant (Claude Code).
 Although it has an automated test suite, its results are <b>not guaranteed to be technically correct</b>:
 the simulations, analyses and theory notes may contain errors. Check any calculation independently before
@@ -485,7 +493,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._placeholders[name] = QtWidgets.QWidget()
                 tabs_in_group.append((self._placeholders[name], title))
             self.pages.add_group(group_title, *tabs_in_group)
-        # The window opens on the Simulation page, the app's home, though the course starts a group earlier.
+        # Built, the window shows the Simulation page (the tests and screenshots start there, without building
+        # a lazy page); the app then opens on the course's first page (open_first_page).
         self.pages.setCurrentWidget(self.sim_page)
         self.pages.currentChanged.connect(self._on_page_changed)
         self._wire_links(self.sim_page)
@@ -506,7 +515,13 @@ class MainWindow(QtWidgets.QMainWindow):
         about.setText("About")
         about.setToolTip("Version, disclaimer and licence.")
         about.clicked.connect(self._about)
+        self.theory_window_button = QtWidgets.QToolButton()
+        self.theory_window_button.setText("Theory window")
+        self.theory_window_button.setToolTip(THEORY_WINDOW_TIP)
+        self.theory_window_button.clicked.connect(self.open_theory_window)
+        self.theory_window: TheoryWindow | None = None  # built when first opened
         cl.addWidget(self.theory_button)
+        cl.addWidget(self.theory_window_button)
         cl.addWidget(about)
         cl.addSpacing(8)
         cl.addWidget(theme_label)
@@ -515,6 +530,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(self.pages)
         self.resize(1700, 900)
         QtGui.QShortcut(QtGui.QKeySequence("F1"), self, self.show_theory)
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+F1"), self, self.open_theory_window)
         for i in range(len(PAGE_GROUPS)):  # Ctrl+1 … Ctrl+6: a group, at the page it last showed
             QtGui.QShortcut(QtGui.QKeySequence(f"Ctrl+{i + 1}"), self,
                             lambda i=i: self.pages.groups.setCurrentIndex(i))
@@ -608,6 +624,33 @@ class MainWindow(QtWidgets.QMainWindow):
         holder.deleteLater()
         return page
 
+    def show_page(self, name: str) -> None:
+        """Show page `name` (an attribute in PAGE_GROUPS), building it if it isn't yet."""
+        self.pages.setCurrentWidget(self.sim_page if name == "sim_page" else self._page(name))
+
+    def open_first_page(self) -> None:
+        """Show the course's first page, where the app opens."""
+        self.show_page(PAGE_GROUPS[0][1][0][0])
+
+    def page_name(self, page: QtWidgets.QWidget) -> str | None:
+        """The attribute in PAGE_GROUPS of a page built (or the Simulation page)."""
+        if page is self.sim_page:
+            return "sim_page"
+        return next((name for name, built in self._built.items() if built is page), None)
+
+    def open_theory_window(self) -> TheoryWindow:
+        """Show the Theory window (at the page showing's notes, the first time)."""
+        from .theory_window import TheoryWindow
+
+        if self.theory_window is None:
+            self.theory_window = TheoryWindow(self.show_page, self)
+        if self.theory_window.page is None:
+            self.theory_window.show_page(self.page_name(self.pages.currentWidget()) or "sim_page")
+        self.theory_window.show()
+        self.theory_window.raise_()
+        self.theory_window.activateWindow()
+        return self.theory_window
+
     def show_theory(self) -> QtWidgets.QTextBrowser | None:
         """Bring the page showing's Theory tab to the front (and any group of tabs it sits in); its browser."""
         page = self.pages.currentWidget()
@@ -624,8 +667,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def go_to(self, name: str, anchor: str = "") -> None:
         """Show page `name` (an attribute in PAGE_GROUPS) at its Theory, scrolled to `anchor`."""
-        page = self.sim_page if name == "sim_page" else self._page(name)
-        self.pages.setCurrentWidget(page)
+        self.show_page(name)
         browser = self.show_theory()
         if browser is not None and anchor:
             QtCore.QTimer.singleShot(0, lambda: browser.scrollToAnchor(anchor))  # once it's laid out
@@ -648,6 +690,11 @@ class MainWindow(QtWidgets.QMainWindow):
         box.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
         box.exec()
 
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802 (Qt's name)
+        if self.theory_window is not None:
+            self.theory_window.close()  # it closes with this window
+        super().closeEvent(event)
+
     def _on_page_changed(self, index: int) -> None:
         widget = self.pages.widget(index)
         for name, holder in list(self._placeholders.items()):
@@ -657,6 +704,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
                 QtCore.QTimer.singleShot(0, QtWidgets.QApplication.restoreOverrideCursor)
                 self._page(name)
+        if self.theory_window is not None and self.theory_window.isVisible():
+            name = self.page_name(self.pages.currentWidget())
+            if name is not None:
+                self.theory_window.follow_page(name)
 
     # --------------------------------------------------------------- theme
     def set_theme(self, name: str) -> None:
@@ -683,6 +734,8 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (self.chain, self.time_plot, self.mode_plot, self.phasor_plot.plot, self.frf_plot,
                   self.params, self.energy, *self._built.values()):
             w.apply_theme()
+        if self.theory_window is not None:
+            self.theory_window.apply_theme()
         self.force_panel.refresh()
         self._refresh_modal_views()  # mode colours: table, shapes, time and FRF curves
 

@@ -37,7 +37,7 @@ from .lesson import (
     set_quietly,
     trials_html,
 )
-from .links import before, takeaways
+from .links import course_map, takeaways
 from .style import colors
 from .theming import add_legend
 
@@ -153,7 +153,12 @@ POLES_TIP = (
     "kept, k and c follow).</p>")
 
 NOTES_HTML = """
-<!--BEFORE-->
+<h3><a name="course-map"></a>The pages, in order</h3>
+<p>This is the first page. The pages are meant to be read in order, left to right, group by group: each one
+uses only ideas from the pages before it, and its Theory tab (F1) starts by saying which. The <i>One mass</i>
+pages come first, then the Simulation page builds a chain of these oscillators. The Theory window (its
+button, or Ctrl+F1) lists them too, and keeps its place as you move between pages.</p>
+<!--COURSE-->
 <h3><a name="equation"></a>One mass on a spring</h3>
 <p>Every vibration on these pages is built from one oscillator: a mass m on a spring k and a damper c,</p>
 <p align="center"><b>m ẍ + c ẋ + k x = f(t).</b></p>
@@ -275,9 +280,7 @@ origin along the slow root's direction.</p>
 <tr><td>s</td><td>pole, root of m s² + c s + k</td><td>1/s</td></tr>
 </table>
 """
-NOTES_HTML = NOTES_HTML.replace("<!--BEFORE-->", before(
-    ("sim_page", "course-map", "The pages, in order"),
-)).replace("<!--TRIALS-->", trials_html(TRIALS)).replace("<!--TAKEAWAYS-->", takeaways(
+NOTES_HTML = NOTES_HTML.replace("<!--COURSE-->", course_map()).replace("<!--TRIALS-->", trials_html(TRIALS)).replace("<!--TAKEAWAYS-->", takeaways(
     "One mass on a spring and a damper is set by f<sub>n</sub> = √(k/m)/2π, ζ = c/2√(km) and 1/k.",
     "Underdamped, it rings at ω<sub>d</sub> ≈ ω<sub>n</sub> inside an envelope e<sup>−ζω<sub>n</sub>t</sup>; "
     "critically damped it returns fastest without overshoot; overdamped it creeps.",
