@@ -2,7 +2,7 @@
 
 Real-time teaching app for an N-mass spring-damper chain (PySide6 + pyqtgraph + NumPy/SciPy), managed with uv.
 
-- Run: `uv run vib-tutorial`. Test: `uv run pytest` (GUI smoke test runs headless via `QT_QPA_PLATFORM=offscreen`).
+- Run: `uv run vib-tutorial`. Test: `uv run pytest` (GUI smoke test runs headless via `QT_QPA_PLATFORM=offscreen`). pytest runs in up to 4 xdist workers (`addopts`): no window a GUI test builds is ever freed (PySide's signal connections hold them, and deleting them segfaulted), ~20 MB RSS and ~77 MB of address space each, so one process running every GUI test outgrew an 8 GB `ulimit -v`. Pass `-n0` to debug a test in one process.
 - `src/vib_tutorial/core/` is NumPy/SciPy with no Qt imports; keep it that way so it stays testable and scriptable.
 - Rust kernels live in `native/` (PyO3, abi3), built by maturin (the package's build backend) into `vib_tutorial._native`; `uv sync`/`uv run` rebuild it when the Rust changes. Each kernel replaces a Python function that stays as the reference: `core/native.py`'s `kernel(name, reference)` picks the Rust one when it's built, `VIB_NATIVE=0` runs the Python everywhere, and `tests/test_native.py` compares the two. Name the Python `<name>_reference` and keep the public name for the dispatch (`fluid_bearing.pi_film`). The release builds' `--smoke-test` fails if the module didn't load.
 - `src/vib_tutorial/gui/` holds the Qt widgets. `main_window.py` owns the timer loop and wires the panels to `Simulator`.
