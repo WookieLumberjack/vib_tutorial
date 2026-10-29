@@ -9,7 +9,7 @@ welcome.
 
 Please **do not open a public issue**. Report it privately instead: on the
 repository's **Security** tab, click **Report a vulnerability**
-([direct link](https://github.com/WookieLumberjack/vib_tutorial/security/advisories/new)).
+([direct link](https://github.com/WookieLumberjack/vibration-tutorial/security/advisories/new)).
 Only the maintainer can see the report.
 
 Please include what you found, how to reproduce it, and which version or commit

@@ -10,7 +10,7 @@ They are not code-signed, so the operating system warns the first time you open 
 | Linux (x86-64) | `vib-tutorial-*-linux-x86_64.tar.gz` | `tar xzf vib-tutorial-*-linux-x86_64.tar.gz`, then run `vib-tutorial/vib-tutorial`. Needs an X11 or Wayland desktop. |
 
 If a build doesn't run on your system (for example an Intel Mac), run from source with
-[uv](https://docs.astral.sh/uv/) instead: `uvx --from git+https://github.com/WookieLumberjack/vib_tutorial@TAG vib-tutorial`,
+[uv](https://docs.astral.sh/uv/) instead: `uvx --from git+https://github.com/WookieLumberjack/vibration-tutorial@TAG vib-tutorial`,
 with `TAG` replaced by this release's tag.
 
 This software is for educational use only, with no warranty; see the README's disclaimer.
