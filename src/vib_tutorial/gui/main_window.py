@@ -276,7 +276,7 @@ the simulations, analyses and theory notes may contain errors. Check any calcula
 relying on it, and do not use it for design, certification, safety-related or other engineering
 decisions.</p>
 <p>Provided "as is", without warranty of any kind. Released under the MIT License.
-<a href="https://github.com/WookieLumberjack/vib_tutorial">github.com/WookieLumberjack/vib_tutorial</a></p>
+<a href="https://github.com/WookieLumberjack/vibration-tutorial">github.com/WookieLumberjack/vibration-tutorial</a></p>
 """
 COMPARE_TIP = (
     "<p>Also draws, thin and dashed, the frequency response of the chain with its last mass "
